@@ -1,19 +1,69 @@
 {
-	"name": "@ix-xs/node-comfort",
-	"version": "1.1.2",
-	"description": "Small collection of Node.js utilities: colorful logger, filesystem helper, SQLite wrapper, runtime type checks and async/process helpers.",
-	"main": "index.js",
-	"scripts": {
-		"test": "echo \"Error: no test specified\" && exit 1"
-	},
-	"keywords": [],
-	"author": "ix-xs",
-	"license": "MIT",
-	"type": "commonjs",
-    "engines": {
-        "node": ">=20.12.0"
-    },
-    "repository": {
+  "name": "@ix-xs/node-comfort",
+  "version": "1.2.0",
+  "description": "Zero-dependency comfort belt for Node.js: colorful logger, filesystem helper, SQLite wrapper, runtime type checks, async/process helpers, plus rich string, number, array, object, function, date and id/crypto utilities.",
+  "main": "index.js",
+  "types": "types/index.d.ts",
+  "type": "commonjs",
+  "keywords": [
+    "utils",
+    "utilities",
+    "helpers",
+    "toolkit",
+    "logger",
+    "console",
+    "colors",
+    "ansi",
+    "filesystem",
+    "fs",
+    "sqlite",
+    "database",
+    "type-check",
+    "guards",
+    "validation",
+    "string",
+    "slugify",
+    "camelcase",
+    "number",
+    "format-bytes",
+    "array",
+    "object",
+    "deep-clone",
+    "deep-merge",
+    "debounce",
+    "throttle",
+    "memoize",
+    "retry",
+    "date",
+    "duration",
+    "uuid",
+    "ulid",
+    "nanoid",
+    "hash",
+    "crypto",
+    "zero-dependency",
+    "no-dependencies"
+  ],
+  "author": "ix-xs",
+  "license": "MIT",
+  "engines": {
+    "node": ">=20.12.0"
+  },
+  "files": [
+    "index.js",
+    "src/",
+    "types/",
+    "README.md",
+    "LICENSE"
+  ],
+  "scripts": {
+    "build": "tsc",
+    "prepublishOnly": "npm run build"
+  },
+  "devDependencies": {
+    "typescript": "^5.6.0"
+  },
+  "repository": {
     "type": "git",
     "url": "https://github.com/ix-xs/node-comfort.git"
   },
