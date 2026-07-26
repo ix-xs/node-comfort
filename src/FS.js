@@ -1,5 +1,6 @@
-const { readdirSync, existsSync, mkdirSync, rmSync, writeFileSync, unlinkSync, copyFileSync, readFileSync, watch } = require("node:fs");
+const { readdirSync, existsSync, mkdirSync, rmSync, writeFileSync, unlinkSync, copyFileSync, readFileSync, appendFileSync, statSync, watch } = require("node:fs");
 const { resolve, dirname, sep, isAbsolute, join, relative, basename } = require("node:path");
+const { createHash } = require("node:crypto");
 
 /**
    * Normalizes a path to the current platform separator.
@@ -652,6 +653,131 @@ module.exports = {
       return readFileSync(target, "utf8");
     } catch {
       return undefined;
+    }
+  },
+
+  /**
+   * Reads and parses a JSON file.
+   * @template T
+   * @param {string} path - The JSON file path.
+   * @param {T} [fallback] - Value returned when the file is missing or invalid.
+   * @returns {T|any|undefined} The parsed value, or the fallback.
+   */
+  readJSON(path, fallback) {
+    const content = this.readFile(path);
+    if (content === undefined) return fallback;
+    try {
+      return JSON.parse(content);
+    } catch {
+      return fallback;
+    }
+  },
+
+  /**
+   * Serializes a value to JSON and writes it to a file (creating folders as needed).
+   * @param {string} path - The destination file path.
+   * @param {*} data - The value to serialize.
+   * @param {{ spaces?: number, force?: boolean }} [options] - Formatting options (`spaces` default 2).
+   * @returns {boolean} True on success, false on failure.
+   */
+  writeJSON(path, data, options = {}) {
+    const spaces = options.spaces ?? 2;
+    try {
+      const target = this.createPath(path);
+      if (!this.getFolder(dirname(target))) this.createFolder(dirname(target));
+      writeFileSync(target, JSON.stringify(data, null, spaces), "utf8");
+      return true;
+    } catch {
+      return false;
+    }
+  },
+
+  /**
+   * Appends text to a file, creating it (and its folders) if necessary.
+   * @param {string} path - The file path.
+   * @param {string} data - The text to append.
+   * @returns {boolean} True on success, false on failure.
+   */
+  appendFile(path, data) {
+    try {
+      const target = _target(path, "file") ?? this.createPath(path);
+      if (!this.getFolder(dirname(target))) this.createFolder(dirname(target));
+      appendFileSync(target, typeof data === "string" ? data : String(data), "utf8");
+      return true;
+    } catch {
+      return false;
+    }
+  },
+
+  /**
+   * Checks whether a path (file or folder) exists.
+   * @param {string} path - The path to check.
+   * @returns {boolean} True if the path exists.
+   */
+  exists(path) {
+    if (!path) return false;
+    const direct = this.createPath(path);
+    if (existsSync(direct)) return true;
+    return Boolean(_target(path, "file") || _target(path, "folder"));
+  },
+
+  /**
+   * Returns filesystem stats for a path, or undefined if it does not exist.
+   * @param {string} path - The path to stat.
+   * @returns {import("node:fs").Stats|undefined} The stats object, or undefined.
+   */
+  stat(path) {
+    const target = _target(path, "file") ?? _target(path, "folder");
+    if (!target) return undefined;
+    try {
+      return statSync(target);
+    } catch {
+      return undefined;
+    }
+  },
+
+  /**
+   * Returns the size of a file in bytes.
+   * @param {string} path - The file path.
+   * @returns {number|undefined} Size in bytes, or undefined if not found.
+   */
+  fileSize(path) {
+    const stats = this.stat(path);
+    return stats ? stats.size : undefined;
+  },
+
+  /**
+   * Computes a hash digest of a file's contents.
+   * @param {string} path - The file path.
+   * @param {{ algorithm?: string, encoding?: "hex"|"base64"|"base64url" }} [options] - Hash options.
+   * @returns {string|undefined} The digest, or undefined if the file cannot be read.
+   */
+  hashFile(path, options = {}) {
+    const target = _target(path, "file");
+    if (!target) return undefined;
+    try {
+      const buffer = readFileSync(target);
+      return createHash(options.algorithm ?? "sha256").update(buffer).digest(options.encoding ?? "hex");
+    } catch {
+      return undefined;
+    }
+  },
+
+  /**
+   * Empties a folder's contents while keeping the folder itself.
+   * @param {string} path - The folder to empty.
+   * @returns {boolean|undefined} True on success, false on failure, undefined if not found.
+   */
+  emptyFolder(path) {
+    const target = _target(path);
+    if (!target) return undefined;
+    try {
+      for (const entry of readdirSync(target)) {
+        rmSync(resolve(target, entry), { recursive: true, force: true });
+      }
+      return true;
+    } catch {
+      return false;
     }
   },
 
