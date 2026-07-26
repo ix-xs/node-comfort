@@ -220,6 +220,24 @@ const _indent = () => {
   return "  ".repeat(_groups.length);
 };
 
+/**
+   * Coerces any value to a string for the level helpers (info/warn/...).
+   * @private
+   * @param {*} content - Value to stringify.
+   * @returns {string} The string representation.
+   */
+const _stringify = (content) => {
+  if (typeof content === "string") return content;
+  if (typeof content === "object" && content !== null) {
+    try {
+      return JSON.stringify(content, null, 2);
+    } catch {
+      return String(content);
+    }
+  }
+  return String(content);
+};
+
 module.exports = {
   /**
    * Enables or disables timestamp in logs
@@ -282,6 +300,59 @@ module.exports = {
     }
 
     return /** @type {Logger} */ (this);
+  },
+
+  /**
+   * Logs an informational message, prefixed with a cyan `ℹ INFO` label.
+   * @param {*} content - Content to print.
+   * @returns {Logger} The same Logger instance (for chaining).
+   */
+  info(content) {
+    return this.log(`<% cyan bold ℹ INFO %> ${_stringify(content)}`);
+  },
+
+  /**
+   * Logs a success message, prefixed with a green `✔ OK` label.
+   * @param {*} content - Content to print.
+   * @returns {Logger} The same Logger instance (for chaining).
+   */
+  success(content) {
+    return this.log(`<% greenBright bold ✔ OK %> ${_stringify(content)}`);
+  },
+
+  /**
+   * Logs a warning, prefixed with a yellow `⚠ WARN` label (writes to stderr).
+   * @param {*} content - Content to print.
+   * @returns {Logger} The same Logger instance (for chaining).
+   */
+  warn(content) {
+    return this.log(`<% yellowBright bold ⚠ WARN %> ${_stringify(content)}`);
+  },
+
+  /**
+   * Logs an error, prefixed with a red `✖ ERROR` label.
+   *
+   * Accepts an `Error` and prints its stack when available.
+   * @param {*} content - Content or Error to print.
+   * @returns {Logger} The same Logger instance (for chaining).
+   */
+  error(content) {
+    const text =
+      content instanceof Error ? content.stack ?? content.message : _stringify(content);
+    return this.log(`<% redBright bold ✖ ERROR %> ${text}`);
+  },
+
+  /**
+   * Logs a debug message (only when `DEBUG`/`NODE_DEBUG` env is set), prefixed
+   * with a gray `● DEBUG` label.
+   * @param {*} content - Content to print.
+   * @returns {Logger} The same Logger instance (for chaining).
+   */
+  debug(content) {
+    if (!process.env.DEBUG && !process.env.NODE_DEBUG) {
+      return /** @type {Logger} */ (this);
+    }
+    return this.log(`<% gray bold ● DEBUG %> <% gray ${_stringify(content)} %>`);
   },
 
   /**
