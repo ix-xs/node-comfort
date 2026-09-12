@@ -1,6 +1,6 @@
 "use strict";
 
-const { describe, it } = require("node:test");
+const { describe, it, before, after } = require("node:test");
 const assert = require("node:assert/strict");
 const fs = require("node:fs");
 const os = require("node:os");
@@ -291,6 +291,16 @@ describe("cli: prompts (non-interactive streams)", () => {
 });
 
 describe("cli: feedback in non-interactive mode", () => {
+  // CI services turn colors on even without a terminal: compare plain text.
+  const savedNoColor = process.env.NO_COLOR;
+  before(() => {
+    process.env.NO_COLOR = "1";
+  });
+  after(() => {
+    if (savedNoColor === undefined) delete process.env.NO_COLOR;
+    else process.env.NO_COLOR = savedNoColor;
+  });
+
   it("spinner prints start and final lines only", () => {
     const out = sink();
     const spin = cli.spinner("Working", { stream: out.stream }).start();
