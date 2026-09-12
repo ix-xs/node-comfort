@@ -1,0 +1,223 @@
+"use strict";
+
+/**
+ * Builds the TypeScript declarations shipped with the package.
+ *
+ * 1. Compiles the JSDoc of every `src/*.js` module into `types/src/*.d.ts`
+ *    (TypeScript keeps every description, `@param`, `@example`, ...).
+ * 2. Generates `types/index.d.ts` from the real runtime exports of `index.js`.
+ *    Every public value and every public type becomes a genuine named export
+ *    (`export import name = _Module.name`), which is what gives editors:
+ *    hover documentation, completions after `nc.`, and auto-imports of
+ *    `nc`, `nodeComfort` or any helper straight from the package root.
+ * 3. Fails loudly when runtime exports and typed exports drift apart, or when
+ *    two modules export a type with the same name.
+ *
+ * Usage: `npm run build`
+ */
+
+const fs = require("node:fs");
+const path = require("node:path");
+const ts = require("typescript");
+
+const ROOT = path.resolve(__dirname, "..");
+const SRC = path.join(ROOT, "src");
+const OUT = path.join(ROOT, "types");
+
+const fail = (message) => {
+  console.error(`\n[build-types] ${message}\n`);
+  process.exit(1);
+};
+
+// compile
+
+fs.rmSync(OUT, { recursive: true, force: true });
+
+const configPath = path.join(ROOT, "tsconfig.json");
+const config = ts.readConfigFile(configPath, ts.sys.readFile);
+if (config.error) fail(ts.flattenDiagnosticMessageText(config.error.messageText, "\n"));
+const parsed = ts.parseJsonConfigFileContent(config.config, ts.sys, ROOT);
+const program = ts.createProgram(parsed.fileNames, parsed.options);
+const emit = program.emit();
+const diagnostics = [...ts.getPreEmitDiagnostics(program), ...emit.diagnostics];
+
+if (diagnostics.length) {
+  const host = {
+    getCanonicalFileName: (f) => f,
+    getCurrentDirectory: () => ROOT,
+    getNewLine: () => "\n",
+  };
+  console.error(ts.formatDiagnosticsWithColorAndContext(diagnostics, host));
+  fail(`${diagnostics.length} TypeScript error(s) in src/. Fix them before publishing.`);
+}
+
+// map runtime exports
+
+const api = require(path.join(ROOT, "index.js"));
+const modules = fs
+  .readdirSync(SRC)
+  .filter((file) => file.endsWith(".js"))
+  .map((file) => {
+    const name = path.basename(file, ".js");
+    return { name, alias: `_${name.replace(/[^A-Za-z0-9_]/g, "_")}`, value: require(path.join(SRC, file)) };
+  });
+
+const byValue = new Map(modules.map((m) => [m.value, m]));
+const SELF = new Set(["nc", "nodeComfort"]);
+
+/** @type {Array<{ key: string, kind: "module"|"member"|"self", module?: typeof modules[number] }>} */
+const entries = [];
+
+for (const key of Object.keys(api)) {
+  const value = api[key];
+  if (SELF.has(key)) {
+    if (value !== api) fail(`"${key}" must reference the package itself.`);
+    entries.push({ key, kind: "self" });
+    continue;
+  }
+  const whole = byValue.get(value);
+  if (whole) {
+    entries.push({ key, kind: "module", module: whole });
+    continue;
+  }
+  const owner = modules.find((m) => m.value && typeof m.value === "object" && m.value[key] === value);
+  if (!owner) fail(`Cannot find the module that exports "${key}". Export it from a src/ module.`);
+  entries.push({ key, kind: "member", module: owner });
+}
+
+// collect exported type names
+
+const declProgram = ts.createProgram(
+  modules.map((m) => path.join(OUT, "src", `${m.name}.d.ts`)),
+  { ...parsed.options, noEmit: true, allowJs: false, checkJs: false },
+);
+const checker = declProgram.getTypeChecker();
+
+/** @type {Map<string, string>} type name -> module name */
+const typeOwners = new Map();
+
+for (const m of modules) {
+  const file = declProgram.getSourceFile(path.join(OUT, "src", `${m.name}.d.ts`));
+  if (!file) fail(`Missing declaration for src/${m.name}.js`);
+  const symbol = checker.getSymbolAtLocation(file);
+  if (!symbol) continue;
+  for (const exported of checker.getExportsOfModule(symbol)) {
+    const target = exported.flags & ts.SymbolFlags.Alias ? checker.getAliasedSymbol(exported) : exported;
+    const isType = target.flags & (ts.SymbolFlags.TypeAlias | ts.SymbolFlags.Interface);
+    const isValue = target.flags & ts.SymbolFlags.Value;
+    if (!isType || isValue) continue;
+    const name = exported.getName();
+    if (name.startsWith("_")) continue;
+    const previous = typeOwners.get(name);
+    if (previous && previous !== m.name) {
+      fail(`Type "${name}" is exported by both src/${previous}.js and src/${m.name}.js. Rename one of them.`);
+    }
+    typeOwners.set(name, m.name);
+  }
+}
+
+const valueKeys = new Set(entries.map((e) => e.key));
+for (const name of typeOwners.keys()) {
+  if (valueKeys.has(name)) fail(`Type "${name}" clashes with a runtime export of the same name.`);
+}
+
+// write index.d.ts
+
+const pkg = JSON.parse(fs.readFileSync(path.join(ROOT, "package.json"), "utf8"));
+const used = new Set([
+  ...entries.filter((e) => e.module).map((e) => e.module.name),
+  ...typeOwners.values(),
+]);
+const aliasOf = (name) => modules.find((m) => m.name === name).alias;
+
+const lines = [];
+lines.push(`// Generated by scripts/build-types.js. Do not edit by hand.`);
+lines.push(`// ${pkg.name} v${pkg.version}`);
+lines.push("");
+for (const m of modules.filter((mod) => used.has(mod.name))) {
+  lines.push(`import ${m.alias} = require("./src/${m.name}");`);
+}
+lines.push("");
+lines.push("/**");
+lines.push(` * **${pkg.name}**: ${pkg.description}`);
+lines.push(" *");
+lines.push(" * @example");
+lines.push(' * const nc = require("@ix-xs/node-comfort");');
+lines.push(' * nc.info("Server ready");');
+lines.push(' * nc.str.slugify("Héllo World"); // "hello-world"');
+lines.push(" *");
+lines.push(" * @example");
+lines.push(' * import { nc, slugify, isEmail } from "@ix-xs/node-comfort";');
+lines.push(" */");
+lines.push("declare namespace nodeComfort {");
+
+const section = (title) => lines.push("", `  // ${title}`);
+
+/**
+ * The overview JSDoc at the top of a source file (after "use strict"), which
+ * editors show when hovering `nc.str`, `nc.SQLite`...
+ * @param {string} name Module name.
+ * @returns {string[]} The comment lines, indented for the namespace body.
+ */
+const overview = (name) => {
+  const source = fs.readFileSync(path.join(SRC, `${name}.js`), "utf8").replace(/\r\n/g, "\n");
+  const match = /^(?:"use strict";\s*)?(\/\*\*[\s\S]*?\*\/)\n\n/.exec(source);
+  if (!match) fail(`src/${name}.js must start with an overview JSDoc block (shown when hovering the namespace).`);
+  return match[1].split("\n").map((line) => `  ${line.trimStart().startsWith("*") ? ` ${line.trimStart()}` : line.trimStart()}`);
+};
+
+section("Namespaces and classes");
+for (const e of entries.filter((x) => x.kind === "module")) {
+  lines.push(...overview(e.module.name));
+  lines.push(`  export import ${e.key} = ${e.module.alias};`);
+}
+
+section("Flat helpers (logger, fs, checker, utils)");
+for (const e of entries.filter((x) => x.kind === "member")) {
+  lines.push(`  export import ${e.key} = ${e.module.alias}.${e.key};`);
+}
+
+section("Types");
+for (const [name, owner] of [...typeOwners].sort(([a], [b]) => a.localeCompare(b))) {
+  lines.push(`  export import ${name} = ${aliasOf(owner)}.${name};`);
+}
+
+section("Self references");
+lines.push("  /**");
+lines.push("   * The whole toolkit. Lets you write `const { nc } = require(\"@ix-xs/node-comfort\")`");
+lines.push("   * or `import { nc } from \"@ix-xs/node-comfort\"`.");
+lines.push("   */");
+lines.push('  export const nc: typeof import("./index.js");');
+lines.push("  /** The whole toolkit (same object as `nc`). */");
+lines.push('  export const nodeComfort: typeof import("./index.js");');
+lines.push("}");
+lines.push("");
+lines.push("export = nodeComfort;");
+lines.push("");
+
+fs.writeFileSync(path.join(OUT, "index.d.ts"), lines.join("\n"));
+
+// validate result
+
+const finalProgram = ts.createProgram([path.join(OUT, "index.d.ts")], {
+  ...parsed.options,
+  noEmit: true,
+  allowJs: false,
+  checkJs: false,
+  skipLibCheck: false,
+});
+const finalDiagnostics = ts.getPreEmitDiagnostics(finalProgram);
+if (finalDiagnostics.length) {
+  console.error(finalDiagnostics.map((d) => ts.flattenDiagnosticMessageText(d.messageText, "\n")).join("\n"));
+  fail("The generated types/index.d.ts does not type-check.");
+}
+
+const counts = {
+  namespaces: entries.filter((e) => e.kind === "module").length,
+  helpers: entries.filter((e) => e.kind === "member").length,
+  types: typeOwners.size,
+};
+console.log(
+  `[build-types] OK with TypeScript ${ts.version}: ${counts.namespaces} namespaces/classes, ` +
+    `${counts.helpers} flat helpers, ${counts.types} public types.`,
+);

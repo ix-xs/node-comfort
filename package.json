@@ -1,74 +1,201 @@
 {
   "name": "@ix-xs/node-comfort",
-  "version": "1.2.0",
-  "description": "Zero-dependency comfort belt for Node.js: colorful logger, filesystem helper, SQLite wrapper, runtime type checks, async/process helpers, plus rich string, number, array, object, function, date and id/crypto utilities.",
-  "main": "index.js",
-  "types": "types/index.d.ts",
-  "type": "commonjs",
+  "version": "2.0.0",
+  "description": "The zero-dependency standard library for Node.js: logger, filesystem, SQLite, schema validation, HTTP client, CLI toolkit, cache, env, async pools, colors, events, i18n dates, ids, crypto and hundreds of fully typed helpers.",
   "keywords": [
     "utils",
     "utilities",
     "helpers",
     "toolkit",
+    "stdlib",
+    "standard-library",
+    "zero-dependency",
+    "no-dependencies",
+    "typescript",
     "logger",
-    "console",
     "colors",
     "ansi",
+    "cli",
+    "spinner",
+    "progress-bar",
+    "prompt",
     "filesystem",
     "fs",
+    "glob",
     "sqlite",
     "database",
-    "type-check",
-    "guards",
+    "schema",
     "validation",
+    "http",
+    "fetch",
+    "retry",
+    "cache",
+    "lru",
+    "env",
+    "dotenv",
+    "async",
+    "concurrency",
+    "queue",
+    "events",
+    "emitter",
+    "date",
+    "i18n",
+    "timezone",
+    "duration",
     "string",
     "slugify",
-    "camelcase",
-    "number",
-    "format-bytes",
     "array",
     "object",
-    "deep-clone",
     "deep-merge",
     "debounce",
     "throttle",
     "memoize",
-    "retry",
-    "date",
-    "duration",
     "uuid",
     "ulid",
     "nanoid",
-    "hash",
     "crypto",
-    "zero-dependency",
-    "no-dependencies"
+    "encryption",
+    "password-hashing"
   ],
-  "author": "ix-xs",
+  "homepage": "https://ix-xs.github.io/node-comfort/",
+  "bugs": {
+    "url": "https://github.com/ix-xs/node-comfort/issues"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/ix-xs/node-comfort.git"
+  },
   "license": "MIT",
-  "engines": {
-    "node": ">=20.12.0"
+  "author": "ix-xs",
+  "type": "commonjs",
+  "main": "./index.js",
+  "types": "./types/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./types/index.d.ts",
+      "default": "./index.js"
+    },
+    "./logger": {
+      "types": "./types/src/Logger.d.ts",
+      "default": "./src/Logger.js"
+    },
+    "./fs": {
+      "types": "./types/src/FS.d.ts",
+      "default": "./src/FS.js"
+    },
+    "./checker": {
+      "types": "./types/src/Checker.d.ts",
+      "default": "./src/Checker.js"
+    },
+    "./utils": {
+      "types": "./types/src/Utils.d.ts",
+      "default": "./src/Utils.js"
+    },
+    "./str": {
+      "types": "./types/src/Str.d.ts",
+      "default": "./src/Str.js"
+    },
+    "./num": {
+      "types": "./types/src/Num.d.ts",
+      "default": "./src/Num.js"
+    },
+    "./arr": {
+      "types": "./types/src/Arr.d.ts",
+      "default": "./src/Arr.js"
+    },
+    "./obj": {
+      "types": "./types/src/Obj.d.ts",
+      "default": "./src/Obj.js"
+    },
+    "./func": {
+      "types": "./types/src/Func.d.ts",
+      "default": "./src/Func.js"
+    },
+    "./time": {
+      "types": "./types/src/Time.d.ts",
+      "default": "./src/Time.js"
+    },
+    "./id": {
+      "types": "./types/src/Id.d.ts",
+      "default": "./src/Id.js"
+    },
+    "./crypto": {
+      "types": "./types/src/Crypto.d.ts",
+      "default": "./src/Crypto.js"
+    },
+    "./color": {
+      "types": "./types/src/Color.d.ts",
+      "default": "./src/Color.js"
+    },
+    "./cli": {
+      "types": "./types/src/Cli.d.ts",
+      "default": "./src/Cli.js"
+    },
+    "./sys": {
+      "types": "./types/src/Sys.d.ts",
+      "default": "./src/Sys.js"
+    },
+    "./async": {
+      "types": "./types/src/Async.d.ts",
+      "default": "./src/Async.js"
+    },
+    "./schema": {
+      "types": "./types/src/Schema.d.ts",
+      "default": "./src/Schema.js"
+    },
+    "./http": {
+      "types": "./types/src/Http.d.ts",
+      "default": "./src/Http.js"
+    },
+    "./env": {
+      "types": "./types/src/Env.d.ts",
+      "default": "./src/Env.js"
+    },
+    "./errors": {
+      "types": "./types/src/errors.d.ts",
+      "default": "./src/errors.js"
+    },
+    "./sqlite": {
+      "types": "./types/src/SQLite.d.ts",
+      "default": "./src/SQLite.js"
+    },
+    "./cache": {
+      "types": "./types/src/Cache.d.ts",
+      "default": "./src/Cache.js"
+    },
+    "./emitter": {
+      "types": "./types/src/Emitter.d.ts",
+      "default": "./src/Emitter.js"
+    },
+    "./package.json": "./package.json"
   },
   "files": [
     "index.js",
     "src/",
     "types/",
     "README.md",
+    "CHANGELOG.md",
     "LICENSE"
   ],
+  "engines": {
+    "node": ">=22.13.0"
+  },
+  "publishConfig": {
+    "access": "public"
+  },
   "scripts": {
-    "build": "tsc",
-    "prepublishOnly": "npm run build"
+    "build": "node scripts/build-types.js && node scripts/build-docs.js",
+    "build:types": "node scripts/build-types.js",
+    "build:docs": "node scripts/build-docs.js",
+    "build:site": "node scripts/build-site.js",
+    "site:serve": "node scripts/serve-site.js",
+    "test": "node --test \"test/**/*.test.js\"",
+    "test:types": "node scripts/check-types.js",
+    "check": "npm run build && npm run build:site && npm test && npm run test:types",
+    "prepublishOnly": "npm run check"
   },
   "devDependencies": {
-    "typescript": "^5.6.0"
-  },
-  "repository": {
-    "type": "git",
-    "url": "https://github.com/ix-xs/node-comfort.git"
-  },
-  "bugs": {
-    "url": "https://github.com/ix-xs/node-comfort/issues"
-  },
-  "homepage": "https://github.com/ix-xs/node-comfort#readme"
+    "@types/node": "^22.13.0",
+    "typescript": "~6.0.3"
+  }
 }

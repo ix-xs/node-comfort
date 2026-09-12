@@ -1,40 +1,81 @@
-const crypto = require("node:crypto");
+"use strict";
 
 /**
- * ID, token & hashing utilities.
+ * Unique ids: UUID v4 and v7, ULID, nanoid-style ids, Snowflakes, tokens
+ * and short codes. All of them use the secure random generator of
+ * `node:crypto`, with no bias.
  *
- * Cryptographically-secure identifiers (UUID v4, ULID, nanoid-style tokens),
- * hashing helpers and constant-time comparison • all built on Node's native
- * `node:crypto`, with zero external dependencies.
+ * @example
+ * id.uuidv7();  // "0190a5c4-7c1e-7b2a-9f3e-1c2d3e4f5a6b", sorts by creation time
+ * id.nano();    // "V1StGXR8_Z5jdHi6B-myT"
+ * id.code();    // "K7QF9X"
+ * id.token(32); // for API keys and reset links
  */
 
-const NANOID_ALPHABET = "useandom-26T198340PX75pxJACKVERYMINDBUSHWOLF_GQZbfghjklqvwyzrict";
+/** @type {typeof import("node:crypto") | undefined} */
+let _nodeCrypto;
+const _crypto = () => (_nodeCrypto ??= require("node:crypto"));
+const nodeCrypto = require("./Crypto.js");
+
+/**
+ * Encodings for `token()`.
+ * @typedef {"hex" | "base64" | "base64url" | "base58" | "base32"} TokenEncoding
+ */
+
+/**
+ * Options for `snowflake()` and `parseSnowflake()`.
+ * @typedef {object} SnowflakeOptions
+ * @property {number} [epoch] Start of time, in ms. Defaults to Discord's (2015-01-01). Twitter uses `1288834974657`.
+ * @property {number} [workerId] 0 to 31. Defaults to `0`.
+ * @property {number} [processId] 0 to 31. Defaults to `process.pid % 32`.
+ */
+
+/**
+ * A decoded Snowflake.
+ * @typedef {object} ParsedSnowflake
+ * @property {Date} date When it was created.
+ * @property {number} timestamp When it was created, in ms.
+ * @property {number} workerId
+ * @property {number} processId
+ * @property {number} increment Sequence number within the millisecond, 0 to 4095.
+ */
+
+const NANO_ALPHABET = "useandom-26T198340PX75pxJACKVERYMINDBUSHWOLF_GQZbfghjklqvwyzrict";
 const BASE58_ALPHABET = "123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz";
-const ULID_ALPHABET = "0123456789ABCDEFGHJKMNPQRSTVWXYZ"; // Crockford base32
+const CROCKFORD = "0123456789ABCDEFGHJKMNPQRSTVWXYZ";
+const DISCORD_EPOCH = 1420070400000;
+
+/** @type {Record<string, number>} */
+const _counters = {};
 
 /**
- * Per-prefix counters for {@link module:Id.seq}.
- * @private
- * @type {Record<string, number>}
- */
-const _seqCounters = {};
-
-/**
- * Fills a buffer with cryptographically secure random bytes.
- * @private
+ * Secure random characters, with rejection sampling so there's no bias.
+ * @param {string} alphabet
  * @param {number} size
- * @returns {Buffer}
+ * @returns {string}
  */
-const _randomBytes = (size) => crypto.randomBytes(size);
+const _random = (alphabet, size) => {
+  const len = alphabet.length;
+  if (len < 2 || len > 256) throw new RangeError("The alphabet must contain between 2 and 256 characters");
+  const mask = (2 << Math.floor(Math.log2(len - 1))) - 1;
+  const step = Math.ceil((1.6 * mask * size) / len);
+  let out = "";
+  while (out.length < size) {
+    const bytes = _crypto().randomBytes(step);
+    for (let i = 0; i < step && out.length < size; i++) {
+      const index = bytes[i] & mask;
+      if (index < len) out += alphabet[index];
+    }
+  }
+  return out;
+};
 
 /**
- * Encodes a buffer as Base58 using the Bitcoin alphabet.
- * @private
- * @param {Buffer} buffer - Bytes to encode.
- * @returns {string} The Base58 string.
+ * @param {Buffer} buffer
+ * @returns {string}
  */
-const _toBase58 = (buffer) => {
-  if (buffer.length === 0) return "";
+const _base58 = (buffer) => {
+  if (!buffer.length) return "";
   const digits = [0];
   for (const byte of buffer) {
     let carry = byte;
@@ -48,188 +89,330 @@ const _toBase58 = (buffer) => {
       carry = Math.floor(carry / 58);
     }
   }
-  let str = "";
-  for (let i = 0; buffer[i] === 0 && i < buffer.length - 1; i++) str += BASE58_ALPHABET[0];
-  for (let i = digits.length - 1; i >= 0; i--) str += BASE58_ALPHABET[digits[i]];
-  return str;
+  let out = "";
+  for (let i = 0; i < buffer.length - 1 && buffer[i] === 0; i++) out += BASE58_ALPHABET[0];
+  for (let i = digits.length - 1; i >= 0; i--) out += BASE58_ALPHABET[digits[i]];
+  return out;
 };
 
+/**
+ * @param {Buffer} buffer
+ * @returns {string}
+ */
+const _base32 = (buffer) => {
+  let bits = 0;
+  let value = 0;
+  let out = "";
+  for (const byte of buffer) {
+    value = (value << 8) | byte;
+    bits += 8;
+    while (bits >= 5) {
+      out += CROCKFORD[(value >>> (bits - 5)) & 31];
+      bits -= 5;
+    }
+  }
+  if (bits > 0) out += CROCKFORD[(value << (5 - bits)) & 31];
+  return out;
+};
+
+/**
+ * A random UUID (version 4). For ids that sort by date, see `uuidv7()`.
+ *
+ * @example
+ * id.uuid(); // "3f2504e0-4f89-41d3-9a0c-0305e82c3301"
+ *
+ * @returns {string}
+ */
+function uuid() {
+  return _crypto().randomUUID();
+}
+
+let _v7LastMs = 0;
+let _v7Counter = 0;
+
+/**
+ * A UUID v7: it starts with a timestamp, so ids sort by creation time.
+ * That keeps database indexes compact, which makes them great primary
+ * keys. Ids from the same process always increase, even within a
+ * millisecond.
+ *
+ * @example
+ * id.uuidv7();               // "0190a5c4-7c1e-7b2a-9f3e-1c2d3e4f5a6b"
+ * id.timestamp(id.uuidv7()); // when it was created
+ *
+ * @returns {string}
+ */
+function uuidv7() {
+  let now = Date.now();
+  if (now <= _v7LastMs) {
+    _v7Counter++;
+    if (_v7Counter > 0xfff) {
+      _v7Counter = 0;
+      _v7LastMs++;
+    }
+    now = _v7LastMs;
+  } else {
+    _v7LastMs = now;
+    _v7Counter = _crypto().randomInt(0, 0x800);
+  }
+  const bytes = _crypto().randomBytes(16);
+  bytes.writeUIntBE(now, 0, 6);
+  bytes[6] = 0x70 | ((_v7Counter >> 8) & 0x0f);
+  bytes[7] = _v7Counter & 0xff;
+  bytes[8] = 0x80 | (bytes[8] & 0x3f);
+  const hex = bytes.toString("hex");
+  return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20)}`;
+}
+
+let _ulidLastMs = -1;
+/** @type {number[]} */
+let _ulidLastRandom = [];
+
+/**
+ * A ULID: 26 URL-safe characters that sort by creation time. Ids made in
+ * the same millisecond still increase.
+ *
+ * @example
+ * id.ulid();                       // "01HQ3Z8K9V3N5W7Y2XJ4T6R8PB"
+ * id.ulid(Date.UTC(2024, 0, 1));   // for a given time
+ *
+ * @param {number} [time] Timestamp to encode, in ms. Defaults to now.
+ * @returns {string}
+ */
+function ulid(time) {
+  const now = time ?? Date.now();
+  /** @type {number[]} */
+  let random;
+  if (time === undefined && now === _ulidLastMs) {
+    random = [..._ulidLastRandom];
+    let i = random.length - 1;
+    while (i >= 0 && random[i] === 31) random[i--] = 0;
+    if (i < 0) throw new RangeError("ULID overflow: too many ids in the same millisecond");
+    random[i]++;
+  } else {
+    random = [..._crypto().randomBytes(16)].map((b) => b & 31);
+  }
+  if (time === undefined) {
+    _ulidLastMs = now;
+    _ulidLastRandom = random;
+  }
+  let t = now;
+  let head = "";
+  for (let i = 0; i < 10; i++) {
+    head = CROCKFORD[t % 32] + head;
+    t = Math.floor(t / 32);
+  }
+  return head + random.map((v) => CROCKFORD[v]).join("");
+}
+
+/**
+ * A short, URL-safe random id, like `nanoid`. At 21 characters, collisions
+ * are as unlikely as with a UUID.
+ *
+ * @example
+ * id.nano();                      // "V1StGXR8_Z5jdHi6B-myT"
+ * id.nano(10);                    // "IRFa-VaY2b"
+ * id.nano(8, "0123456789abcdef"); // "4f90d13a"
+ *
+ * @param {number} [size=21]
+ * @param {string} [alphabet] 2 to 256 characters. Defaults to letters, digits, `_` and `-`.
+ * @returns {string}
+ */
+function nano(size = 21, alphabet = NANO_ALPHABET) {
+  return _random(alphabet, size);
+}
+
+/**
+ * Makes an id generator with your own alphabet and length.
+ *
+ * @example
+ * const orderId = id.customAlphabet("0123456789ABCDEF", 12);
+ * orderId(); // "4F1A09C2BB7E"
+ *
+ * @param {string} alphabet
+ * @param {number} [size=21]
+ * @returns {(size?: number) => string}
+ */
+function customAlphabet(alphabet, size = 21) {
+  _random(alphabet, 1);
+  return (length = size) => _random(alphabet, length);
+}
+
+/**
+ * A random token for API keys, session ids, reset links...
+ *
+ * @example
+ * id.token();                // 64 hex characters
+ * id.token(16, "base64url"); // 22 URL-safe characters
+ * id.token(16, "base58");    // no look-alike characters
+ *
+ * @param {number} [bytes=32] How much randomness, in bytes.
+ * @param {TokenEncoding} [encoding="hex"]
+ * @returns {string}
+ */
+function token(bytes = 32, encoding = "hex") {
+  const buffer = _crypto().randomBytes(bytes);
+  if (encoding === "base58") return _base58(buffer);
+  if (encoding === "base32") return _base32(buffer);
+  return buffer.toString(encoding);
+}
+
+/**
+ * A short code that's easy to read aloud and type: no `0/O` or `1/I/L`
+ * mix-ups. For invites, coupons and verification codes.
+ *
+ * @example
+ * id.code();                // "K7QF9X"
+ * id.code(4, "0123456789"); // "3920"
+ *
+ * @param {number} [length=6]
+ * @param {string} [alphabet="ABCDEFGHJKMNPQRSTUVWXYZ23456789"]
+ * @returns {string}
+ */
+function code(length = 6, alphabet = "ABCDEFGHJKMNPQRSTUVWXYZ23456789") {
+  return _random(alphabet, length);
+}
+
+let _snowflakeLastMs = 0;
+let _snowflakeIncrement = 0;
+
+/**
+ * A Snowflake id, the 64-bit format used by Discord and Twitter. Returned
+ * as a string because it doesn't fit in a JavaScript number.
+ *
+ * @example
+ * id.snowflake(); // "1215361932810932224"
+ *
+ * @param {SnowflakeOptions} [options]
+ * @returns {string}
+ */
+function snowflake(options = {}) {
+  const epoch = options.epoch ?? DISCORD_EPOCH;
+  let now = Date.now();
+  if (now <= _snowflakeLastMs) {
+    _snowflakeIncrement = (_snowflakeIncrement + 1) & 0xfff;
+    if (_snowflakeIncrement === 0) _snowflakeLastMs++;
+    now = _snowflakeLastMs;
+  } else {
+    _snowflakeLastMs = now;
+    _snowflakeIncrement = 0;
+  }
+  const worker = BigInt((options.workerId ?? 0) & 31);
+  const proc = BigInt((options.processId ?? process.pid) & 31);
+  return ((BigInt(now - epoch) << 22n) | (worker << 17n) | (proc << 12n) | BigInt(_snowflakeIncrement)).toString();
+}
+
+/**
+ * Decodes a Snowflake. With the default epoch, it reads Discord ids.
+ *
+ * @example
+ * id.parseSnowflake("175928847299117063").date; // 2016-04-30T11:18:25.796Z
+ *
+ * @param {string | bigint} id
+ * @param {SnowflakeOptions} [options] Use the epoch it was created with.
+ * @returns {ParsedSnowflake}
+ */
+function parseSnowflake(id, options = {}) {
+  const value = BigInt(id);
+  const timestamp = Number(value >> 22n) + (options.epoch ?? DISCORD_EPOCH);
+  return {
+    date: new Date(timestamp),
+    timestamp,
+    workerId: Number((value >> 17n) & 31n),
+    processId: Number((value >> 12n) & 31n),
+    increment: Number(value & 0xfffn),
+  };
+}
+
+/**
+ * When a ULID or a UUID v7 was created.
+ *
+ * @example
+ * id.timestamp(id.ulid()); // now
+ * id.timestamp(id.uuid()); // undefined, v4 has no time in it
+ *
+ * @param {string} value
+ * @returns {Date | undefined}
+ */
+function timestamp(value) {
+  const s = String(value);
+  if (/^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(s)) {
+    return new Date(parseInt(s.replace(/-/g, "").slice(0, 12), 16));
+  }
+  if (/^[0-7][0-9A-HJKMNP-TV-Z]{25}$/i.test(s)) {
+    let ms = 0;
+    for (const char of s.slice(0, 10).toUpperCase()) ms = ms * 32 + CROCKFORD.indexOf(char);
+    return new Date(ms);
+  }
+  return undefined;
+}
+
+/**
+ * Readable sequential ids like `"user-1"`, `"user-2"`, counted per prefix.
+ * Only unique within the current process; handy in logs and tests.
+ *
+ * @example
+ * id.seq("user"); // "user-1"
+ * id.seq("user"); // "user-2"
+ *
+ * @param {string} [prefix=""]
+ * @returns {string}
+ */
+function seq(prefix = "") {
+  _counters[prefix] = (_counters[prefix] ?? 0) + 1;
+  return prefix ? `${prefix}-${_counters[prefix]}` : String(_counters[prefix]);
+}
+
+/**
+ * Hashes a value.
+ *
+ * @deprecated Use `nc.crypto.hash()`. This alias goes away in 3.0.
+ * @param {string | Buffer | Uint8Array} value
+ * @param {import("./Crypto").HashOptions} [options]
+ * @returns {string}
+ */
+function hash(value, options) {
+  return nodeCrypto.hash(value, options);
+}
+
+/**
+ * Signs a value with HMAC.
+ *
+ * @deprecated Use `nc.crypto.hmac()`. This alias goes away in 3.0.
+ * @param {string | Buffer | Uint8Array} value
+ * @param {string | Buffer | Uint8Array} secret
+ * @param {import("./Crypto").HashOptions} [options]
+ * @returns {string}
+ */
+function hmac(value, secret, options) {
+  return nodeCrypto.hmac(value, secret, options);
+}
+
+/**
+ * Compares two secrets in constant time.
+ *
+ * @deprecated Use `nc.crypto.safeEqual()`. This alias goes away in 3.0.
+ * @param {string | Buffer | Uint8Array} a
+ * @param {string | Buffer | Uint8Array} b
+ * @returns {boolean}
+ */
+function safeEqual(a, b) {
+  return nodeCrypto.safeEqual(a, b);
+}
+
 module.exports = {
-  /**
-   * Generates a random UUID v4.
-   *
-   * @example
-   * nodeComfort.id.uuid(); // "3f2504e0-4f89-41d3-9a0c-0305e82c3301"
-   *
-   * @returns {string} A UUID v4 string.
-   */
-  uuid() {
-    return crypto.randomUUID();
-  },
-
-  /**
-   * Generates a URL-safe, collision-resistant ID (nanoid-compatible alphabet).
-   *
-   * Uses secure randomness with unbiased rejection sampling.
-   *
-   * @example
-   * nodeComfort.id.nano();    // "V1StGXR8_Z5jdHi6B-myT"
-   * nodeComfort.id.nano(10);  // "IRFa-VaY2b"
-   *
-   * @param {number} [size=21] - Desired length.
-   * @param {string} [alphabet] - Custom alphabet.
-   * @returns {string} The generated ID.
-   */
-  nano(size = 21, alphabet = NANOID_ALPHABET) {
-    const len = alphabet.length;
-    // Bitmask for unbiased sampling.
-    const mask = (2 << Math.floor(Math.log2(len - 1))) - 1;
-    const step = Math.ceil((1.6 * mask * size) / len);
-    let id = "";
-    while (id.length < size) {
-      const bytes = _randomBytes(step);
-      for (let i = 0; i < step && id.length < size; i++) {
-        const index = bytes[i] & mask;
-        if (index < len) id += alphabet[index];
-      }
-    }
-    return id;
-  },
-
-  /**
-   * Generates a ULID • a lexicographically-sortable, timestamp-prefixed ID.
-   *
-   * ULIDs sort by creation time and are a great primary-key alternative to UUIDs.
-   *
-   * @example
-   * nodeComfort.id.ulid(); // "01ARZ3NDEKTSV4RRFFQ69G5FAV"
-   *
-   * @param {number} [time=Date.now()] - Timestamp in ms to encode.
-   * @returns {string} A 26-character ULID.
-   */
-  ulid(time = Date.now()) {
-    let timeChars = "";
-    let t = time;
-    for (let i = 0; i < 10; i++) {
-      timeChars = ULID_ALPHABET[t % 32] + timeChars;
-      t = Math.floor(t / 32);
-    }
-
-    const bytes = _randomBytes(16);
-    let randChars = "";
-    for (let i = 0; i < 16; i++) {
-      randChars += ULID_ALPHABET[bytes[i] % 32];
-    }
-    return timeChars + randChars;
-  },
-
-  /**
-   * Generates a cryptographically-secure random token.
-   *
-   * @example
-   * nodeComfort.id.token();               // 32-byte hex string
-   * nodeComfort.id.token(16, "base64url"); // 16 bytes, URL-safe base64
-   *
-   * @param {number} [bytes=32] - Number of random bytes.
-   * @param {"hex"|"base64"|"base64url"|"base58"} [encoding="hex"] - Output encoding.
-   * @returns {string} The token.
-   */
-  token(bytes = 32, encoding = "hex") {
-    const buffer = _randomBytes(bytes);
-    if (encoding === "base58") return _toBase58(buffer);
-    return buffer.toString(encoding);
-  },
-
-  /**
-   * Generates a short, human-friendly random code (uppercase + digits by default).
-   *
-   * Ambiguous characters (`0/O`, `1/I`) are excluded, making it suitable for
-   * coupons, OTP-like codes and invite links.
-   *
-   * @example
-   * nodeComfort.id.code();            // "K7QF9X"
-   * nodeComfort.id.code(4, "1234");   // "3142"
-   *
-   * @param {number} [length=6] - Number of characters.
-   * @param {string} [alphabet="ABCDEFGHJKLMNPQRSTUVWXYZ23456789"] - Characters to pick from.
-   * @returns {string} The random code.
-   */
-  code(length = 6, alphabet = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789") {
-    const bytes = _randomBytes(length);
-    let out = "";
-    for (let i = 0; i < length; i++) {
-      out += alphabet[bytes[i] % alphabet.length];
-    }
-    return out;
-  },
-
-  /**
-   * Hashes a value with a chosen algorithm.
-   *
-   * @example
-   * nodeComfort.id.hash("hello");                  // sha256 hex
-   * nodeComfort.id.hash("hello", { algorithm: "md5" });
-   *
-   * @param {string|Buffer} value - Data to hash.
-   * @param {{ algorithm?: string, encoding?: "hex"|"base64"|"base64url" }} [options] - Hash options.
-   * @returns {string} The digest.
-   */
-  hash(value, options = {}) {
-    const algorithm = options.algorithm ?? "sha256";
-    const encoding = options.encoding ?? "hex";
-    return crypto.createHash(algorithm).update(value).digest(encoding);
-  },
-
-  /**
-   * Computes an HMAC signature for a value using a secret key.
-   *
-   * @example
-   * nodeComfort.id.hmac("payload", "secret"); // sha256 HMAC hex
-   *
-   * @param {string|Buffer} value - Data to sign.
-   * @param {string|Buffer} secret - Secret key.
-   * @param {{ algorithm?: string, encoding?: "hex"|"base64"|"base64url" }} [options] - HMAC options.
-   * @returns {string} The signature.
-   */
-  hmac(value, secret, options = {}) {
-    const algorithm = options.algorithm ?? "sha256";
-    const encoding = options.encoding ?? "hex";
-    return crypto.createHmac(algorithm, secret).update(value).digest(encoding);
-  },
-
-  /**
-   * Compares two strings/buffers in constant time to prevent timing attacks.
-   *
-   * Use this when comparing secrets, tokens, or signatures.
-   *
-   * @example
-   * if (nodeComfort.id.safeEqual(provided, expected)) { ... }
-   *
-   * @param {string|Buffer} a - First value.
-   * @param {string|Buffer} b - Second value.
-   * @returns {boolean} True if equal.
-   */
-  safeEqual(a, b) {
-    const bufA = Buffer.isBuffer(a) ? a : Buffer.from(String(a));
-    const bufB = Buffer.isBuffer(b) ? b : Buffer.from(String(b));
-    if (bufA.length !== bufB.length) return false;
-    return crypto.timingSafeEqual(bufA, bufB);
-  },
-
-  /**
-   * Returns a monotonically-increasing counter ID prefixed with an optional label.
-   *
-   * Useful for readable, unique keys within a single process run.
-   *
-   * @example
-   * nodeComfort.id.seq("user"); // "user-1"
-   * nodeComfort.id.seq("user"); // "user-2"
-   *
-   * @param {string} [prefix=""] - Optional prefix.
-   * @returns {string} The sequential ID.
-   */
-  seq(prefix = "") {
-    _seqCounters[prefix] = (_seqCounters[prefix] ?? 0) + 1;
-    return prefix ? `${prefix}-${_seqCounters[prefix]}` : String(_seqCounters[prefix]);
-  },
+  uuid,
+  uuidv7,
+  ulid,
+  nano,
+  customAlphabet,
+  token,
+  code,
+  snowflake,
+  parseSnowflake,
+  timestamp,
+  seq,
+  hash,
+  hmac,
+  safeEqual,
 };

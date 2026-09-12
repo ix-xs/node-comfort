@@ -1,622 +1,209 @@
-# @ix-xs/node-comfort
-
 <div align="center">
 
-![Node.js](https://img.shields.io/badge/node.js-6DA55F?style=for-the-badge&logo=node.js&logoColor=white)
-![JavaScript](https://img.shields.io/badge/javascript-%23323330.svg?style=for-the-badge&logo=javascript&logoColor=%23F7DF1E)
-![NPM](https://img.shields.io/badge/NPM-%23CB3837.svg?style=for-the-badge&logo=npm&logoColor=white)
-![Github](https://img.shields.io/badge/github-%23121011.svg?style=for-the-badge&logo=github&logoColor=white)
+# node-comfort
 
-[![npm version](https://badge.fury.io/js/%40ix-xs%2Fnode-comfort.svg)](https://www.npmjs.com/package/@ix-xs/node-comfort)
+**The standard library Node.js deserves.**
+
+Logging, config, validation, HTTP, SQLite, dates, crypto, CLI tools and 500+ helpers.<br>
+One package, zero dependencies, documented right in your editor.
+
+[![npm version](https://img.shields.io/npm/v/@ix-xs/node-comfort.svg)](https://www.npmjs.com/package/@ix-xs/node-comfort)
 [![Downloads](https://img.shields.io/npm/dm/@ix-xs/node-comfort.svg)](https://www.npmjs.com/package/@ix-xs/node-comfort)
-[![Zero dependencies](https://img.shields.io/badge/dependencies-0-brightgreen)](https://www.npmjs.com/package/@ix-xs/node-comfort)
+[![CI](https://github.com/ix-xs/node-comfort/actions/workflows/ci.yml/badge.svg)](https://github.com/ix-xs/node-comfort/actions/workflows/ci.yml)
+[![Dependencies](https://img.shields.io/badge/dependencies-0-brightgreen)](https://www.npmjs.com/package/@ix-xs/node-comfort?activeTab=dependencies)
+[![Node](https://img.shields.io/node/v/@ix-xs/node-comfort.svg)](https://nodejs.org)
+[![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](./LICENSE)
+
+[Documentation](https://ix-xs.github.io/node-comfort/) •
+[Getting started](https://ix-xs.github.io/node-comfort/guide/getting-started.html) •
+[API reference](https://ix-xs.github.io/node-comfort/api/index.html) •
+[Recipes](https://ix-xs.github.io/node-comfort/guide/recipes.html) •
+[Changelog](./CHANGELOG.md)
 
 </div>
 
-A **zero-dependency** comfort belt for Node.js • the helpers you rewrite in every
-project, in one small, well-typed package:
-
-- 🎨 **Logger** • colorful console logging with a tiny markup syntax and levels
-- 📁 **FS** • safe filesystem operations, JSON I/O, watching, hashing
-- 🧪 **Checker** • 35 runtime type guards (`isEmail`, `isEmpty`, `isPlainObject`, …)
-- ⏳ **Utils** • `wait`, `when`, `dontCrash`, JSON helpers
-- 🔤 **str** • case conversion, slugs, truncation, templating
-- 🔢 **num** • clamp, round, ranges, byte/duration/number formatting
-- 📚 **arr** • chunk, groupBy, unique, set operations, shuffle
-- 🧩 **obj** • deep clone/merge/equal, dot-path get/set, pick/omit
-- 🛠️ **func** • debounce, throttle, memoize, retry, timeout, pipe/compose
-- 🕒 **time** • durations, relative time, date math • locale & time-zone aware
-- 🆔 **id** • secure UUID / ULID / nanoid / tokens, hashing, constant-time compare
-- 🗄️ **SQLite** • a small model + CRUD wrapper over Node's built-in `node:sqlite`
-
-Everything is plain CommonJS with JSDoc, and the package ships full TypeScript
-type definitions.
-
 ---
 
-## Installation
+Most Node.js projects install the same twenty packages before writing a single line of their own: a logger, dotenv, a validation library, an HTTP client, a retry helper, a date library, uuid, bcrypt, a CLI parser, a spinner. Hundreds of transitive dependencies come with them.
 
-```bash
-npm install @ix-xs/node-comfort
-# or
-yarn add @ix-xs/node-comfort
-# or
-pnpm add @ix-xs/node-comfort
-```
-
-Requires **Node 20.12+** (uses `node:sqlite`, `process.loadEnvFile`, `structuredClone`).
-
----
-
-## Quick start
-
-The package exposes a **flat API** for the historical modules (Logger, FS,
-Checker, Utils) and **namespaces** for the newer utility collections.
+Node.js can do most of this on its own now. It ships `fetch`, `Intl`, `node:crypto` and even SQLite. node-comfort is the missing layer on top: one consistent, fully typed API, and nothing else to install.
 
 ```js
 const nc = require("@ix-xs/node-comfort");
 
-// Logger (flat)
-nc.log("<% greenBright Success %>");
-nc.info("server started");
-nc.error(new Error("boom"));
-
-// FS (flat)
-nc.writeJSON("./data/config.json", { ready: true });
-const cfg = nc.readJSON("./data/config.json", {});
-
-// Checker (flat)
-nc.isEmail("john@example.com"); // true
-nc.isEmpty([]);                 // true
-
-// Utils (flat)
-await nc.wait(500);
-
-// Namespaced collections
-nc.str.slugify("Héllo World");        // "hello-world"
-nc.num.formatBytes(1536);             // "1.5 KB"
-nc.arr.chunk([1, 2, 3, 4], 2);        // [[1, 2], [3, 4]]
-nc.obj.get(data, "a.b[0].c", "def");
-nc.func.debounce(fn, 200);
-nc.time.relative(Date.now() - 3600e3); // "1 hour ago"
-nc.id.uuid();
-
-// SQLite (class)
-const db = new nc.SQLite("data/app.sqlite");
-```
-
-> The flat modules are also available as namespaces if you prefer explicit
-> grouping: `nc.logger`, `nc.fs`, `nc.checker`, `nc.utils`.
-
----
-
-## API at a glance
-
-| Namespace | Highlights |
-| --- | --- |
-| flat / `logger` | `log` `info` `success` `warn` `error` `debug` `group` `groupEnd` `setTimestamp` `setDelimiter` |
-| flat / `fs` | `readFile` `readJSON` `writeJSON` `appendFile` `createFile` `createFolder` `copy*` `move*` `delete*` `getFilesIn` `getFoldersIn` `exists` `stat` `fileSize` `hashFile` `emptyFolder` `watch` `getEnv` |
-| flat / `checker` | `isArray` `isNumber` `isInteger` `isString` `isPlainObject` `isPromise` `isEmpty` `isEmail` `isURL` `isUUID` `isJSON` `isNumeric` … (35 total) |
-| flat / `utils` | `wait` `when` `dontCrash` `JSONString` `JSONParse` |
-| `str` | `capitalize` `camelCase` `snakeCase` `kebabCase` `slugify` `truncate` `template` `escapeHTML` `words` … |
-| `num` | `clamp` `round` `range` `sum` `average` `median` `formatBytes` `abbreviate` `thousands` `ordinal` `percent` … |
-| `arr` | `chunk` `unique` `groupBy` `keyBy` `partition` `sortBy` `difference` `intersection` `union` `zip` `shuffle` `sample` … |
-| `obj` | `clone` `merge` `equal` `get` `set` `has` `pick` `omit` `mapValues` `flatten` `unflatten` `deepFreeze` … |
-| `func` | `debounce` `throttle` `once` `memoize` `retry` `timeout` `pipe` `compose` `curry` `promisify` `attempt` … |
-| `time` | `parseDuration` `formatDuration` `relative` `format` `add` `subtract` `diff` `startOf` `isSameDay` `stopwatch` `setLocale` `setTimezone` … (i18n + time-zone aware) |
-| `id` | `uuid` `ulid` `nano` `token` `code` `hash` `hmac` `safeEqual` `seq` |
-| `SQLite` | `createTable` `insert` `update` `upsert` `get` `getAll` `delete` `count` `transaction` `createIndex` … |
-
----
-
-## Logger
-
-Colorized console logger with a minimal markup syntax, optional timestamps,
-groups, and level helpers.
-
-Wrap styles in delimiters (default `<%` … `%>`):
-
-- **styles**: `bold`, `italic`, `underline`, `overline`
-- **colors**: `red`, `green`, `yellow`, `blue`, `magenta`, `cyan`, `white`, `gray`, `black`
-- **bright**: `redBright`, `greenBright`, … `whiteBright`
-- **background**: `bgRed`, `bgBlue`, …
-- **RGB**: `rgb(255, 0, 0)`
-
-```js
-nc.log("Plain log");
-nc.log("<% green Success %>");
-nc.log("<% red bold Error:%> something went wrong");
-nc.log("<% bgBlue white INFO %> message");
-nc.log("<% rgb(255,128,0) Orange text %>");
-```
-
-### Level helpers
-
-```js
-nc.info("Loading configuration…");   // ℹ INFO
-nc.success("Database connected");     // ✔ OK
-nc.warn("Cache miss");                // ⚠ WARN
-nc.error(new Error("Boom"));          // ✖ ERROR  (prints the stack)
-nc.debug({ requestId: 42 });          // ● DEBUG  (only when DEBUG/NODE_DEBUG is set)
-```
-
-### Timestamp, delimiters & groups
-
-```js
-nc.setTimestamp(false);
-nc.setDelimiter({ open: "{{", close: "}}" });
-nc.log("{{red Hello}} world");
-
-nc.group("Startup");
-nc.log("Loading config…");
-nc.group("DB");
-nc.log("Connecting…");
-nc.groupEnd(); // end "DB"
-nc.groupEnd(); // end "Startup"
-```
-
----
-
-## FS
-
-File-system helper with safe path resolution, recursive walking, copy/move
-helpers, JSON I/O, hashing and a small watcher. Relative paths (`./`, `../`) are
-resolved from the **caller file**, which is handy inside libraries.
-
-```js
-// Paths
-const p = nc.createPath("./config/app.json"); // absolute, even if missing
-const folder = nc.getFolder("./src");
-const file = nc.getFile("package.json");
-
-// Create
-nc.createFolder("./dist");
-nc.createFile("./dist/info.txt", false, "hello");
-
-// JSON I/O
-nc.writeJSON("./dist/data.json", { ok: true });          // pretty, 2 spaces
-const data = nc.readJSON("./dist/data.json", {});         // fallback on error
-
-// Append / read
-nc.appendFile("./logs/app.log", "started\n");
-const content = nc.readFile("./README.md");
-
-// Inspect
-nc.exists("./dist");                 // true
-nc.fileSize("./dist/data.json");     // bytes
-nc.stat("./dist/data.json");         // fs.Stats
-nc.hashFile("./dist/data.json");     // sha256 hex
-
-// List & delete
-const files = nc.getFilesIn("./src", true);
-nc.deleteFilesIn("./logs", false, (f) => f.endsWith(".log"));
-nc.emptyFolder("./tmp");             // keep the folder, clear its contents
-```
-
-### Copy & move
-
-```js
-nc.copyFolder({ path: "./templates", dest: "./dist/templates", recursive: true, withFiles: true, force: true });
-nc.copyFilesIn({ path: "./src", dest: "./dist", recursive: true, filter: (f) => f.endsWith(".js") });
-nc.copyFile({ path: "./src/index.js", dest: "./dist", force: true });
-
-nc.moveFolder({ path: "./build", dest: "./dist", recursive: true, withFiles: true, force: true });
-nc.moveFile({ path: "./logs/app.log", dest: "./logs/archive/app.log", force: true });
-```
-
-### Watch
-
-```js
-const watcher = nc.watch({ path: "./src", recursive: true, filter: (event, file) => file.endsWith(".js") });
-
-watcher
-  .on("change", (file) => nc.log(`<% cyan changed %> ${file}`))
-  .on("rename", (file) => nc.log(`<% yellow renamed %> ${file}`));
-
-watcher.pause();
-watcher.resume();
-watcher.stop();
-```
-
----
-
-## Checker
-
-35 runtime type guards. Each is a boolean function that accepts any input.
-
-```js
-// Primitives & core
-nc.isArray([1, 2]);          nc.isNumber(42);        nc.isInteger(4);
-nc.isFloat(4.2);             nc.isString("x");       nc.isBoolean(false);
-nc.isBigInt(10n);            nc.isSymbol(Symbol());   nc.isFunction(() => {});
-nc.isAsyncFunction(async () => {});
-
-// Nullish & primitiveness
-nc.isNull(null);   nc.isUndefined(undefined);   nc.isNil(null);   nc.isPrimitive(1);
-
-// Objects & structures
-nc.isObject({});             nc.isPlainObject({});    nc.isPromise(Promise.resolve());
-nc.isRegExp(/a/);            nc.isDate(new Date());   nc.isValidDate(new Date());
-nc.isMap(new Map());        nc.isSet(new Set());     nc.isIterable([1]);
-nc.isBuffer(Buffer.from("")); nc.isTypedArray(new Uint8Array()); nc.isError(new Error());
-
-// Emptiness & formats
-nc.isEmpty("");   nc.isEmpty([]);   nc.isEmpty({});   nc.isEmpty(new Map());
-nc.isEmail("john@example.com");     nc.isURL("https://x.com");
-nc.isUUID("123e4567-e89b-12d3-a456-426614174000");
-nc.isJSON('{"a":1}');               nc.isNumeric("42");
-```
-
----
-
-## Utils
-
-Async & process helpers.
-
-```js
-// wait
-await nc.wait(500);
-
-// when • poll a predicate and emit events
-nc.when(() => Math.random() > 0.8, { label: "Lucky" }, { interval: 200, max: 3, timeout: 5000 })
-  .on("trigger", (p) => nc.log(`<% green ${p.label} %>`))
-  .on("timeout", () => nc.log("<% red Timeout %>"))
-  .start();
-
-// dontCrash • process-level safety nets
-nc.dontCrash()
-  .on("error", (err) => console.error("Global error:", err))
-  .on("sig", (signal) => { nc.warn(`Caught ${signal}`); process.exit(0); });
-
-// JSON
-const json = nc.JSONString({ hello: "world" }); // 4-space pretty print
-const value = nc.JSONParse(json);
-```
-
----
-
-## str • string utilities
-
-```js
-nc.str.capitalize("hELLO");            // "Hello"
-nc.str.titleCase("the quick fox");     // "The Quick Fox"
-nc.str.camelCase("foo-bar_baz");       // "fooBarBaz"
-nc.str.pascalCase("foo bar");          // "FooBar"
-nc.str.snakeCase("helloWorld");        // "hello_world"
-nc.str.kebabCase("helloWorld");        // "hello-world"
-nc.str.constantCase("helloWorld");     // "HELLO_WORLD"
-
-nc.str.slugify("Héllo, World!");       // "hello-world"
-nc.str.truncate("Hello world", 8);     // "Hello w…"
-nc.str.center("hi", 6, "*");           // "**hi**"
-nc.str.reverse("abc");                 // "cba"  (emoji-safe)
-nc.str.squish("  a   b  ");            // "a b"
-nc.str.stripTags("<b>Hi</b>");         // "Hi"
-nc.str.escapeHTML('<a>&"');            // "&lt;a&gt;&amp;&quot;"
-nc.str.escapeRegExp("a.b");            // "a\\.b"
-nc.str.count("banana", "a");           // 3
-nc.str.ensurePrefix("a.com", "https://"); // "https://a.com"
-nc.str.template("Hi {name} ({user.role})", { name: "Jo", user: { role: "admin" } });
-// "Hi Jo (admin)"
-nc.str.words("helloWorld-foo");        // ["hello", "World", "foo"]
-nc.str.length("😀");                    // 1
-```
-
----
-
-## num • number & math utilities
-
-```js
-nc.num.clamp(15, 0, 10);               // 10
-nc.num.round(1.005, 2);                // 1.01
-nc.num.inRange(5, 0, 10);              // true
-nc.num.lerp(0, 100, 0.5);              // 50
-nc.num.mapRange(5, 0, 10, 0, 100);     // 50
-nc.num.randomInt(1, 6);                // dice roll
-
-nc.num.range(4);                       // [0, 1, 2, 3]
-nc.num.range(0, 10, 2);                // [0, 2, 4, 6, 8]
-nc.num.range(5, 0);                    // [5, 4, 3, 2, 1]
-
-nc.num.sum([1, 2, 3]);                 // 6
-nc.num.average([2, 4]);                // 3
-nc.num.median([3, 1, 2]);              // 2
-nc.num.percent(25, 200);               // 12.5
-
-nc.num.formatBytes(1536);              // "1.5 KB"
-nc.num.formatBytes(1024, { iec: true }); // "1 KiB"
-nc.num.abbreviate(2_400_000);          // "2.4M"
-nc.num.thousands(1234567);             // "1,234,567"
-nc.num.ordinal(22);                    // "22nd"
-nc.num.parse("42px");                  // 42
-```
-
----
-
-## arr • array utilities
-
-All methods are pure (they never mutate their input). Many accept an
-`iteratee`: a property key (string) or a function.
-
-```js
-nc.arr.chunk([1, 2, 3, 4, 5], 2);      // [[1, 2], [3, 4], [5]]
-nc.arr.unique([1, 1, 2]);              // [1, 2]
-nc.arr.unique(users, "id");            // de-dupe by id
-nc.arr.groupBy([1, 2, 3, 4], (n) => (n % 2 ? "odd" : "even"));
-nc.arr.keyBy(users, "id");
-nc.arr.partition([1, 2, 3, 4], (n) => n % 2 === 0); // [[2, 4], [1, 3]]
-nc.arr.countBy(["a", "b", "a"]);       // { a: 2, b: 1 }
-
-nc.arr.sortBy(users, "age");
-nc.arr.sortBy(users, ["age", "name"], "desc");
-nc.arr.sumBy(items, "price");
-nc.arr.maxBy(items, "score");
-
-nc.arr.difference([1, 2, 3, 4], [2, 4]); // [1, 3]
-nc.arr.intersection([1, 2, 3], [2, 3, 4]); // [2, 3]
-nc.arr.union([1, 2], [2, 3]);          // [1, 2, 3]
-nc.arr.zip(["a", "b"], [1, 2]);        // [["a", 1], ["b", 2]]
-
-nc.arr.compact([0, 1, false, 2, ""]);  // [1, 2]
-nc.arr.flatten([1, [2, [3]]], Infinity); // [1, 2, 3]
-nc.arr.shuffle([1, 2, 3]);             // random order
-nc.arr.sample([1, 2, 3]);              // random element
-nc.arr.sampleSize([1, 2, 3, 4], 2);    // 2 random elements
-nc.arr.first([1, 2, 3], 2);            // [1, 2]
-nc.arr.last([1, 2, 3]);                // 3
-nc.arr.move([1, 2, 3], 0, 2);          // [2, 3, 1]
-nc.arr.times(3, (i) => i * 2);         // [0, 2, 4]
-```
-
----
-
-## obj • object utilities
-
-Pure, dot-path-aware helpers. `get`/`set`/`has` accept `"a.b[0].c"` paths.
-
-```js
-nc.obj.clone({ a: { b: 1 } });         // deep clone (structuredClone + fallback)
-nc.obj.merge({ a: { x: 1 } }, { a: { y: 2 } }); // { a: { x: 1, y: 2 } }
-nc.obj.equal({ a: [1, 2] }, { a: [1, 2] });     // true (deep)
-
-nc.obj.get(data, "a.b[0].c", "default");
-nc.obj.set({}, "a.b.c", 1);            // { a: { b: { c: 1 } } }  (returns a clone)
-nc.obj.has({ a: { b: 1 } }, "a.b");    // true
-
-nc.obj.pick({ a: 1, b: 2, c: 3 }, ["a", "c"]); // { a: 1, c: 3 }
-nc.obj.omit({ a: 1, b: 2 }, ["b"]);            // { a: 1 }
-nc.obj.filter({ a: 1, b: 2 }, (v) => v > 1);   // { b: 2 }
-nc.obj.mapValues({ a: 1 }, (v) => v * 10);     // { a: 10 }
-nc.obj.mapKeys({ a: 1 }, (k) => k.toUpperCase()); // { A: 1 }
-nc.obj.invert({ a: "x" });             // { x: "a" }
-nc.obj.compact({ a: 1, b: null });     // { a: 1 }
-
-nc.obj.flatten({ a: { b: { c: 1 } } });  // { "a.b.c": 1 }
-nc.obj.unflatten({ "a.b.c": 1 });        // { a: { b: { c: 1 } } }
-nc.obj.deepFreeze(config);               // recursively immutable
-```
-
----
-
-## func • function & control-flow utilities
-
-```js
-// Rate limiting
-const onResize = nc.func.debounce(() => render(), 200);
-const onScroll = nc.func.throttle(() => update(), 100);
-onResize.cancel(); onResize.flush();
-
-// Caching & single-call
-const init = nc.func.once(() => setup());
-const fib = nc.func.memoize((n) => (n < 2 ? n : fib(n - 1) + fib(n - 2)));
-
-// Resilience
-const data = await nc.func.retry(() => fetchThing(), {
-  attempts: 5, delay: 200, backoff: 2, // 200, 400, 800…
-});
-const res = await nc.func.timeout(fetchThing(), 5000, "too slow");
-
-// Go-style error handling • no try/catch
-const [err, user] = await nc.func.attempt(() => getUser(id))();
-
-// Composition
-const clean = nc.func.pipe((s) => s.trim(), (s) => s.toUpperCase());
-const add = nc.func.curry((a, b, c) => a + b + c);
-add(1)(2)(3); // 6
-
-// Interop
-const readFile = nc.func.promisify(require("fs").readFile);
-```
-
----
-
-## time • date & time utilities
-
-No heavyweight date library required.
-
-```js
-nc.time.parseDuration("1h30m");        // 5400000
-nc.time.parseDuration("2 days");       // 172800000
-nc.time.formatDuration(5_400_000);     // "1h 30m"
-nc.time.formatDuration(90_000, { long: true }); // "1 minute 30 seconds"
-
-nc.time.relative(Date.now() - 3600e3); // "1 hour ago"
-nc.time.relative(Date.now() + 86400e3); // "in 1 day"
-
-nc.time.format(new Date(), "YYYY-MM-DD HH:mm:ss");
-nc.time.add(new Date(), "2h");
-nc.time.subtract(new Date(), 1, "d");
-nc.time.diff("2024-01-03", "2024-01-01", "d"); // 2
-nc.time.startOf(new Date(), "day");
-nc.time.isSameDay(a, b);
-nc.time.unix();                        // seconds since epoch
-
-const sw = nc.time.stopwatch();
-doWork();
-sw.stop();      // 12.34 (ms, sub-ms precise)
-sw.stop(true);  // "12.34ms"
-```
-
-### Language & time zone
-
-`relative`, `formatDuration` and `format` are **locale-aware** and built on the
-platform's native `Intl` (Node ships with full ICU), so **every language works
-out of the box** • no locale files, no dependencies. The default locale is
-`"en"` for deterministic output.
-
-Set a global default (chainable), or override per call:
-
-```js
-// Global defaults
-nc.time.setLocale("fr").setTimezone("Europe/Paris");
-nc.time.getConfig(); // { locale: "fr", timeZone: "Europe/Paris" }
-
-// …or per call via options
-nc.time.relative(Date.now() - 3600e3, undefined, { locale: "fr" });      // "il y a 1 heure"
-nc.time.relative(Date.now() - 86400e3, undefined, { numeric: "auto" });  // "yesterday"
-nc.time.formatDuration(90_000, { long: true, locale: "de" });            // "1 Minute 30 Sekunden"
-
-// Localized date formatting
-nc.time.format(Date.now(), "dddd D MMMM YYYY", { locale: "fr" });        // "lundi 15 janvier 2024"
-nc.time.format(Date.now(), "h:mm A");                                    // "2:30 PM"
-
-// Time-zone aware (IANA names)
-nc.time.format(utcDate, "YYYY-MM-DD HH:mm", { timeZone: "Asia/Tokyo" });
-nc.time.isSameDay(a, b, { timeZone: "America/New_York" });
-```
-
-**`format` tokens** • numeric: `YYYY` `YY` `MM` `M` `DD` `D` `HH` `H` (24h)
-`hh` `h` (12h) `mm` `m` `ss` `s` `SSS`; localized: `MMMM` `MMM` (month),
-`dddd` `ddd` (weekday), `A` `a` (AM/PM). Wrap literal text in square brackets:
-`format(d, "[Updated on] dddd")`.
-
----
-
-## id • id, token & hashing utilities
-
-Cryptographically secure, built on Node's native `node:crypto`.
-
-```js
-nc.id.uuid();                          // UUID v4
-nc.id.ulid();                          // sortable, timestamp-prefixed id
-nc.id.nano();                          // URL-safe nanoid (21 chars)
-nc.id.nano(10);                        // custom length
-
-nc.id.token();                         // 32-byte hex token
-nc.id.token(16, "base64url");          // URL-safe base64
-nc.id.token(16, "base58");             // Base58 (Bitcoin alphabet)
-nc.id.code();                          // "K7QF9X"  (unambiguous, human-friendly)
-
-nc.id.hash("hello");                   // sha256 hex
-nc.id.hash("hello", { algorithm: "md5" });
-nc.id.hmac("payload", "secret");       // HMAC-SHA256
-
-nc.id.safeEqual(provided, expected);   // constant-time comparison
-nc.id.seq("user");                     // "user-1", "user-2", …
-```
-
-> **Tip:** ULIDs sort by creation time, making them a great primary-key
-> alternative to UUIDs. Use `nc.id.safeEqual` whenever you compare secrets,
-> tokens or signatures to avoid timing attacks.
-
----
-
-## SQLite
-
-Thin wrapper over the built-in `node:sqlite` `DatabaseSync`, with a small model
-system and CRUD helpers. Identifiers are validated and values are bound with
-`?` placeholders. WAL mode and foreign keys are enabled automatically.
-
-```js
-const db = new nc.SQLite("data/app.sqlite"); // folder created if needed
-// const db = new nc.SQLite(":memory:");     // transient in-memory DB
-
-await db.createTable({
-  name: "users",
-  columns: {
-    id:        { type: "INTEGER", primaryKey: true, autoincrement: true },
-    name:      { type: "TEXT", notNull: true },
-    role:      { type: "TEXT", values: ["admin", "user"], defaultValue: "user" },
-    createdAt: { type: "INTEGER", notNull: true },
-  },
-  indexes: [{ columns: ["role"] }],
+const config = nc.env.validate({
+  PORT: { type: "port", default: 3000 },
+  DATABASE_URL: { type: "url" },
 });
 
-await db.insert("users", { name: "John", role: "admin", createdAt: Date.now() });
-await db.update("users", { role: "user" }, { name: "John" });
-await db.upsert("users", { id: 1, role: "admin" }, ["id"]);
+const db = new nc.SQLite("./data/app.sqlite");
+const github = nc.http.create({ baseURL: "https://api.github.com/", retry: { attempts: 3 } });
 
-const user  = await db.get("users", { name: "John" });
-const admins = await db.getAll("users", { role: "admin" }, { limit: 100, orderBy: "createdAt", direction: "DESC" });
+const { data: repo } = await github.get("repos/nodejs/node");
+nc.info(`Node.js has <% yellow ${nc.num.abbreviate(repo.stargazers_count)} %> stars`);
 
-await db.delete("users", { role: "user" });
-await db.count("users", { role: "admin" });
-await db.clearTable("users");
+nc.sys.onShutdown(() => db.close());
 ```
 
-### Constraints & indexes
+## Install
+
+```bash
+npm install @ix-xs/node-comfort
+```
+
+Node.js 22.13 or newer. That's the first version where `node:sqlite` works without a flag.
+
+## Why node-comfort
+
+- **Zero dependencies.** Built only on Node's own modules. No install scripts, nothing else to audit or keep up to date.
+- **Your editor already knows it.** Every function, parameter and option is typed and documented, with examples. Type `nc.` and look around. It works in plain JavaScript too.
+- **Fast to load.** Namespaces load the first time you use them. Requiring the package takes about 3 ms, and a script that only logs never loads the database or the HTTP client.
+- **Safe by default.** Prototype-pollution-proof objects, scrypt passwords, AES-256-GCM, constant-time comparisons, parameterized SQL, atomic file writes.
+- **One way of doing things.** Durations are always `"5m"` or milliseconds, options always come last, and every error has a stable `code`.
+- **Tested everywhere.** Linux, macOS and Windows, Node.js 22 and 24, TypeScript 5.9, 6 and 7.
+
+## What's inside
+
+| Namespace | What it's for | Often replaces |
+| --- | --- | --- |
+| [Logger](https://ix-xs.github.io/node-comfort/guide/logger.html) | Colorful logs, levels, JSON output, log files with rotation | `chalk`, `pino`, `winston` |
+| [`fs`](https://ix-xs.github.io/node-comfort/guide/fs.html) | Files and folders without try/catch, atomic writes, glob, watch | `fs-extra`, `glob`, `rimraf` |
+| [`checker`](https://ix-xs.github.io/node-comfort/guide/checker.html) | 60+ type guards and validators, `assert` | `is`, `validator` |
+| [`env`](https://ix-xs.github.io/node-comfort/guide/env.html) | `.env` loading, typed and validated configuration | `dotenv`, `envalid` |
+| [`schema`](https://ix-xs.github.io/node-comfort/guide/schema.html) | Data validation with TypeScript inference | `zod`, `yup`, `joi` |
+| [`http`](https://ix-xs.github.io/node-comfort/guide/http.html) | `fetch` with JSON, retries, timeouts, hooks, downloads | `axios`, `got`, `ky` |
+| [`SQLite`](https://ix-xs.github.io/node-comfort/guide/sqlite.html) | CRUD, filters, JSON columns, transactions, migrations | `better-sqlite3` and helpers |
+| [`time`](https://ix-xs.github.io/node-comfort/guide/time.html) | Formatting in any language and time zone, durations, date math, cron | `dayjs`, `ms`, `node-cron` |
+| [`str`](https://ix-xs.github.io/node-comfort/guide/str.html) | Case conversion, slugs, emoji-safe truncation, fuzzy matching, plurals | `lodash`, `slugify`, `leven` |
+| [`num`](https://ix-xs.github.io/node-comfort/guide/num.html) | Exact rounding, statistics, currencies, bytes | `numeral`, `pretty-bytes` |
+| [`arr`](https://ix-xs.github.io/node-comfort/guide/arr.html) | Chunk, group, multi-key sort, paginate, set operations | `lodash` |
+| [`obj`](https://ix-xs.github.io/node-comfort/guide/obj.html) | Deep clone, merge, equal and diff, typed dot paths | `lodash`, `deepmerge`, `dequal` |
+| [`func`](https://ix-xs.github.io/node-comfort/guide/func.html) | Debounce, throttle, memoize, retry with backoff, timeout | `p-retry`, `p-timeout` |
+| [`async`](https://ix-xs.github.io/node-comfort/guide/async.html) | Concurrency limits, queues, mutex, polling | `p-limit`, `p-map`, `p-queue` |
+| [`Cache`](https://ix-xs.github.io/node-comfort/guide/cache.html) | LRU cache with TTL, loaders and statistics | `lru-cache` |
+| [`Emitter`](https://ix-xs.github.io/node-comfort/guide/emitter.html) | Typed events, `waitFor`, async iteration | `mitt`, `emittery` |
+| [`id`](https://ix-xs.github.io/node-comfort/guide/id.html) | UUID v4 and v7, ULID, nanoid, tokens, Snowflakes | `uuid`, `ulid`, `nanoid` |
+| [`crypto`](https://ix-xs.github.io/node-comfort/guide/crypto.html) | Passwords, encryption, JWT, TOTP two-factor codes | `bcrypt`, `jsonwebtoken`, `otplib` |
+| [`cli`](https://ix-xs.github.io/node-comfort/guide/cli.html) | Typed arguments, prompts, menus, spinners, progress bars, tables | `commander`, `inquirer`, `ora` |
+| [`color`](https://ix-xs.github.io/node-comfort/guide/color.html) | Chainable terminal colors, truecolor, gradients, links | `chalk`, `picocolors` |
+| [`sys`](https://ix-xs.github.io/node-comfort/guide/sys.html) | Run commands, `which`, graceful shutdown, platform detection | `execa`, `which` |
+| [`utils`](https://ix-xs.github.io/node-comfort/guide/utils.html) | `wait`, safe JSON, crash guard | |
+| [`errors`](https://ix-xs.github.io/node-comfort/guide/errors.html) | Error classes with stable codes | |
+
+The logger, `fs`, `checker` and `utils` helpers are also available at the top level: `nc.info()`, `nc.readJSON()`, `nc.isEmail()`, `nc.wait()`.
+
+## Importing
 
 ```js
-await db.createTable({
-  name: "UserAuthMethod",
-  columns: {
-    id:             { type: "INTEGER", primaryKey: true, autoincrement: true },
-    userId:         { type: "INTEGER", notNull: true },
-    provider:       { type: "TEXT", notNull: true },
-    providerUserId: { type: "TEXT", notNull: true },
-  },
-  constraints: [
-    { type: "unique", columns: ["provider", "providerUserId"] },
-    { type: "foreignKey", columns: ["userId"], references: { table: "users", columns: ["id"] }, onDelete: "CASCADE" },
-  ],
-});
+// CommonJS
+const nc = require("@ix-xs/node-comfort");
+const { str, isEmail, info } = require("@ix-xs/node-comfort");
 
-await db.createIndex("UserAuthMethod", { columns: ["provider", "providerUserId"], unique: true });
+// ES modules
+import nc from "@ix-xs/node-comfort";
+import { slugify } from "@ix-xs/node-comfort/str";   // loads only what it needs
 ```
 
-### Transactions & raw SQL
+Every namespace has its own entry point (`@ix-xs/node-comfort/http`, `/sqlite`, `/schema`...). In an ES module, importing from these keeps startup lean. See [Performance](https://ix-xs.github.io/node-comfort/guide/performance.html).
 
-```js
-await db.transaction(async () => {
-  await db.insert("users", { name: "A", createdAt: Date.now() });
-  await db.insert("profiles", { userId: 1, nickname: "A" });
-  return { ok: true }; // throw to roll back
-});
-
-await db.exec("CREATE INDEX IF NOT EXISTS idx_name ON users (name)");
-const one = await db.queryOne("SELECT * FROM users WHERE id = ?", [1]);
-const many = await db.queryAll("SELECT * FROM users WHERE role = ?", ["admin"]);
-
-db.close();
-```
-
----
-
-## TypeScript
-
-The package ships generated `.d.ts` files, so everything is fully typed out of
-the box • no `@types` package needed.
+TypeScript needs no setup: the types ship with the package.
 
 ```ts
-import nc from "@ix-xs/node-comfort";
-// or: import * as nc from "@ix-xs/node-comfort";
+import { schema as s, type Infer } from "@ix-xs/node-comfort";
 
-const id: string = nc.id.uuid();
-const size: string = nc.num.formatBytes(2048);
+const User = s.object({ email: s.string().email(), age: s.number().int().optional() });
+type User = Infer<typeof User>; // { email: string; age?: number | undefined }
 ```
 
----
+## A quick tour
+
+**Logs** that look good in a terminal and turn into JSON in production:
+
+```js
+nc.info("Server listening on port 3000").success("Connected to the database");
+nc.log("<% cyan bold Tip:%> press <% bgWhite black  q  %> to quit");
+
+const log = nc.createLogger({ scope: "api", file: { path: "./logs/api.log", maxSize: "10MB", maxFiles: 5 } });
+const reqLog = log.child("request", { fields: { requestId: "a1b2" } });
+```
+
+**Validation** with the type inferred for you:
+
+```js
+const User = nc.schema.object({
+  email: nc.schema.string().trim().email(),
+  age: nc.schema.number().int().min(18).optional(),
+  role: nc.schema.enum(["admin", "user"]).default("user"),
+});
+
+const result = User.safeParse(req.body);
+if (!result.success) return res.status(400).json(result.error.flatten());
+```
+
+**HTTP** on top of `fetch`, with the parts you always end up writing:
+
+```js
+const api = nc.http.create({
+  baseURL: "https://api.example.com/v1/",
+  auth: { bearer: process.env.API_TOKEN },
+  timeout: "10s",
+  retry: { attempts: 3 },
+});
+
+const { data: users } = await api.get("users", { query: { page: 2 } });
+await api.post("users", { name: "Ada" });
+```
+
+**SQLite** without compiling anything, with objects in and objects out:
+
+```js
+const db = new nc.SQLite("./data/app.sqlite");
+
+db.insert("users", { email: "ada@example.com", settings: { theme: "dark" } });
+const admins = db.getAll("users", { role: ["admin", "owner"], age: { gte: 18 } }, { orderBy: "email", limit: 20 });
+db.transaction(() => {
+  db.update("accounts", { balance: 90 }, { id: 1 });
+  db.update("accounts", { balance: 110 }, { id: 2 });
+});
+```
+
+**Dates** in any language and time zone:
+
+```js
+nc.time.setLocale("fr").setTimezone("Europe/Paris");
+nc.time.format(new Date(), "dddd D MMMM YYYY HH:mm"); // "vendredi 11 septembre 2026 14:30"
+nc.time.relative(Date.now() - 3 * 3600e3);            // "il y a 3 heures"
+nc.time.cron("0 9 * * 1-5", sendReport);              // weekdays at 9:00
+```
+
+**Command-line tools** with typed flags, prompts and spinners:
+
+```js
+const { flags } = nc.cli.args({
+  port: { type: "number", short: "p", default: 3000, description: "Port to listen on" },
+}, { version: "1.0.0" });                              // --help and --version for free
+
+const env = await nc.cli.select("Environment?", ["staging", "production"]);
+const spinner = nc.cli.spinner(`Deploying to ${env}`).start();
+spinner.succeed("Deployed");
+```
+
+That's a small part of it. The [guide](https://ix-xs.github.io/node-comfort/guide/introduction.html) walks through every namespace, and the [recipes](https://ix-xs.github.io/node-comfort/guide/recipes.html) show them working together: a small API server, a CLI, a scheduled job.
+
+## Coming from 1.x
+
+2.0 keeps the 1.x API but changes a few behaviors. The main ones:
+
+- Node.js 22.13 or newer is required.
+- SQLite methods throw a `SQLiteError` instead of returning `{ error }`, and `getAll()` no longer adds a default limit and order.
+- `warn` and `error` write to stderr.
+- Deep imports (`@ix-xs/node-comfort/src/...`) are replaced by official entry points (`@ix-xs/node-comfort/str`).
+
+The [migration guide](https://ix-xs.github.io/node-comfort/guide/migration.html) lists every change with before and after examples.
 
 ## Contributing
 
-Issues and PRs are welcome at
-[github.com/ix-xs/node-comfort](https://github.com/ix-xs/node-comfort).
-
-```bash
-npm run build   # regenerate the type definitions (tsc)
-```
-
----
+Bug reports, ideas and pull requests are welcome. [CONTRIBUTING.md](./CONTRIBUTING.md) explains how the project is organized. In short: `npm install`, then `npm run check` builds everything and runs the tests.
 
 ## License
 

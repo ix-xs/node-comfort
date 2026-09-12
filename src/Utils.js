@@ -1,325 +1,321 @@
-const logger = require("./Logger");
+"use strict";
 
 /**
- * Miscellaneous async and process helpers.
+ * Everyday helpers: `wait`, `when`, `dontCrash`, and JSON functions that
+ * don't throw. They are also available at the top level (`nc.wait()`).
+ *
+ * @example
+ * await nc.wait("1.5s");
+ * const settings = nc.JSONParse(text, {});
  */
-module.exports = {
-  /**
-   * Waits for a given number of milliseconds.
-   *
-   * @example
-   * await nodeComfort.wait(500); // waits 500 ms
-   *
-   * @param {number} ms - Delay in milliseconds.
-   * @returns {Promise<void>} A promise that resolves after the delay.
-   */
-  wait(ms) {
-    return new Promise((resolve) => setTimeout(resolve, ms));
-  },
 
-  /**
-   * Polls a predicate at a given interval and emits events when it matches or times out.
-   *
-   * The predicate is evaluated every `options.interval` milliseconds (default: 50 ms).
-   * Be careful with the default interval: 50 ms is very frequent polling and can be
-   * unnecessarily CPU‑intensive if your predicate or trigger handlers are heavy.
-   * When `options.max` is `null`, the predicate can match indefinitely (infinite triggers),
-   * so you should choose an interval that makes sense for your use‑case.
-   *
-   * A `when(...)` task is one‑shot: once it has been stopped (manually or via `max`/`timeout`),
-   * calling `.start()` again on the same task will not restart it.
-   *
-   * @param {boolean|Promise<boolean>|(() => boolean|Promise<boolean>)} predicate
-   *        Condition to evaluate at each tick, or a function returning it.
-   * @param {*} [payload={}]
-   *        Value passed to listeners when events are emitted (e.g. an object or message).
-   * @param {object} [options]
-   * @param {number} [options.interval=50]
-   *        Polling interval in milliseconds. Increase this value if your predicate is
-   *        expensive or you expect many triggers without a `max` limit.
-   * @param {number|null} [options.timeout=null]
-   *        Maximum time in milliseconds before emitting a "timeout" event and stopping.
-   *        If `null`, no timeout is applied.
-   * @param {number|null} [options.max=null]
-   *        Maximum number of successful predicate evaluations ("trigger" events) before
-   *        automatically stopping. If `null`, triggers are infinite until `stop()` is called.
-   *
-   * @example
-   * // Basic usage: infinite triggers every 50 ms (default interval) – use with caution.
-   * const task = nodeComfort.when(() => true, { message: "Ok" });
-   *
-   * task
-   *   .on("trigger", (payload) => {
-   *     console.log(payload.message);
-   *     // task.stop(); // stop when you’re done
-   *   })
-   *   .start();
-   *
-   * @example
-   * // Safer usage: limit triggers and/or lower polling frequency.
-   * nodeComfort.when(() => true, { message: "Ok" }, { max: 1, interval: 500 })
-   *   .on("trigger", (payload) => {
-   *     console.log(payload.message);
-   *   })
-   *   .on("timeout", (payload) => {
-   *     console.log("Timed out", payload);
-   *   })
-   *   .start();
-   *
-   * @returns {{
-   *   start: () => any,
-   *   stop: () => any,
-   *   on: <E extends "error"|"trigger"|"timeout">(event: E, handler: E extends "error"
-   *       ? (error: unknown) => void|Promise<void>
-   *       : (payload: any) => void|Promise<void>) => any
-   * }} A small task controller with `start`, `stop` and `on`.
-   */
-  when(predicate, payload = {}, options) {
-    const interval = options?.interval ?? 50;
-    const timeout = options?.timeout ?? null;
-    const max = options?.max ?? null;
+const { AbortError } = require("./errors.js");
+const { types } = require("node:util");
 
-    /** @type {{ trigger: Set<Function>, error: Set<Function>, timeout: Set<Function> }} */
-    const listeners = {
-      trigger: new Set(),
-      error: new Set(),
-      timeout: new Set(),
+/**
+ * Options for `wait()`.
+ * @typedef {object} WaitOptions
+ * @property {AbortSignal} [signal] Cancels the wait; the promise rejects with an `AbortError`.
+ * @property {boolean} [unref] Let the process exit even if the timer is still pending.
+ */
+
+/**
+ * Options for `when()`.
+ * @typedef {object} WhenOptions
+ * @property {number} [interval] Milliseconds between two checks. Defaults to `50`.
+ * @property {number | null} [timeout] Give up after this many milliseconds and emit `"timeout"`.
+ * @property {number | null} [max] Stop after this many triggers.
+ */
+
+/**
+ * The task returned by `when()`. Every method returns the task, so calls chain.
+ * @typedef {object} WhenTask
+ * @property {() => WhenTask} start Starts checking. A stopped task can't be restarted.
+ * @property {() => WhenTask} stop Stops checking and clears the timers.
+ * @property {<E extends "trigger" | "error" | "timeout">(event: E, handler: E extends "error" ? (error: unknown) => void : (payload: any) => void) => WhenTask} on Listens to `"trigger"` (the condition is true), `"error"` (it threw) or `"timeout"`.
+ */
+
+/**
+ * Events you can customize on `dontCrash()`.
+ * @typedef {"error" | "exit" | "sig" | "beforeExit"} DontCrashEvent
+ */
+
+/**
+ * Returned by `dontCrash()`.
+ * @typedef {object} DontCrashController
+ * @property {<E extends DontCrashEvent>(event: E, handler?: E extends "error" ? (error: unknown) => void : E extends "sig" ? (signal: NodeJS.Signals) => void : (code: number) => void) => DontCrashController} on Replaces the handler for an event. Call it without a handler to restore the default one.
+ * @property {() => void} dispose Removes everything `dontCrash()` installed.
+ */
+
+/**
+ * Resolves after a delay, given in milliseconds or as a duration string.
+ *
+ * @example
+ * await nc.wait(500);
+ * await nc.wait("2s");
+ * await nc.wait("1m", { signal: controller.signal });
+ *
+ * @param {number | string} duration Milliseconds, or a string like `"250ms"`, `"2s"`, `"1m30s"`.
+ * @param {WaitOptions} [options]
+ * @returns {Promise<void>}
+ * @throws {AbortError} If the signal is aborted.
+ * @throws {TypeError} If the duration can't be parsed.
+ */
+function wait(duration, options = {}) {
+  const ms = typeof duration === "number" ? duration : require("./Time.js").parseDuration(duration);
+  if (ms === null || !Number.isFinite(ms)) return Promise.reject(new TypeError(`Invalid duration: ${String(duration)}`));
+  const { signal } = options;
+  return new Promise((resolve, reject) => {
+    if (signal?.aborted) return reject(new AbortError(undefined, { cause: signal.reason }));
+    const onAbort = () => {
+      clearTimeout(timer);
+      reject(new AbortError(undefined, { cause: signal?.reason }));
     };
+    const timer = setTimeout(() => {
+      signal?.removeEventListener("abort", onAbort);
+      resolve();
+    }, Math.max(0, ms));
+    if (options.unref) timer.unref();
+    signal?.addEventListener("abort", onAbort, { once: true });
+  });
+}
 
-    let _timer = null;
-    let _timeoutTimer = null;
-    let _stopped = false;
-    let _count = 0;
+/**
+ * Checks a condition at a regular interval and tells you when it's true.
+ * Call `.start()` once your listeners are in place. If you just want to
+ * await a condition, `nc.async.poll()` is simpler.
+ *
+ * @example
+ * nc.when(() => queue.length > 0, { reason: "jobs waiting" }, { interval: 500, max: 1, timeout: 10_000 })
+ *   .on("trigger", (payload) => nc.info(payload.reason))
+ *   .on("timeout", () => nc.warn("Nothing happened in 10s"))
+ *   .start();
+ *
+ * @param {boolean | PromiseLike<boolean> | (() => unknown)} predicate The condition, or a function (sync or async) that returns it.
+ * @param {any} [payload={}] Passed to the `"trigger"` and `"timeout"` listeners.
+ * @param {WhenOptions} [options]
+ * @returns {WhenTask}
+ */
+function when(predicate, payload = {}, options = {}) {
+  const interval = options.interval ?? 50;
+  const timeout = options.timeout ?? null;
+  const max = options.max ?? null;
+  /** @type {Record<"trigger" | "error" | "timeout", Set<Function>>} */
+  const listeners = { trigger: new Set(), error: new Set(), timeout: new Set() };
+  /** @type {NodeJS.Timeout | undefined} */
+  let timer;
+  /** @type {NodeJS.Timeout | undefined} */
+  let timeoutTimer;
+  let stopped = false;
+  let started = false;
+  let count = 0;
 
-    /**
-     * Emits an event to all registered listeners.
-     * Errors in listeners are caught and ignored to avoid breaking the polling loop.
-     *
-     * @param {"trigger"|"error"|"timeout"} event
-     * @param {*} p
-     */
-    function emit(event, p) {
-      for (const fn of listeners[event]) {
-        try {
-          fn(p);
-        } catch {
-          // Best effort: we don't re-throw here to keep the task alive.
-        }
-      }
-    }
-
-    async function evalPredicate() {
-      if (typeof predicate === "function") {
-        return await predicate();
-      }
-      return Boolean(await predicate);
-    }
-
-    async function tick() {
-      if (_stopped) return;
-
+  const emit = (/** @type {"trigger" | "error" | "timeout"} */ event, /** @type {unknown} */ value) => {
+    for (const fn of listeners[event]) {
       try {
-        const ok = await evalPredicate();
-
-        if (ok) {
-          _count++;
-          emit("trigger", payload);
-
-          if (max != null && _count >= max) {
-            _stopInternal();
-            return;
-          }
-        }
-
-        if (!_stopped) {
-          _timer = setTimeout(tick, interval);
-        }
-      } catch (error) {
-        emit("error", error);
-        if (!_stopped) {
-          _timer = setTimeout(tick, interval);
-        }
+        fn(value);
+      } catch {
+        // A failing listener must not stop the task.
       }
     }
-
-    function _stopInternal() {
-      _stopped = true;
-      if (_timer) {
-        clearTimeout(_timer);
-        _timer = null;
+  };
+  const halt = () => {
+    stopped = true;
+    clearTimeout(timer);
+    clearTimeout(timeoutTimer);
+  };
+  const tick = async () => {
+    if (stopped) return;
+    try {
+      const ok = typeof predicate === "function" ? await predicate() : await predicate;
+      if (stopped) return;
+      if (ok) {
+        count++;
+        emit("trigger", payload);
+        if (max !== null && count >= max) return halt();
       }
-      if (_timeoutTimer) {
-        clearTimeout(_timeoutTimer);
-        _timeoutTimer = null;
-      }
+    } catch (error) {
+      emit("error", error);
     }
+    if (!stopped) timer = setTimeout(tick, interval);
+  };
 
-    const controller = {
-      /**
-       * Starts the polling task (one-shot: no effect if it was already stopped).
-       * @returns {typeof controller}
-       */
-      start() {
-        if (_stopped) return controller;
+  /** @type {WhenTask} */
+  const task = {
+    start() {
+      if (stopped || started) return task;
+      started = true;
+      timer = setTimeout(tick, 0);
+      if (timeout !== null) {
+        timeoutTimer = setTimeout(() => {
+          if (stopped) return;
+          emit("timeout", payload);
+          halt();
+        }, timeout);
+      }
+      return task;
+    },
+    stop() {
+      halt();
+      return task;
+    },
+    on(event, handler) {
+      listeners[event]?.add(handler);
+      return task;
+    },
+  };
+  return task;
+}
 
-        if (!_timer) {
-          _timer = setTimeout(tick, 0);
-        }
+/**
+ * Keeps the process alive when something goes wrong. Uncaught exceptions and
+ * unhandled rejections are logged instead of crashing, and `SIGINT`/`SIGTERM`
+ * are logged before a clean exit. Customize any of it with `.on()`.
+ *
+ * Only its own handlers are ever removed; listeners added by your code or by
+ * other libraries are left alone.
+ *
+ * @example
+ * nc.dontCrash()
+ *   .on("error", (error) => sentry.captureException(error))
+ *   .on("sig", async () => {
+ *     await server.close();
+ *     process.exit(0);
+ *   });
+ *
+ * @returns {DontCrashController}
+ */
+function dontCrash() {
+  _dontCrashDispose?.();
+  const logger = require("./Logger.js");
+  /** @type {Array<[string, (...args: any[]) => void]>} */
+  let installed = [];
 
-        if (timeout != null && !_timeoutTimer) {
-          _timeoutTimer = setTimeout(() => {
-            if (_stopped) return;
-            emit("timeout", payload);
-            _stopInternal();
-          }, timeout);
-        }
-
-        return controller;
-      },
-      /**
-       * Stops the polling task and clears all timers.
-       * @returns {typeof controller}
-       */
-      stop() {
-        _stopInternal();
-        return controller;
-      },
-      /**
-       * Registers an event handler.
-       *
-       * @typedef { "error" | "trigger" | "timeout" } EventNames
-       * @typedef {{
-       *   error: (error: unknown) => void|Promise<void>,
-       *   trigger: (payload: any) => void|Promise<void>,
-       *   timeout: (payload: any) => void|Promise<void>,
-       * }} EventHandlers
-       *
-       * @template {EventNames} E
-       * @param {E} event - Event name.
-       * @param {EventHandlers[E]} handler - Handler function.
-       * @returns {typeof controller}
-       */
-      on(event, handler) {
-        listeners[event]?.add(handler);
-        return controller;
-      },
-    };
-
-    return controller;
-  },
-
-  /**
-   * Installs process-level safety nets for errors, exits and signals.
-   *
-   * By default, it:
-   * - logs uncaught exceptions and unhandled rejections,
-   * - logs process exit codes,
-   * - logs SIGINT/SIGTERM/SIGQUIT and exits with code 0.
-   *
-   * You can override each handler with `.on(event, handler)`.
-   *
-   * @example
-   * // Use defaults:
-   * nodeComfort.dontCrash();
-   *
-   * @example
-   * // Custom error handler:
-   * nodeComfort.dontCrash().on("error", (err) => {
-   *   console.error("Global error:", err);
-   *   process.exit(1);
-   * });
-   *
-   * @returns {{
-   *   on: <E extends "error"|"exit"|"sig"|"beforeExit">(event: E, handler?: (
-   *     E extends "error" ? (error: Error|unknown) => void|Promise<void> :
-   *     E extends "exit" ? (code: number) => void|Promise<void> :
-   *     E extends "sig" ? (signal: "SIGINT"|"SIGTERM"|"SIGQUIT") => void|Promise<void> :
-   *     (code: number) => void|Promise<void>
-   *   )) => any
-   * }} A small controller to configure global handlers.
-   */
-  dontCrash() {
-    const defaults = {
-      error: (error) => {
-        logger.log(
-          `<% red [@ix-xs/node-comfort] Process Error %>\n<% gray ${error.stack ?? error} %>`,
-        );
-      },
-      exit: (code) => {
-        logger.log(
-          `<% yellow [@ix-xs/node-comfort] Process Exit %>\n→ Code: <% gray ${code} %>`,
-        );
-      },
-      sig: (signal) => {
-        logger.log(
-          `<% yellow [@ix-xs/node-comfort] Process SIG* %>\n→ Signal: <% gray ${signal} %>`,
-        );
-        process.exit(0);
-      },
-      beforeExit: (code) => {},
-    };
-
-    const controller = {
-      /**
-       * Registers global process handlers.
-       *
-       * @template { "error" | "exit" | "sig" | "beforeExit" } E
-       * @param {E} event - Event name.
-       * @param {{
-       *   error: (error: Error | unknown) => void | Promise<void>,
-       *   exit: (code: number) => void | Promise<void>,
-       *   sig: (signal: "SIGINT" | "SIGTERM" | "SIGQUIT") => void | Promise<void>,
-       *   beforeExit: (code: number) => void|Promise<void>
-       * }[E]} [handler] - Custom handler, or use the default when omitted.
-       * @returns {typeof controller}
-       */
-      on(event, handler) {
-        if (event === "error") {
-          process.removeAllListeners("uncaughtException");
-          process.removeAllListeners("unhandledRejection");
-          const fn = handler ?? defaults.error;
-          process.on("uncaughtException", fn);
-          process.on("unhandledRejection", fn);
-        } else if (event === "exit") {
-          process.removeAllListeners("exit");
-          process.on("exit", handler ?? defaults.exit);
-        } else if (event === "sig") {
-          for (const signal of ["SIGINT", "SIGTERM", "SIGQUIT"]) {
-            process.removeAllListeners(signal);
-            process.on(signal, handler ?? defaults.sig);
-          }
-        } else if (event === "beforeExit") {
-          process.removeAllListeners("beforeExit");
-          process.on("beforeExit", handler ?? defaults.beforeExit);
-        }
-
-        return controller;
-      },
-    };
-
-    // Install default handlers for error, exit, sig
-    controller.on("error").on("exit").on("sig");
-
-    return controller;
-  },
+  const defaults = {
+    error: (/** @type {unknown} */ error) => logger.error("[@ix-xs/node-comfort] Uncaught error:", error),
+    exit: (/** @type {number} */ code) => logger.log(`<% gray [@ix-xs/node-comfort] Process exit with code ${code} %>`),
+    sig: (/** @type {NodeJS.Signals} */ signal) => {
+      logger.warn(`[@ix-xs/node-comfort] Received ${signal}, exiting`);
+      process.exit(0);
+    },
+    beforeExit: () => {},
+  };
 
   /**
-   * Safely stringifies a value to pretty-printed JSON (4 spaces indent).
-   *
-   * @param {*} value - Value to stringify.
-   * @returns {string} JSON string representation.
+   * @param {string} event
+   * @param {(...args: any[]) => void} handler
    */
-  JSONString(value) {
-    return JSON.stringify(value, null, 4);
-  },
+  const listen = (event, handler) => {
+    try {
+      process.on(/** @type {any} */ (event), handler);
+      installed.push([event, handler]);
+    } catch {
+      // Signal not supported on this platform (for example SIGQUIT on Windows).
+    }
+  };
+  /** @param {string[]} events */
+  const unlisten = (events) => {
+    installed = installed.filter(([event, handler]) => {
+      if (!events.includes(event)) return true;
+      process.off(/** @type {any} */ (event), handler);
+      return false;
+    });
+  };
 
-  /**
-   * Parses a JSON string.
-   *
-   * @param {string} value - JSON string to parse.
-   * @returns {*} Parsed value.
-   */
-  JSONParse(value) {
-    return JSON.parse(value);
-  },
+  /** @type {DontCrashController} */
+  const controller = {
+    on(event, handler) {
+      if (event === "error") {
+        unlisten(["uncaughtException", "unhandledRejection"]);
+        const fn = /** @type {(error: unknown) => void} */ (handler ?? defaults.error);
+        listen("uncaughtException", fn);
+        listen("unhandledRejection", fn);
+      } else if (event === "exit") {
+        unlisten(["exit"]);
+        listen("exit", /** @type {(code: number) => void} */ (handler ?? defaults.exit));
+      } else if (event === "sig") {
+        const signals = ["SIGINT", "SIGTERM", "SIGQUIT"];
+        unlisten(signals);
+        for (const signal of signals) listen(signal, /** @type {(signal: NodeJS.Signals) => void} */ (handler ?? defaults.sig));
+      } else if (event === "beforeExit") {
+        unlisten(["beforeExit"]);
+        listen("beforeExit", /** @type {(code: number) => void} */ (handler ?? defaults.beforeExit));
+      }
+      return controller;
+    },
+    dispose() {
+      unlisten(installed.map(([event]) => event));
+      if (_dontCrashDispose === controller.dispose) _dontCrashDispose = undefined;
+    },
+  };
+  _dontCrashDispose = controller.dispose;
+  controller.on("error").on("exit").on("sig");
+  return controller;
+}
+
+/** @type {(() => void) | undefined} */
+let _dontCrashDispose;
+
+/**
+ * `JSON.stringify` that never throws. Circular references become
+ * `"[Circular]"`, bigints become strings, Maps become objects and Sets become
+ * arrays.
+ *
+ * @example
+ * nc.JSONString({ a: 1 });                          // '{\n    "a": 1\n}'
+ * nc.JSONString({ id: 10n, tags: new Set(["x"]) }, 0); // '{"id":"10","tags":["x"]}'
+ *
+ * @param {unknown} value
+ * @param {number} [spaces=4] Indentation. Use `0` for a single line.
+ * @returns {string} The JSON text, or `"undefined"` for values JSON can't represent.
+ */
+function JSONString(value, spaces = 4) {
+  /** @type {Array<[holder: object, original: object]>} ancestors of the value being serialized */
+  const stack = [];
+  const text = JSON.stringify(
+    value,
+    /** @this {any} */ function(_, raw) {
+      if (typeof raw === "bigint") return raw.toString();
+      if (raw === null || typeof raw !== "object") return raw;
+      while (stack.length && stack[stack.length - 1][0] !== this) stack.pop();
+      if (stack.some(([, original]) => original === raw)) return "[Circular]";
+      const v = types.isMap(raw) ? Object.fromEntries(raw) : types.isSet(raw) ? [...raw] : raw;
+      stack.push([v, raw]);
+      return v;
+    },
+    spaces,
+  );
+  return text ?? String(text);
+}
+
+/**
+ * `JSON.parse` with an optional fallback. With a fallback, invalid input
+ * returns it instead of throwing.
+ *
+ * @example
+ * nc.JSONParse('{"a":1}');    // { a: 1 }
+ * nc.JSONParse("oops", null); // null
+ * nc.JSONParse("oops");       // throws SyntaxError
+ *
+ * @template [T=any]
+ * @param {string} text
+ * @param {T} [fallback] Returned when `text` isn't valid JSON.
+ * @returns {T}
+ * @throws {SyntaxError} If `text` is invalid and there's no fallback.
+ */
+function JSONParse(text, fallback) {
+  if (arguments.length < 2) return JSON.parse(text);
+  try {
+    return JSON.parse(text);
+  } catch {
+    return /** @type {T} */ (fallback);
+  }
+}
+
+module.exports = {
+  wait,
+  when,
+  dontCrash,
+  JSONString,
+  JSONParse,
 };

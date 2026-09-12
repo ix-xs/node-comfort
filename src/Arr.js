@@ -1,433 +1,901 @@
+"use strict";
+
 /**
- * Array utilities.
+ * Array helpers. None of them mutate what you pass in, and item types carry
+ * through (`chunk(numbers, 2)` is a `number[][]`). Many take an iteratee:
+ * a property name, which your editor completes, or a function.
  *
- * Chunking, grouping, uniqueness, set operations, shuffling, flattening and
- * more • expressed as small pure functions that never mutate their input.
- *
- * Many methods accept an `iteratee`: either a property key (string) or a
- * function mapping an item to a value.
+ * @example
+ * arr.chunk([1, 2, 3, 4, 5], 2);          // [[1, 2], [3, 4], [5]]
+ * arr.groupBy(users, "role");             // { admin: [...], user: [...] }
+ * arr.sortBy(users, ["lastName", "age"]);
  */
 
 /**
- * Turns a key or function into a value-extracting function.
- * @private
- * @param {string|((item: any) => any)} [iteratee]
- * @returns {(item: any) => any}
+ * How to get a value out of an item: a property name, or a function
+ * `(item, index) => value`.
+ *
+ * @template T
+ * @typedef {(T extends object ? keyof T & (string | number) : never) | ((item: T, index: number) => unknown)} Iteratee
  */
-const _iteratee = (iteratee) => {
-  if (typeof iteratee === "function") return iteratee;
-  if (typeof iteratee === "string") return (item) => (item == null ? undefined : item[iteratee]);
+
+/**
+ * A sort key for `sortBy()`: an iteratee, or `[iteratee, "asc" | "desc"]`
+ * to give that key its own direction.
+ *
+ * @template T
+ * @typedef {Iteratee<T> | [Iteratee<T>, "asc" | "desc"]} SortKey
+ */
+
+/**
+ * Options for `sortBy()`.
+ * @typedef {object} SortByOptions
+ * @property {"asc"|"desc"} [order] Direction for keys that don't set their own. Defaults to `"asc"`.
+ * @property {boolean} [natural] Sort text like a person would: ignore case, respect accents, `"item2"` before `"item10"`.
+ * @property {string} [locale] Language used by `natural`. Defaults to the system's.
+ */
+
+/**
+ * A page returned by `paginate()`.
+ * @template T
+ * @typedef {object} Page
+ * @property {T[]} items The items on this page.
+ * @property {number} page The page number, starting at 1.
+ * @property {number} perPage
+ * @property {number} total Total number of items.
+ * @property {number} pages Number of pages, at least 1.
+ * @property {boolean} hasPrev
+ * @property {boolean} hasNext
+ */
+
+/**
+ * @param {unknown} iteratee
+ * @returns {(item: any, index: number) => any}
+ */
+const _fn = (iteratee) => {
+  if (typeof iteratee === "function") return /** @type {(item: any, index: number) => any} */ (iteratee);
+  if (typeof iteratee === "string" || typeof iteratee === "number" || typeof iteratee === "symbol") {
+    return (item) => (item == null ? undefined : item[iteratee]);
+  }
   return (item) => item;
 };
 
+/**
+ * @param {unknown} key
+ * @returns {PropertyKey}
+ */
+const _key = (key) => (typeof key === "symbol" || typeof key === "number" ? key : String(key));
+
+/**
+ * Splits an array into groups of `size` items. The last group can be shorter.
+ *
+ * @example
+ * arr.chunk([1, 2, 3, 4, 5], 2); // [[1, 2], [3, 4], [5]]
+ * arr.chunk(emails, 100).forEach(sendBatch);
+ *
+ * @template T
+ * @param {readonly T[]} array
+ * @param {number} size
+ * @returns {T[][]}
+ */
+function chunk(array, size) {
+  const n = Math.floor(size);
+  if (!(n >= 1)) return [];
+  /** @type {T[][]} */
+  const out = [];
+  for (let i = 0; i < array.length; i += n) out.push(array.slice(i, i + n));
+  return out;
+}
+
+/**
+ * Sliding windows of `size` items, moving by `step`. Good for moving
+ * averages and comparing neighbours.
+ *
+ * @example
+ * arr.windows([1, 2, 3, 4], 2);       // [[1, 2], [2, 3], [3, 4]]
+ * arr.windows([1, 2, 3, 4, 5], 3, 2); // [[1, 2, 3], [3, 4, 5]]
+ *
+ * @template T
+ * @param {readonly T[]} array
+ * @param {number} size
+ * @param {number} [step=1]
+ * @returns {T[][]}
+ */
+function windows(array, size, step = 1) {
+  const n = Math.floor(size);
+  const s = Math.max(1, Math.floor(step));
+  /** @type {T[][]} */
+  const out = [];
+  if (!(n >= 1)) return out;
+  for (let i = 0; i + n <= array.length; i += s) out.push(array.slice(i, i + n));
+  return out;
+}
+
+/**
+ * The first item, or the first `n` items.
+ *
+ * @example
+ * arr.first([1, 2, 3]);    // 1
+ * arr.first([1, 2, 3], 2); // [1, 2]
+ *
+ * @template T
+ * @overload
+ * @param {readonly T[]} array
+ * @returns {T | undefined}
+ */
+/**
+ * The first `n` items.
+ *
+ * @template T
+ * @overload
+ * @param {readonly T[]} array
+ * @param {number} n
+ * @returns {T[]}
+ */
+/**
+ * @template T
+ * @param {readonly T[]} array
+ * @param {number} [n]
+ * @returns {T | T[] | undefined}
+ */
+function first(array, n) {
+  if (n === undefined) return array[0];
+  return array.slice(0, Math.max(0, n));
+}
+
+/**
+ * The last item, or the last `n` items.
+ *
+ * @example
+ * arr.last([1, 2, 3]);    // 3
+ * arr.last([1, 2, 3], 2); // [2, 3]
+ *
+ * @template T
+ * @overload
+ * @param {readonly T[]} array
+ * @returns {T | undefined}
+ */
+/**
+ * The last `n` items.
+ *
+ * @template T
+ * @overload
+ * @param {readonly T[]} array
+ * @param {number} n
+ * @returns {T[]}
+ */
+/**
+ * @template T
+ * @param {readonly T[]} array
+ * @param {number} [n]
+ * @returns {T | T[] | undefined}
+ */
+function last(array, n) {
+  if (n === undefined) return array[array.length - 1];
+  return n <= 0 ? [] : array.slice(-n);
+}
+
+/**
+ * One page of an array, with what you need to draw pagination controls.
+ * Pages start at 1; an out-of-range page is brought back into range.
+ *
+ * @example
+ * arr.paginate(products, 2, 20);
+ * // { items: [...], page: 2, perPage: 20, total: 95, pages: 5, hasPrev: true, hasNext: true }
+ *
+ * @template T
+ * @param {readonly T[]} array
+ * @param {number} [page=1]
+ * @param {number} [perPage=20]
+ * @returns {Page<T>}
+ */
+function paginate(array, page = 1, perPage = 20) {
+  const size = Math.max(1, Math.floor(perPage));
+  const pages = Math.max(1, Math.ceil(array.length / size));
+  const current = Math.min(Math.max(1, Math.floor(page) || 1), pages);
+  const start = (current - 1) * size;
+  return {
+    items: array.slice(start, start + size),
+    page: current,
+    perPage: size,
+    total: array.length,
+    pages,
+    hasPrev: current > 1,
+    hasNext: current < pages,
+  };
+}
+
+/**
+ * Removes duplicates. With an iteratee, items that give the same value are
+ * duplicates; the first one is kept.
+ *
+ * @example
+ * arr.unique([1, 1, 2, 3]);                  // [1, 2, 3]
+ * arr.unique(users, "email");                // one user per email
+ * arr.unique(tags, (t) => t.toLowerCase());
+ *
+ * @template T
+ * @param {readonly T[]} array
+ * @param {Iteratee<T>} [iteratee]
+ * @returns {T[]}
+ */
+function unique(array, iteratee) {
+  if (iteratee === undefined) return [...new Set(array)];
+  const fn = _fn(iteratee);
+  const seen = new Set();
+  return array.filter((item, i) => {
+    const key = fn(item, i);
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
+}
+
+/**
+ * Groups items by key.
+ *
+ * @example
+ * arr.groupBy(users, "role"); // { admin: [...], user: [...] }
+ * arr.groupBy([1, 2, 3, 4], (n) => (n % 2 ? "odd" : "even")); // { odd: [1, 3], even: [2, 4] }
+ *
+ * @template T
+ * @param {readonly T[]} array
+ * @param {Iteratee<T>} iteratee
+ * @returns {Record<string, T[]>}
+ */
+function groupBy(array, iteratee) {
+  const fn = _fn(iteratee);
+  /** @type {Record<PropertyKey, T[]>} */
+  const out = {};
+  array.forEach((item, i) => {
+    (out[_key(fn(item, i))] ??= []).push(item);
+  });
+  return out;
+}
+
+/**
+ * Indexes items by key. If two items share a key, the last one wins.
+ *
+ * @example
+ * const byId = arr.keyBy(users, "id");
+ * byId[42]; // user 42
+ *
+ * @template T
+ * @param {readonly T[]} array
+ * @param {Iteratee<T>} iteratee
+ * @returns {Record<string, T>}
+ */
+function keyBy(array, iteratee) {
+  const fn = _fn(iteratee);
+  /** @type {Record<PropertyKey, T>} */
+  const out = {};
+  array.forEach((item, i) => {
+    out[_key(fn(item, i))] = item;
+  });
+  return out;
+}
+
+/**
+ * Builds a `Map` from an array. Unlike `keyBy()`, keys keep their type.
+ *
+ * @example
+ * arr.toMap(users, "id");                 // Map<number, User>
+ * arr.toMap(users, "id", (u) => u.name);  // Map<number, string>
+ *
+ * @template T
+ * @template [V=T]
+ * @param {readonly T[]} array
+ * @param {Iteratee<T>} key
+ * @param {(item: T, index: number) => V} [value] The value to store. Defaults to the item.
+ * @returns {Map<any, V>}
+ */
+function toMap(array, key, value) {
+  const keyFn = _fn(key);
+  /** @type {Map<any, V>} */
+  const map = new Map();
+  array.forEach((item, i) => map.set(keyFn(item, i), value ? value(item, i) : /** @type {V} */ (/** @type {unknown} */ (item))));
+  return map;
+}
+
+/**
+ * Counts items per key.
+ *
+ * @example
+ * arr.countBy(["a", "b", "a"]);  // { a: 2, b: 1 }
+ * arr.countBy(users, "country"); // { FR: 12, US: 7 }
+ *
+ * @template T
+ * @param {readonly T[]} array
+ * @param {Iteratee<T>} [iteratee] Defaults to the item itself.
+ * @returns {Record<string, number>}
+ */
+function countBy(array, iteratee) {
+  const fn = _fn(iteratee);
+  /** @type {Record<PropertyKey, number>} */
+  const out = {};
+  array.forEach((item, i) => {
+    const key = _key(fn(item, i));
+    out[key] = (out[key] ?? 0) + 1;
+  });
+  return out;
+}
+
+/**
+ * Counts the items that pass a test.
+ *
+ * @example
+ * arr.count(users, (u) => u.active);
+ *
+ * @template T
+ * @param {readonly T[]} array
+ * @param {(item: T, index: number) => unknown} predicate
+ * @returns {number}
+ */
+function count(array, predicate) {
+  let total = 0;
+  array.forEach((item, i) => {
+    if (predicate(item, i)) total++;
+  });
+  return total;
+}
+
+/**
+ * Splits items into those that pass a test and those that don't.
+ *
+ * @example
+ * const [adults, minors] = arr.partition(people, (p) => p.age >= 18);
+ *
+ * @template T
+ * @param {readonly T[]} array
+ * @param {(item: T, index: number) => unknown} predicate
+ * @returns {[T[], T[]]}
+ */
+function partition(array, predicate) {
+  /** @type {T[]} */
+  const pass = [];
+  /** @type {T[]} */
+  const fail = [];
+  array.forEach((item, i) => (predicate(item, i) ? pass : fail).push(item));
+  return [pass, fail];
+}
+
+/**
+ * Takes one property from every item.
+ *
+ * @example
+ * arr.pluck(users, "email"); // ["ada@x.io", "bob@x.io"]
+ *
+ * @template T
+ * @template {keyof T} K
+ * @param {readonly T[]} array
+ * @param {K} key
+ * @returns {Array<T[K]>}
+ */
+function pluck(array, key) {
+  return array.map((item) => (item == null ? /** @type {T[K]} */ (/** @type {unknown} */ (undefined)) : item[key]));
+}
+
+/**
+ * Sorts by one or more keys, each with its own direction if you like.
+ * The sort is stable and `null`/`undefined` always go last.
+ *
+ * @example
+ * arr.sortBy(users, "age");                         // youngest first
+ * arr.sortBy(users, "age", "desc");                 // oldest first
+ * arr.sortBy(users, [["age", "desc"], "lastName"]);
+ * arr.sortBy(files, "name", { natural: true });     // "file2" before "file10"
+ *
+ * @template T
+ * @param {readonly T[]} array
+ * @param {SortKey<T> | Array<SortKey<T>>} keys
+ * @param {"asc" | "desc" | SortByOptions} [order="asc"]
+ * @returns {T[]}
+ */
+function sortBy(array, keys, order = "asc") {
+  const options = typeof order === "string" ? { order } : order;
+  const defaultDir = options.order === "desc" ? -1 : 1;
+  const collator = options.natural ? new Intl.Collator(options.locale, { numeric: true, sensitivity: "base" }) : null;
+  const isTuple = (/** @type {unknown} */ k) => Array.isArray(k) && k.length === 2 && (k[1] === "asc" || k[1] === "desc");
+  const list = Array.isArray(keys) && !isTuple(keys) ? keys : [keys];
+  const comparators = list.map((k) => {
+    const [iteratee, dir] = isTuple(k) ? /** @type {[unknown, string]} */ (k) : [k, undefined];
+    return { fn: _fn(iteratee), dir: dir === undefined ? defaultDir : dir === "desc" ? -1 : 1 };
+  });
+  return array
+    .map((item, index) => ({ item, index }))
+    .sort((a, b) => {
+      for (const { fn, dir } of comparators) {
+        const va = fn(a.item, a.index);
+        const vb = fn(b.item, b.index);
+        const aNil = va === null || va === undefined;
+        const bNil = vb === null || vb === undefined;
+        if (aNil || bNil) {
+          if (aNil && bNil) continue;
+          return aNil ? 1 : -1;
+        }
+        let result = 0;
+        if (collator && typeof va === "string" && typeof vb === "string") result = collator.compare(va, vb);
+        else if (va < vb) result = -1;
+        else if (va > vb) result = 1;
+        if (result) return result * dir;
+      }
+      return a.index - b.index;
+    })
+    .map((entry) => entry.item);
+}
+
+/**
+ * A shuffled copy (Fisher-Yates).
+ *
+ * @template T
+ * @param {readonly T[]} array
+ * @returns {T[]}
+ */
+function shuffle(array) {
+  const out = [...array];
+  for (let i = out.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [out[i], out[j]] = [out[j], out[i]];
+  }
+  return out;
+}
+
+/**
+ * One random item, or `undefined` if the array is empty.
+ *
+ * @template T
+ * @param {readonly T[]} array
+ * @returns {T | undefined}
+ */
+function sample(array) {
+  return array.length ? array[Math.floor(Math.random() * array.length)] : undefined;
+}
+
+/**
+ * `n` random items, never the same one twice.
+ *
+ * @example
+ * arr.sampleSize(players, 3);
+ *
+ * @template T
+ * @param {readonly T[]} array
+ * @param {number} n
+ * @returns {T[]}
+ */
+function sampleSize(array, n) {
+  return shuffle(array).slice(0, Math.max(0, n));
+}
+
+/**
+ * Rotates items. Positive `n` moves items from the start to the end,
+ * negative `n` the other way.
+ *
+ * @example
+ * arr.rotate([1, 2, 3, 4], 1);  // [2, 3, 4, 1]
+ * arr.rotate([1, 2, 3, 4], -1); // [4, 1, 2, 3]
+ *
+ * @template T
+ * @param {readonly T[]} array
+ * @param {number} [n=1]
+ * @returns {T[]}
+ */
+function rotate(array, n = 1) {
+  if (!array.length) return [];
+  const k = ((Math.trunc(n) % array.length) + array.length) % array.length;
+  return [...array.slice(k), ...array.slice(0, k)];
+}
+
+/**
+ * Moves one item to another position. Negative indexes count from the end.
+ *
+ * @example
+ * arr.move(["a", "b", "c"], 0, 2); // ["b", "c", "a"]
+ *
+ * @template T
+ * @param {readonly T[]} array
+ * @param {number} from
+ * @param {number} to
+ * @returns {T[]}
+ */
+function move(array, from, to) {
+  const out = [...array];
+  const len = out.length;
+  const src = from < 0 ? len + from : from;
+  if (src < 0 || src >= len) return out;
+  const [item] = out.splice(src, 1);
+  out.splice(to < 0 ? len + to : to, 0, item);
+  return out;
+}
+
+/**
+ * Swaps two items.
+ *
+ * @example
+ * arr.swap(["a", "b", "c"], 0, 2); // ["c", "b", "a"]
+ *
+ * @template T
+ * @param {readonly T[]} array
+ * @param {number} i
+ * @param {number} j
+ * @returns {T[]}
+ */
+function swap(array, i, j) {
+  const out = [...array];
+  if (i in out && j in out) [out[i], out[j]] = [out[j], out[i]];
+  return out;
+}
+
+/**
+ * Items of `array` that appear in none of the others.
+ *
+ * @example
+ * arr.difference([1, 2, 3, 4], [2, 4]); // [1, 3]
+ *
+ * @template T
+ * @param {readonly T[]} array
+ * @param {...ReadonlyArray<T>} others
+ * @returns {T[]}
+ */
+function difference(array, ...others) {
+  const exclude = new Set(others.flat());
+  return array.filter((item) => !exclude.has(item));
+}
+
+/**
+ * Items present in every array, without duplicates.
+ *
+ * @example
+ * arr.intersection([1, 2, 3], [2, 3, 4], [3, 2]); // [2, 3]
+ *
+ * @template T
+ * @param {...ReadonlyArray<T>} arrays
+ * @returns {T[]}
+ */
+function intersection(...arrays) {
+  if (!arrays.length) return [];
+  const [head, ...rest] = arrays;
+  const sets = rest.map((a) => new Set(a));
+  return [...new Set(head)].filter((item) => sets.every((set) => set.has(item)));
+}
+
+/**
+ * Items present in any array, without duplicates.
+ *
+ * @example
+ * arr.union([1, 2], [2, 3], [3, 4]); // [1, 2, 3, 4]
+ *
+ * @template T
+ * @param {...ReadonlyArray<T>} arrays
+ * @returns {T[]}
+ */
+function union(...arrays) {
+  return [...new Set(arrays.flat())];
+}
+
+/**
+ * A copy without the given values. `NaN` works too.
+ *
+ * @example
+ * arr.without([1, 2, 3, 2], 2); // [1, 3]
+ *
+ * @template T
+ * @param {readonly T[]} array
+ * @param {...T} values
+ * @returns {T[]}
+ */
+function without(array, ...values) {
+  const exclude = new Set(values);
+  return array.filter((item) => !exclude.has(item));
+}
+
+/**
+ * A copy without the items that pass the test.
+ *
+ * @example
+ * arr.remove([1, 2, 3, 4], (n) => n % 2 === 0); // [1, 3]
+ *
+ * @template T
+ * @param {readonly T[]} array
+ * @param {(item: T, index: number) => unknown} predicate
+ * @returns {T[]}
+ */
+function remove(array, predicate) {
+  return array.filter((item, i) => !predicate(item, i));
+}
+
+/**
+ * Removes falsy values (`false`, `null`, `undefined`, `0`, `""`, `NaN`).
+ *
+ * @example
+ * arr.compact([0, 1, false, 2, "", 3, null]); // [1, 2, 3]
+ *
+ * @template T
+ * @param {readonly T[]} array
+ * @returns {Array<Exclude<T, false | 0 | 0n | "" | null | undefined>>}
+ */
+function compact(array) {
+  return /** @type {any} */ (array.filter(Boolean));
+}
+
+/**
+ * Adds the item if it's missing, removes it if it's there. Handy for
+ * multi-select state.
+ *
+ * @example
+ * arr.toggle(["a", "b"], "b"); // ["a"]
+ * arr.toggle(["a"], "b");      // ["a", "b"]
+ *
+ * @template T
+ * @param {readonly T[]} array
+ * @param {T} item
+ * @returns {T[]}
+ */
+function toggle(array, item) {
+  return array.includes(item) ? array.filter((x) => x !== item) : [...array, item];
+}
+
+/**
+ * Replaces the item with the same identity, or appends it if there's none.
+ *
+ * @example
+ * arr.upsert(users, { id: 2, name: "Bob" }, "id");
+ *
+ * @template T
+ * @param {readonly T[]} array
+ * @param {T} item
+ * @param {Iteratee<T>} identity What makes two items "the same", like `"id"`.
+ * @returns {T[]}
+ */
+function upsert(array, item, identity) {
+  const fn = _fn(identity);
+  const id = fn(item, -1);
+  const index = array.findIndex((x, i) => fn(x, i) === id);
+  if (index === -1) return [...array, item];
+  const out = [...array];
+  out[index] = item;
+  return out;
+}
+
+/**
+ * Inserts items at an index. Negative indexes count from the end.
+ *
+ * @example
+ * arr.insert(["a", "d"], 1, "b", "c"); // ["a", "b", "c", "d"]
+ *
+ * @template T
+ * @param {readonly T[]} array
+ * @param {number} index
+ * @param {...T} items
+ * @returns {T[]}
+ */
+function insert(array, index, ...items) {
+  const out = [...array];
+  out.splice(index, 0, ...items);
+  return out;
+}
+
+/**
+ * Flattens nested arrays, one level by default.
+ *
+ * @example
+ * arr.flatten([1, [2, [3, [4]]]]);           // [1, 2, [3, [4]]]
+ * arr.flatten([1, [2, [3, [4]]]], Infinity); // [1, 2, 3, 4]
+ *
+ * @template T
+ * @template {number} [D=1]
+ * @param {readonly T[]} array
+ * @param {D} [depth]
+ * @returns {FlatArray<T[], D>[]}
+ */
+function flatten(array, depth) {
+  return /** @type {any} */ (array.flat(depth ?? 1));
+}
+
+/**
+ * Pairs items by position. Shorter arrays leave `undefined` holes.
+ *
+ * @example
+ * arr.zip(["a", "b"], [1, 2]); // [["a", 1], ["b", 2]]
+ *
+ * @template T
+ * @param {...ReadonlyArray<T>} arrays
+ * @returns {Array<Array<T | undefined>>}
+ */
+function zip(...arrays) {
+  const size = Math.max(0, ...arrays.map((a) => a.length));
+  return Array.from({ length: size }, (_, i) => arrays.map((a) => a[i]));
+}
+
+/**
+ * The opposite of `zip()`: rows become columns.
+ *
+ * @example
+ * arr.unzip([["a", 1], ["b", 2]]); // [["a", "b"], [1, 2]]
+ *
+ * @template T
+ * @param {ReadonlyArray<ReadonlyArray<T>>} tuples
+ * @returns {Array<Array<T | undefined>>}
+ */
+function unzip(tuples) {
+  return zip(...tuples);
+}
+
+/**
+ * Takes items from each array in turn, then appends the rest.
+ *
+ * @example
+ * arr.interleave([1, 3, 5], [2, 4]); // [1, 2, 3, 4, 5]
+ *
+ * @template T
+ * @param {...ReadonlyArray<T>} arrays
+ * @returns {T[]}
+ */
+function interleave(...arrays) {
+  /** @type {T[]} */
+  const out = [];
+  const size = Math.max(0, ...arrays.map((a) => a.length));
+  for (let i = 0; i < size; i++) for (const a of arrays) if (i < a.length) out.push(a[i]);
+  return out;
+}
+
+/**
+ * Every combination of one item from each array.
+ *
+ * @example
+ * arr.cartesian(["S", "M"], ["red", "blue"]);
+ * // [["S", "red"], ["S", "blue"], ["M", "red"], ["M", "blue"]]
+ *
+ * @template T
+ * @param {...ReadonlyArray<T>} arrays
+ * @returns {T[][]}
+ */
+function cartesian(...arrays) {
+  if (!arrays.length) return [];
+  return arrays.reduce((acc, list) => acc.flatMap((combo) => list.map((item) => [...combo, item])), /** @type {T[][]} */ ([[]]));
+}
+
+/**
+ * An array of `n` items, from a value or a function of the index.
+ *
+ * @example
+ * arr.times(3, "x");          // ["x", "x", "x"]
+ * arr.times(3, (i) => i * 2); // [0, 2, 4]
+ *
+ * @template T
+ * @param {number} n
+ * @param {T | ((index: number) => T)} [value]
+ * @returns {T[]}
+ */
+function times(n, value) {
+  const size = Math.max(0, Math.floor(n));
+  const fn = typeof value === "function" ? /** @type {(index: number) => T} */ (value) : () => /** @type {T} */ (value);
+  return Array.from({ length: size }, (_, i) => fn(i));
+}
+
+/**
+ * Adds up a number from each item. Non-numbers count as 0.
+ *
+ * @example
+ * arr.sumBy(cart, "price");
+ * arr.sumBy(cart, (item) => item.price * item.quantity);
+ *
+ * @template T
+ * @param {readonly T[]} array
+ * @param {Iteratee<T>} [iteratee]
+ * @returns {number}
+ */
+function sumBy(array, iteratee) {
+  const fn = _fn(iteratee);
+  return array.reduce((acc, item, i) => acc + (Number(fn(item, i)) || 0), 0);
+}
+
+/**
+ * The average of a number from each item, or `0` for an empty array.
+ *
+ * @example
+ * arr.averageBy(reviews, "rating"); // 4.3
+ *
+ * @template T
+ * @param {readonly T[]} array
+ * @param {Iteratee<T>} [iteratee]
+ * @returns {number}
+ */
+function averageBy(array, iteratee) {
+  return array.length ? sumBy(array, iteratee) / array.length : 0;
+}
+
+/**
+ * The item with the highest value.
+ *
+ * @example
+ * arr.maxBy(players, "score");
+ *
+ * @template T
+ * @param {readonly T[]} array
+ * @param {Iteratee<T>} [iteratee]
+ * @returns {T | undefined}
+ */
+function maxBy(array, iteratee) {
+  const fn = _fn(iteratee);
+  /** @type {T | undefined} */
+  let best;
+  /** @type {any} */
+  let bestValue;
+  array.forEach((item, i) => {
+    const v = fn(item, i);
+    if (v !== null && v !== undefined && (bestValue === undefined || v > bestValue)) {
+      bestValue = v;
+      best = item;
+    }
+  });
+  return best;
+}
+
+/**
+ * The item with the lowest value.
+ *
+ * @example
+ * arr.minBy(products, "price");
+ *
+ * @template T
+ * @param {readonly T[]} array
+ * @param {Iteratee<T>} [iteratee]
+ * @returns {T | undefined}
+ */
+function minBy(array, iteratee) {
+  const fn = _fn(iteratee);
+  /** @type {T | undefined} */
+  let best;
+  /** @type {any} */
+  let bestValue;
+  array.forEach((item, i) => {
+    const v = fn(item, i);
+    if (v !== null && v !== undefined && (bestValue === undefined || v < bestValue)) {
+      bestValue = v;
+      best = item;
+    }
+  });
+  return best;
+}
+
 module.exports = {
-  /**
-   * Splits an array into chunks of a given size.
-   *
-   * @example
-   * nodeComfort.arr.chunk([1, 2, 3, 4, 5], 2); // [[1, 2], [3, 4], [5]]
-   *
-   * @param {any[]} array - Source array.
-   * @param {number} size - Chunk size (must be >= 1).
-   * @returns {any[][]} The chunked array.
-   */
-  chunk(array, size) {
-    if (size < 1) return [];
-    const result = [];
-    for (let i = 0; i < array.length; i += size) {
-      result.push(array.slice(i, i + size));
-    }
-    return result;
-  },
-
-  /**
-   * Returns a new array with duplicate values removed.
-   *
-   * Pass an `iteratee` to de-duplicate by a derived key.
-   *
-   * @example
-   * nodeComfort.arr.unique([1, 1, 2, 3]);                       // [1, 2, 3]
-   * nodeComfort.arr.unique([{ id: 1 }, { id: 1 }], "id");       // [{ id: 1 }]
-   *
-   * @param {any[]} array - Source array.
-   * @param {string|((item: any) => any)} [iteratee] - Key or function to compare by.
-   * @returns {any[]} The de-duplicated array.
-   */
-  unique(array, iteratee) {
-    if (!iteratee) return [...new Set(array)];
-    const fn = _iteratee(iteratee);
-    const seen = new Set();
-    const result = [];
-    for (const item of array) {
-      const key = fn(item);
-      if (!seen.has(key)) {
-        seen.add(key);
-        result.push(item);
-      }
-    }
-    return result;
-  },
-
-  /**
-   * Groups the items of an array by a key or function.
-   *
-   * @example
-   * nodeComfort.arr.groupBy([1, 2, 3, 4], (n) => (n % 2 ? "odd" : "even"));
-   * // { odd: [1, 3], even: [2, 4] }
-   *
-   * @param {any[]} array - Source array.
-   * @param {string|((item: any) => any)} iteratee - Key or function to group by.
-   * @returns {Record<string, any[]>} The grouped object.
-   */
-  groupBy(array, iteratee) {
-    const fn = _iteratee(iteratee);
-    const result = {};
-    for (const item of array) {
-      const key = fn(item);
-      (result[key] ??= []).push(item);
-    }
-    return result;
-  },
-
-  /**
-   * Builds an object keyed by a derived value, mapping each key to the
-   * (last) matching item.
-   *
-   * @example
-   * nodeComfort.arr.keyBy([{ id: "a" }, { id: "b" }], "id");
-   * // { a: { id: "a" }, b: { id: "b" } }
-   *
-   * @param {any[]} array - Source array.
-   * @param {string|((item: any) => any)} iteratee - Key or function.
-   * @returns {Record<string, any>} The keyed object.
-   */
-  keyBy(array, iteratee) {
-    const fn = _iteratee(iteratee);
-    const result = {};
-    for (const item of array) result[fn(item)] = item;
-    return result;
-  },
-
-  /**
-   * Partitions an array into two groups based on a predicate:
-   * `[matching, notMatching]`.
-   *
-   * @example
-   * nodeComfort.arr.partition([1, 2, 3, 4], (n) => n % 2 === 0);
-   * // [[2, 4], [1, 3]]
-   *
-   * @param {any[]} array - Source array.
-   * @param {(item: any, index: number) => boolean} predicate - Test function.
-   * @returns {[any[], any[]]} The two partitions.
-   */
-  partition(array, predicate) {
-    const pass = [];
-    const fail = [];
-    array.forEach((item, i) => (predicate(item, i) ? pass : fail).push(item));
-    return [pass, fail];
-  },
-
-  /**
-   * Recursively flattens a nested array up to a given depth.
-   *
-   * @example
-   * nodeComfort.arr.flatten([1, [2, [3, [4]]]]);      // [1, 2, 3, [4]]
-   * nodeComfort.arr.flatten([1, [2, [3]]], Infinity); // [1, 2, 3]
-   *
-   * @param {any[]} array - Source array.
-   * @param {number} [depth=1] - Maximum depth to flatten.
-   * @returns {any[]} The flattened array.
-   */
-  flatten(array, depth = 1) {
-    return array.flat(depth);
-  },
-
-  /**
-   * Returns a shuffled copy of an array (Fisher–Yates).
-   *
-   * Uses `Math.random` • not cryptographically secure.
-   *
-   * @param {any[]} array - Source array.
-   * @returns {any[]} A new shuffled array.
-   */
-  shuffle(array) {
-    const result = [...array];
-    for (let i = result.length - 1; i > 0; i--) {
-      const j = Math.floor(Math.random() * (i + 1));
-      [result[i], result[j]] = [result[j], result[i]];
-    }
-    return result;
-  },
-
-  /**
-   * Returns a random element from an array.
-   *
-   * @param {any[]} array - Source array.
-   * @returns {any} A random element, or undefined if empty.
-   */
-  sample(array) {
-    return array.length ? array[Math.floor(Math.random() * array.length)] : undefined;
-  },
-
-  /**
-   * Returns `n` random elements from an array (without repetition).
-   *
-   * @param {any[]} array - Source array.
-   * @param {number} n - Number of elements to pick.
-   * @returns {any[]} The sampled elements.
-   */
-  sampleSize(array, n) {
-    return this.shuffle(array).slice(0, Math.max(0, n));
-  },
-
-  /**
-   * Sorts an array by one or more iteratees, ascending by default.
-   *
-   * Does not mutate the input.
-   *
-   * @example
-   * nodeComfort.arr.sortBy(users, "age");
-   * nodeComfort.arr.sortBy(users, [(u) => u.age, "name"]);
-   *
-   * @param {any[]} array - Source array.
-   * @param {string|((item: any) => any)|Array<string|((item: any) => any)>} iteratees - Sort key(s).
-   * @param {"asc"|"desc"} [direction="asc"] - Sort direction.
-   * @returns {any[]} A new sorted array.
-   */
-  sortBy(array, iteratees, direction = "asc") {
-    const fns = (Array.isArray(iteratees) ? iteratees : [iteratees]).map(_iteratee);
-    const dir = direction === "desc" ? -1 : 1;
-    return [...array].sort((a, b) => {
-      for (const fn of fns) {
-        const va = fn(a);
-        const vb = fn(b);
-        if (va < vb) return -1 * dir;
-        if (va > vb) return 1 * dir;
-      }
-      return 0;
-    });
-  },
-
-  /**
-   * Returns the elements present in the first array but not in the others.
-   *
-   * @example
-   * nodeComfort.arr.difference([1, 2, 3, 4], [2, 4]); // [1, 3]
-   *
-   * @param {any[]} array - Source array.
-   * @param {...any[]} others - Arrays to subtract.
-   * @returns {any[]} The difference.
-   */
-  difference(array, ...others) {
-    const exclude = new Set(others.flat());
-    return array.filter((item) => !exclude.has(item));
-  },
-
-  /**
-   * Returns the elements common to all provided arrays.
-   *
-   * @example
-   * nodeComfort.arr.intersection([1, 2, 3], [2, 3, 4]); // [2, 3]
-   *
-   * @param {...any[]} arrays - Arrays to intersect.
-   * @returns {any[]} The intersection.
-   */
-  intersection(...arrays) {
-    if (!arrays.length) return [];
-    const [first, ...rest] = arrays;
-    const sets = rest.map((a) => new Set(a));
-    return [...new Set(first)].filter((item) => sets.every((set) => set.has(item)));
-  },
-
-  /**
-   * Returns the union (unique values) of all provided arrays.
-   *
-   * @example
-   * nodeComfort.arr.union([1, 2], [2, 3], [3, 4]); // [1, 2, 3, 4]
-   *
-   * @param {...any[]} arrays - Arrays to unite.
-   * @returns {any[]} The union.
-   */
-  union(...arrays) {
-    return [...new Set(arrays.flat())];
-  },
-
-  /**
-   * Zips multiple arrays together into an array of tuples.
-   *
-   * @example
-   * nodeComfort.arr.zip(["a", "b"], [1, 2]); // [["a", 1], ["b", 2]]
-   *
-   * @param {...any[]} arrays - Arrays to zip.
-   * @returns {any[][]} The zipped tuples.
-   */
-  zip(...arrays) {
-    const length = Math.max(0, ...arrays.map((a) => a.length));
-    const result = [];
-    for (let i = 0; i < length; i++) {
-      result.push(arrays.map((a) => a[i]));
-    }
-    return result;
-  },
-
-  /**
-   * Splits an array into `matching` and removes falsy values.
-   *
-   * Removes `false`, `null`, `0`, `""`, `undefined` and `NaN`.
-   *
-   * @example
-   * nodeComfort.arr.compact([0, 1, false, 2, "", 3, null]); // [1, 2, 3]
-   *
-   * @param {any[]} array - Source array.
-   * @returns {any[]} The compacted array.
-   */
-  compact(array) {
-    return array.filter(Boolean);
-  },
-
-  /**
-   * Returns the first element (or the first `n` elements) of an array.
-   *
-   * @param {any[]} array - Source array.
-   * @param {number} [n] - How many elements to take.
-   * @returns {any} The first element, or the first `n` elements when `n` is given.
-   */
-  first(array, n) {
-    if (n === undefined) return array[0];
-    return array.slice(0, Math.max(0, n));
-  },
-
-  /**
-   * Returns the last element (or the last `n` elements) of an array.
-   *
-   * @param {any[]} array - Source array.
-   * @param {number} [n] - How many elements to take.
-   * @returns {any} The last element, or the last `n` elements when `n` is given.
-   */
-  last(array, n) {
-    if (n === undefined) return array[array.length - 1];
-    return array.slice(Math.max(0, array.length - n));
-  },
-
-  /**
-   * Removes items from an array where the predicate is true, returning a new array.
-   *
-   * @param {any[]} array - Source array.
-   * @param {(item: any, index: number) => boolean} predicate - Removal test.
-   * @returns {any[]} A new array without the removed items.
-   */
-  remove(array, predicate) {
-    return array.filter((item, i) => !predicate(item, i));
-  },
-
-  /**
-   * Moves an element from one index to another (returns a new array).
-   *
-   * @param {any[]} array - Source array.
-   * @param {number} from - Source index.
-   * @param {number} to - Destination index.
-   * @returns {any[]} The reordered array.
-   */
-  move(array, from, to) {
-    const result = [...array];
-    const [item] = result.splice(from, 1);
-    result.splice(to, 0, item);
-    return result;
-  },
-
-  /**
-   * Counts occurrences of each derived key in an array.
-   *
-   * @example
-   * nodeComfort.arr.countBy(["a", "b", "a"]);       // { a: 2, b: 1 }
-   * nodeComfort.arr.countBy([1.1, 2.3, 1.7], Math.floor); // { 1: 2, 2: 1 }
-   *
-   * @param {any[]} array - Source array.
-   * @param {string|((item: any) => any)} [iteratee] - Key or function.
-   * @returns {Record<string, number>} The counts.
-   */
-  countBy(array, iteratee) {
-    const fn = _iteratee(iteratee);
-    const result = {};
-    for (const item of array) {
-      const key = fn(item);
-      result[key] = (result[key] ?? 0) + 1;
-    }
-    return result;
-  },
-
-  /**
-   * Sums an array by a numeric iteratee (or the values themselves).
-   *
-   * @example
-   * nodeComfort.arr.sumBy([{ n: 1 }, { n: 2 }], "n"); // 3
-   *
-   * @param {any[]} array - Source array.
-   * @param {string|((item: any) => number)} [iteratee] - Key or function returning a number.
-   * @returns {number} The sum.
-   */
-  sumBy(array, iteratee) {
-    const fn = _iteratee(iteratee);
-    return array.reduce((acc, item) => acc + (Number(fn(item)) || 0), 0);
-  },
-
-  /**
-   * Returns the item with the maximum derived value.
-   *
-   * @param {any[]} array - Source array.
-   * @param {string|((item: any) => number)} [iteratee] - Key or function.
-   * @returns {any} The item, or undefined if the array is empty.
-   */
-  maxBy(array, iteratee) {
-    const fn = _iteratee(iteratee);
-    let best;
-    let bestVal = -Infinity;
-    for (const item of array) {
-      const val = fn(item);
-      if (val > bestVal) {
-        bestVal = val;
-        best = item;
-      }
-    }
-    return best;
-  },
-
-  /**
-   * Returns the item with the minimum derived value.
-   *
-   * @param {any[]} array - Source array.
-   * @param {string|((item: any) => number)} [iteratee] - Key or function.
-   * @returns {any} The item, or undefined if the array is empty.
-   */
-  minBy(array, iteratee) {
-    const fn = _iteratee(iteratee);
-    let best;
-    let bestVal = Infinity;
-    for (const item of array) {
-      const val = fn(item);
-      if (val < bestVal) {
-        bestVal = val;
-        best = item;
-      }
-    }
-    return best;
-  },
-
-  /**
-   * Creates an array of a given length, filled by a value or generator function.
-   *
-   * @example
-   * nodeComfort.arr.times(3, "x");           // ["x", "x", "x"]
-   * nodeComfort.arr.times(3, (i) => i * 2);  // [0, 2, 4]
-   *
-   * @param {number} n - Number of items.
-   * @param {any|((index: number) => any)} [value] - Fill value or generator.
-   * @returns {any[]} The generated array.
-   */
-  times(n, value) {
-    const fn = typeof value === "function" ? value : () => value;
-    const result = [];
-    for (let i = 0; i < n; i++) result.push(fn(i));
-    return result;
-  },
+  chunk,
+  windows,
+  first,
+  last,
+  paginate,
+  unique,
+  groupBy,
+  keyBy,
+  toMap,
+  countBy,
+  count,
+  partition,
+  pluck,
+  sortBy,
+  shuffle,
+  sample,
+  sampleSize,
+  rotate,
+  move,
+  swap,
+  difference,
+  intersection,
+  union,
+  without,
+  remove,
+  compact,
+  toggle,
+  upsert,
+  insert,
+  flatten,
+  zip,
+  unzip,
+  interleave,
+  cartesian,
+  times,
+  sumBy,
+  averageBy,
+  maxBy,
+  minBy,
 };
