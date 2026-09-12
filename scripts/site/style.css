@@ -96,7 +96,6 @@ code, pre, kbd { font-family: var(--mono); }
 }
 .brand { display: flex; align-items: center; gap: 10px; color: var(--text); font-weight: 700; letter-spacing: -0.01em; white-space: nowrap; }
 .brand:hover { text-decoration: none; }
-.brand-mark { width: 28px; height: 28px; }
 .brand .version { font: 500 12px var(--mono); color: var(--text-soft); background: var(--bg-mute); padding: 2px 7px; border-radius: 99px; }
 .nav { display: flex; gap: 4px; margin-left: 12px; }
 .nav a { color: var(--text-soft); padding: 6px 10px; border-radius: 8px; font-size: 15px; font-weight: 500; }

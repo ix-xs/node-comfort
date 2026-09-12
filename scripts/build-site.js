@@ -72,8 +72,7 @@ const icon = {
   layers: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m12 3 9 5-9 5-9-5 9-5Z"/><path d="m3 13 9 5 9-5"/></svg>',
 };
 
-const MARK = `<svg class="brand-mark" viewBox="0 0 32 32" aria-hidden="true"><defs><linearGradient id="nc-g" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#10b981"/><stop offset="1" stop-color="#0ea5e9"/></linearGradient></defs><rect width="32" height="32" rx="8" fill="url(#nc-g)"/><path d="M9 21v-7.5a3.5 3.5 0 0 1 7 0V21M25 13.5a3.5 3.5 0 1 0 0 7" fill="none" stroke="#fff" stroke-width="2.6" stroke-linecap="round"/></svg>`;
-const FAVICON = MARK.replace('class="brand-mark" ', 'xmlns="http://www.w3.org/2000/svg" ');
+const FAVICON = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32"><defs><linearGradient id="nc-g" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#10b981"/><stop offset="1" stop-color="#0ea5e9"/></linearGradient></defs><rect width="32" height="32" rx="8" fill="url(#nc-g)"/><path d="M9 21v-7.5a3.5 3.5 0 0 1 7 0V21M25 13.5a3.5 3.5 0 1 0 0 7" fill="none" stroke="#fff" stroke-width="2.6" stroke-linecap="round"/></svg>`;
 
 // helpers
 
@@ -154,7 +153,7 @@ const layout = (page) => {
 <a class="skip" href="#main">Skip to content</a>
 <header class="header">
 <button class="icon-button menu-button" id="menu-toggle" type="button" aria-label="Menu">${icon.menu}</button>
-<a class="brand" href="${root}index.html">${MARK}<span>${SITE.name}</span><span class="version">v${version}</span></a>
+<a class="brand" href="${root}index.html"><span>${SITE.name}</span><span class="version">v${version}</span></a>
 <nav class="nav" aria-label="Main">${nav}</nav>
 <div class="header-tools">
 <button class="search-button" type="button" aria-label="Search">${icon.search.replace("<svg", '<svg width="16" height="16"')}<span>Search</span><kbd>Ctrl K</kbd></button>
