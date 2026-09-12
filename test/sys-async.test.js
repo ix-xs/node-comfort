@@ -23,7 +23,8 @@ describe("sys: commands", () => {
   });
 
   it("exec runs through the shell", async () => {
-    const { stdout } = await sys.exec(`"${node}" -e "console.log(1+1)"`);
+    // String(): console.log of a number is colored when npm passes FORCE_COLOR down
+    const { stdout } = await sys.exec(`"${node}" -e "console.log(String(1+1))"`);
     assert.equal(stdout.trim(), "2");
   });
 
