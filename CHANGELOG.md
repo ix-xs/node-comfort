@@ -157,6 +157,8 @@ Each item explains what to change. Most projects only need the SQLite and Node.j
 - Logger groups were not indented consistently, and logging a circular object crashed.
 - `unescapeHTML()` now decodes numeric entities (`&#39;`, `&#x27;`) and `&nbsp;`.
 - `memoize()` no longer keeps rejected promises: a failed call is retried next time.
+- `watch()` follows the real path of what it watches, so a short (8.3) or symlinked path no longer
+  crashes the watcher on Windows.
 - Dates, maps, sets and plain objects coming from a worker or a `vm` context are recognized by
   `obj`, `schema`, `time`, `checker.isPlainObject` and `JSONString` (1.x compared prototypes, which
   are not shared between realms).

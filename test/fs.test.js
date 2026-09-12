@@ -13,7 +13,8 @@ let root;
 const p = (...parts) => path.join(root, ...parts);
 
 before(() => {
-  root = fs.mkdtempSync(path.join(os.tmpdir(), "nc-fs-"));
+  // macOS: /var is a link to /private/var, and the package resolves real paths
+  root = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), "nc-fs-")));
 });
 after(() => {
   fs.rmSync(root, { recursive: true, force: true });
@@ -28,7 +29,7 @@ describe("fs: path resolution", () => {
   });
 
   it("resolves ./ from an ES module caller", () => {
-    const dir = fs.mkdtempSync(path.join(os.tmpdir(), "nc-esm-"));
+    const dir = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), "nc-esm-")));
     try {
       const script = path.join(dir, "caller.mjs");
       const pkg = pathToFileURL(path.join(__dirname, "..", "index.js")).href;

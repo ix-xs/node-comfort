@@ -378,6 +378,22 @@ const _globToRegExp = (pattern, dot) => {
 };
 
 /**
+ * @param {string} path
+ * @returns {string} The real path, symlinks and short names resolved.
+ */
+const _realPath = (path) => {
+  try {
+    return fs.realpathSync.native(path);
+  } catch {
+    try {
+      return fs.realpathSync(path);
+    } catch {
+      return path;
+    }
+  }
+};
+
+/**
  * @param {string} pattern Normalized with `/`.
  * @returns {boolean}
  */
@@ -1376,7 +1392,9 @@ function watch(options = {}) {
   };
 
   const isDir = fs.statSync(target).isDirectory();
-  const watcher = fs.watch(target, { recursive: options.recursive ?? false }, (event, fileName) => {
+  // Watching a short (8.3) or symlinked path crashes libuv on Windows, so
+  // watch the real one and keep reporting paths under the one you passed.
+  const watcher = fs.watch(_realPath(target), { recursive: options.recursive ?? false }, (event, fileName) => {
     const file = fileName && isDir ? nodePath.join(target, String(fileName)) : target;
     const kind = event === "rename" ? "rename" : "change";
     if (!options.debounce) return dispatch(kind, file);
