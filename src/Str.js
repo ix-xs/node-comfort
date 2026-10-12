@@ -24,7 +24,7 @@
  * Options for `truncate()`.
  * @typedef {object} TruncateOptions
  * @property {string} [omission] Added where the text is cut, and counted in the length. Defaults to `"…"`.
- * @property {boolean} [words] Cut at the previous space rather than inside a word.
+ * @property {boolean} [words] Cut at the previous space rather than inside a word, when the end is what gets cut.
  * @property {"end" | "middle" | "start"} [position] Where the text is cut. `"middle"` keeps both ends, which suits paths and ids. Defaults to `"end"`.
  */
 

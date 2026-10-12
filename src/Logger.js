@@ -414,6 +414,10 @@ const _create = (options) => {
   // Everything below is worked out from the settings, and again when they change.
   let threshold = 0;
   let debugScope = false;
+  // What each method does with a message, decided once: a call that prints
+  // nothing must cost next to nothing.
+  /** @type {Record<keyof typeof BADGES, boolean>} */
+  const on = { log: true, trace: false, debug: false, info: true, success: true, warn: true, error: true, fatal: true };
   /** @type {{ open: string, close: string, regex: RegExp }} */
   let delimiter;
   /** @type {Set<string> | undefined} */
@@ -423,10 +427,17 @@ const _create = (options) => {
   /** @type {{ stdout?: _Face, stderr?: _Face, file?: _Face }} */
   let faces = {};
 
-  const refresh = () => {
+  const gate = () => {
     threshold = LEVELS[settings.level];
+    for (const kind of /** @type {Array<keyof typeof BADGES>} */ (Object.keys(BADGES))) {
+      on[kind] = LEVELS[BADGES[kind].level] >= threshold || (debugScope && threshold !== Infinity && (kind === "debug" || kind === "trace"));
+    }
+  };
+
+  const refresh = () => {
     // DEBUG=db,http:* turns debug on for those scopes only, whatever the level.
     debugScope = _debugScope(process.env.DEBUG, settings.scope);
+    gate();
     const { open, close } = settings.delimiter;
     delimiter = { open, close, regex: new RegExp(`${_escape(open)}([\\s\\S]*?)${_escape(close)}`, "g") };
     secrets = settings.redact?.length ? new Set(settings.redact.map((key) => String(key).toLowerCase())) : undefined;
@@ -517,8 +528,8 @@ const _create = (options) => {
    * @param {unknown[]} args
    */
   const emit = (kind, args) => {
+    if (!on[kind]) return;
     const badge = BADGES[kind];
-    if (LEVELS[badge.level] < threshold && !(debugScope && threshold !== Infinity && (kind === "debug" || kind === "trace"))) return;
     const now = new Date();
     const stream = streamOf(badge.stream);
     if (settings.format === "json") {
@@ -548,14 +559,14 @@ const _create = (options) => {
 
   /** @type {Logger} */
   const logger = {
-    log: (...args) => (emit("log", args), logger),
-    trace: (...args) => (emit("trace", args), logger),
-    debug: (...args) => (emit("debug", args), logger),
-    info: (...args) => (emit("info", args), logger),
-    success: (...args) => (emit("success", args), logger),
-    warn: (...args) => (emit("warn", args), logger),
-    error: (...args) => (emit("error", args), logger),
-    fatal: (...args) => (emit("fatal", args), logger),
+    log: (...args) => (on.log && emit("log", args), logger),
+    trace: (...args) => (on.trace && emit("trace", args), logger),
+    debug: (...args) => (on.debug && emit("debug", args), logger),
+    info: (...args) => (on.info && emit("info", args), logger),
+    success: (...args) => (on.success && emit("success", args), logger),
+    warn: (...args) => (on.warn && emit("warn", args), logger),
+    error: (...args) => (on.error && emit("error", args), logger),
+    fatal: (...args) => (on.fatal && emit("fatal", args), logger),
     group: (label = "") => {
       emit("log", [`▼ ${label}`.trimEnd()]);
       groups.push(label);
@@ -594,7 +605,7 @@ const _create = (options) => {
     setLevel: (level) => {
       if (!Object.hasOwn(LEVELS, level)) throw new RangeError(`Unknown log level "${level}"`);
       settings.level = level;
-      threshold = LEVELS[level];
+      gate();
       return logger;
     },
     getLevel: () => settings.level,
