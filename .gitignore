@@ -39,6 +39,3 @@ desktop.ini
 # extra TypeScript versions installed by CI / check-types
 .typescript/
 .ts*/
-
-# documentation website, built by `npm run build:site` and deployed by GitHub Actions
-/site/

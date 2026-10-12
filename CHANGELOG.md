@@ -4,6 +4,142 @@ All notable changes to this project are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and the project uses
 [Semantic Versioning](https://semver.org/).
 
+## [2.1.0] - 2026-10-12
+
+Every module was read again, line by line. The result: about sixty new functions and options, a hot path
+that is several times faster almost everywhere, a long list of edge cases fixed, and a new documentation
+website. Nothing has to change in a project that used 2.0 the documented way. The few behaviours that
+did change are listed under "Changed".
+
+### Added
+
+- **logger**: `redact` hides the keys you name in everything that is logged, `onLog` receives each entry
+  (`LogEntry`) to forward it to another service, and `DEBUG=db,http:*` chooses which scopes print their
+  debug lines.
+- **fs**: `fs.findUp()` (also `nc.findUp()`) walks up the folders to find a file, `writeFile(..., { fsync })`
+  waits for the disk, and watchers emit `"error"`.
+- **checker**: `isHostname`, `isMACAddress`, `isIBAN`, `isE164`, `isObjectId`, `isULID`, `isDataURL`,
+  `isMimeType`, `isTimeZone`, `isLocale`, `isCron` and `isASCII`.
+- **env**: `env.example()` writes a `.env.example` from your specification, and `load({ cascade })` reads
+  `.env`, `.env.local`, `.env.{mode}` and `.env.{mode}.local` in the usual order.
+- **schema**: `pipe()`, `discriminatedUnion()`, `toJSONSchema()`, object `required()`, `merge()` and
+  `keyof()`, number `gt()`, `lt()` and `safe()`, string `date()`, `slug()`, `hex()`, `base64()`, `ulid()`,
+  `semver()` and `hostname()`. `safeParse()` gives the list of `issues` without building an error.
+- **http**: `params` fills a path such as `"users/:id"`, `schema` validates and types the response,
+  `cookies` lists every `Set-Cookie`, headers can be a `Headers` object or pairs, and retries take `jitter`
+  and text delays (`"2s"`).
+- **SQLite**: filters and sorts on JSON paths (`"settings.theme"`), `paginate()`, `increment()`,
+  `onConflict` for `insert()` and `insertMany()`, `defaultExpression` for columns,
+  `transaction({ immediate })`, a `synchronous` option, and reads from views and temporary tables.
+- **time**: `time.parse()` reads a date from text with a pattern, `isSame()`, `range()`, `fromUnix()`, the
+  `Do` and `z` tokens, and `formatDuration()` accepts text such as `"90m"`.
+- **id**: `uuidv5()`, `objectId()` and `prefixed()`.
+- **crypto**: `verifyHmac()` for webhook signatures, `generateKeyPair()`, and JSON Web Tokens signed with
+  RSA, ECDSA or Ed25519 keys (`RS256`, `PS256`, `ES256`, `EdDSA`...).
+- **cli**: `cli.tree()`, `cli.spin()` runs a promise under a spinner, `args()` learns commands
+  (`commands`), `env` fallbacks, `examples` in the help and `choices` for numbers. Tables accept cells of
+  several lines. Menus understand Home, End, Page Up, Page Down and Escape.
+- **color**: `color.truncate()` cuts colored text to a width without breaking its colors.
+- **sys**: `shutdown()`, `freePort()` and `localIP()`.
+- **func**: `batch()` groups calls into one, `dedupe()` shares a call that is already running, and
+  `pipeAsync()`.
+- **async**: `parallel()`, `rateLimit()` and `abortable()`.
+- **Cache**: `getOrSet(..., { staleWhileRevalidate })` answers with the old value while the new one loads,
+  and `resetStats()`.
+- **Emitter**: `on()` and `once()` take `{ signal }`, and `listeners()`.
+- **str**: `upperFirst`, `lowerFirst`, `humanize` and `chunk`. **num**: `pad`, `percentChange` and
+  `product`. **arr**: `duplicates`, `xor`, `takeWhile`, `dropWhile` and `toSentence`. **obj**: `update`,
+  `sortKeys` and `paths`.
+- **Durations are text everywhere.** The last options that only took milliseconds (`debounce`, `throttle`,
+  `memoize`, `retry`, `timeout`, `delay`, `waitFor`...) accept `"5m"` or `"1.5s"` like the rest of the
+  package.
+- Errors serialize with `JSON.stringify()` (name, code, message, fields and cause), and `instanceof` works
+  across two copies of the package.
+
+### Faster
+
+Measured on the same machine, before and after, with Node 24.
+
+| Operation | Speedup |
+| --- | --- |
+| `nc.info()` | 124x |
+| `time.parseDuration("5m")` | 68x |
+| `str.plural()` | 57x |
+| `time.format()` with month and day names | 39x |
+| `id.code()` | 39x |
+| `id.uuidv7()` | 28x |
+| `num.format()` | 23x |
+| `checker.isIP()` | 19x |
+| `obj.get()` with a dot path | 14x |
+| `emitter.emit()` | 10x |
+| `schema.is()` on invalid data | 9x |
+| `schema.safeParse()` on invalid data | 5x |
+| `db.get()` and `db.getAll()` | 3x to 4x |
+
+`sys.which("node")` went from 23 ms to 0.13 ms on Windows. What is slow in JavaScript (`Intl` objects,
+random bytes, stack traces, prepared statements) is now created once and reused.
+
+### Changed
+
+Behaviours that differ from 2.0. Each one fixes something that was wrong or unsafe.
+
+- **logger**: `DEBUG=name` only turns on the debug lines of the scopes it names (it used to turn on all
+  of them). `DEBUG=*`, `DEBUG=1` and `LOG_LEVEL=debug` show everything.
+- **time**: `startOf()`, `endOf()`, `add()` and `diff()` follow `setTimezone()` instead of the system zone.
+  `add(date, "soon")` throws a `TypeError` (unreadable text used to add nothing).
+- **crypto**: `decrypt()` always fails with a `NodeComfortError` whose code is `ERR_DECRYPT` (malformed
+  input used to throw a `TypeError`), and refuses shortened authentication tags. `hash()` and `hmac()`
+  throw a `TypeError` for `null`, `undefined`, plain objects and empty secrets. `safeEqual()` returns
+  `false` when a value is missing. A wrong key type for a token is a `TypeError`, and the algorithms a
+  token may use follow from the key that verifies it.
+- **cli**: leaving a menu or a password prompt with Ctrl+C or Escape rejects with an `AbortError`.
+  `cli.table([])` returns `""`. The
+  `LineReader` type is gone from the public types.
+- **http**: the query and headers of a call are added to those of the client instead of replacing them.
+  A request whose body is a stream is never retried. With `responseType: "stream"` the timeout stops when
+  the headers arrive. `download()` writes to a temporary file first, so a failed download never destroys
+  the file that was there.
+- **schema**: `pick()`, `omit()`, `partial()` and `extend()` keep `strict()`. Names inherited from
+  `Object.prototype` (`toString`, `constructor`) are never read from the input.
+- **SQLite**: a column whose default is `CURRENT_TIMESTAMP` gets the time of the insert (it used to store
+  that text). Columns of joins and renamed columns are converted like the others, with Node 22.16 or later.
+- **env**: in `load()`, the first file that defines a variable wins, whatever `override` says. `override`
+  only decides whether files may replace what was already in the environment.
+- **sys**: `run()` rejects on a timeout it cannot read (it used to mean no timeout), and on Windows a
+  timeout or an abort stops the whole process tree.
+- **fs**: an atomic write keeps the permissions of the file it replaces.
+- **func**: `retry()` stops as soon as the function is aborted. `memoize()` no longer confuses
+  `f(undefined)` with `f(null)`, and accepts `bigint` arguments.
+- **num**: `min()` and `max()` return `NaN` when one value is `NaN`, like `Math.min()`. `sum([0.1, 0.2, 0.3])`
+  is `0.6`.
+- **obj**: `unset()` on an array index removes the item instead of leaving a hole. `clone()` keeps class
+  instances and copies buffers. `merge()` never shares a nested object with its inputs.
+- **checker**: `isEmpty()` is `false` for a `Date`, a `RegExp` and an `Error`.
+- **utils**: `JSONString()` never throws, and writes an error with its name, message and stack.
+
+### Fixed
+
+- Timers longer than 24.8 days (`wait("30d")`, cache expiry, `timeout()`) no longer fire at once.
+- Object helpers (`pick`, `omit`, `filter`, `mapValues`, `flatten`, `groupBy`, `keyBy`, `countBy`, `props`,
+  `env.parse`...) are safe with keys named `__proto__`, `constructor` or `toString`.
+- `safeEqual()` no longer reveals the length of the secret.
+- `str.stripTags()` leaves `a < b and c > d` alone, `unescapeHTML()` accepts invalid code points,
+  `capitalize()` handles letters outside the basic plane, and padding counts what you see.
+- `num.formatBytes()` and `num.abbreviate()` change unit when rounding reaches the next one (`"1 MB"`,
+  not `"1024 KB"`).
+- `isYesterday()` and `isTomorrow()` are right on the days the clocks change.
+- `cache.getOrSet()` respects a `delete()` or a `clear()` made while the value was loading.
+- `emitter.off()` removes a listener added with `once()`.
+- `http` keeps every `Set-Cookie` header and reads the status of an error response in all cases.
+- Tables no longer fail on very large inputs, and progress bars print labels that contain `$`.
+
+### Documentation
+
+- A new website, in English and in French, with a search, a page for every namespace generated from the
+  types, and a landing page whose examples are real files, run at every build.
+- The old addresses (`/guide/logger.html`, `/api/str.html`) redirect to the new pages.
+- `docs/API.md` is gone: the reference lives on the website, and in your editor.
+
 ## [2.0.0] - 2026-09-12
 
 node-comfort becomes a complete, zero-dependency standard library for Node.js: 23 namespaces and classes,
@@ -186,5 +322,6 @@ Each item explains what to change. Most projects only need the SQLite and Node.j
 
 - SQLite: the folder of the database was created in one place and the file opened in another.
 
+[2.1.0]: https://github.com/ix-xs/node-comfort/compare/v2.0.0...v2.1.0
 [2.0.0]: https://github.com/ix-xs/node-comfort/compare/v1.2.0...v2.0.0
 [1.2.0]: https://github.com/ix-xs/node-comfort/releases/tag/v1.2.0

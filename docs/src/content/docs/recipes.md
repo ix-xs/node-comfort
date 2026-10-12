@@ -63,24 +63,33 @@ nc.box(`${files.length} images written to ${flags.out}`, { title: "done", border
 // github.mjs
 import nc from "@ix-xs/node-comfort";
 
+const { schema: s } = nc;
+
 const github = nc.http.create({
   baseURL: "https://api.github.com/",
   headers: { "x-github-api-version": "2022-11-28" },
   auth: { bearer: process.env.GITHUB_TOKEN },
   timeout: "10s",
-  retry: { attempts: 4 },
+  retry: { attempts: 4, jitter: true },
 });
 
+// what this program needs from the answer, checked when it arrives
+const Repo = s.object({ full_name: s.string(), stargazers_count: s.number().int() });
 const repos = new nc.Cache({ max: 500, ttl: "10m" });
 
-async function getRepo(fullName) {
-  return repos.getOrSet(fullName, async () => (await github.get(`repos/${fullName}`)).data);
+async function getRepo(owner, repo) {
+  return repos.getOrSet(`${owner}/${repo}`, async () => {
+    const response = await github.get("repos/:owner/:repo", { params: { owner, repo }, schema: Repo });
+    return response.data;
+  }, { staleWhileRevalidate: "1h" });
 }
 
-const names = ["nodejs/node", "microsoft/TypeScript", "vitejs/vite"];
-const results = await nc.async.map(names, getRepo, { concurrency: 2 });
+const names = [["nodejs", "node"], ["microsoft", "TypeScript"], ["vitejs", "vite"]];
+const results = await nc.async.map(names, ([owner, repo]) => getRepo(owner, repo), { concurrency: 2 });
 nc.table(results.map((r) => ({ name: r.full_name, stars: nc.num.abbreviate(r.stargazers_count) })));
 ```
+
+`params` fills the path and encodes each value. `schema` throws a `ValidationError` if the service answers with something else than what you expect, and gives `response.data` its type. With `staleWhileRevalidate`, an entry older than ten minutes is still returned at once, for up to an hour, while a fresh one loads in the background.
 
 ## Validating a request body
 
@@ -113,6 +122,40 @@ http.createServer(async (req, res) => {
   res.writeHead(201).end();
 }).listen(3000);
 ```
+
+## Receiving a webhook
+
+The sender signs the body with a secret you share. Check the signature on the raw bytes, before parsing anything.
+
+```js
+const http = require("node:http");
+const nc = require("@ix-xs/node-comfort");
+const { schema: s } = nc;
+
+const Event = s.discriminatedUnion("type", [
+  s.object({ type: s.literal("invoice.paid"), invoiceId: s.string() }),
+  s.object({ type: s.literal("customer.deleted"), customerId: s.string() }),
+]);
+
+http.createServer(async (req, res) => {
+  const chunks = [];
+  for await (const chunk of req) chunks.push(chunk);
+  const raw = Buffer.concat(chunks);
+
+  if (!nc.crypto.verifyHmac(raw, req.headers["x-signature"], process.env.WEBHOOK_SECRET)) {
+    return res.writeHead(401).end();
+  }
+
+  const event = Event.safeParse(nc.JSONParse(raw.toString(), null));
+  if (!event.success) return res.writeHead(400).end();
+
+  res.writeHead(204).end(); // answer first, work after
+  if (event.data.type === "invoice.paid") await markPaid(event.data.invoiceId);
+  else await forget(event.data.customerId);
+}).listen(3000);
+```
+
+`verifyHmac` compares in constant time and returns `false` for a missing or malformed signature, so there is nothing to check before calling it.
 
 ## A small database layer
 
@@ -170,7 +213,7 @@ const log = nc.createLogger({ scope: "jobs" });
 nc.time.every("1m", async () => {
   const pending = db.getAll("emails", { sent_at: null }, { limit: 50 });
   for (const email of pending) {
-    jobs.add(() => nc.func.retry(() => send(email), { attempts: 3, delay: 2000 }))
+    jobs.add(() => nc.func.retry(() => send(email), { attempts: 3, delay: "2s" }))
       .then(() => db.update("emails", { sent_at: new Date() }, { id: email.id }))
       .catch((error) => log.error(`Email ${email.id} failed`, error));
   }
@@ -203,8 +246,15 @@ nc.configure({
   format: nc.env.isProduction() ? "json" : "pretty",
   fields: { service: "billing", version: require("./package.json").version },
   file: nc.env.isProduction() ? undefined : "logs/dev.log",
+  redact: ["password", "authorization", "token"],
+  onLog: (entry) => {
+    if (entry.level === "error" || entry.level === "fatal") reportToYourErrorTracker(entry);
+  },
 });
 
 const requestLog = nc.createLogger({ scope: "http" });
 requestLog.info("GET /invoices", { status: 200, ms: 14 });
+requestLog.info("POST /login", { email: "ada@example.com", password: "hunter2" }); // password: "[redacted]"
 ```
+
+`redact` replaces the values of these keys wherever they appear, at any depth. `onLog` receives every entry that is written, with its time, level, scope, message and the arguments that were passed.

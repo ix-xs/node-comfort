@@ -126,10 +126,15 @@ time.parseDuration("banana");   // null
 ## formatDuration
 
 ```ts
-formatDuration(ms: number, options?: FormatDurationOptions): string
+formatDuration(duration: string | number, options?: FormatDurationOptions): string
 ```
 
 Writes a duration for humans.
+
+| Parameter | Type | Description |
+| --- | --- | --- |
+| `duration` | `number \| string` | Milliseconds, or text like `"90m"`. |
+| `options?` | [`FormatDurationOptions`](#formatdurationoptions) |  |
 
 ```js
 time.formatDuration(5_400_000);                               // "1h 30m"
@@ -137,6 +142,7 @@ time.formatDuration(90_000, { long: true });                  // "1 minute 30 se
 time.formatDuration(90_000, { long: true, locale: "fr" });    // "1 minute 30 secondes"
 time.formatDuration(93_784_000, { units: 2 });                // "1d 2h"
 time.formatDuration(5_405_000, { clock: true });              // "01:30:05"
+time.formatDuration("90m");                                   // "1h 30m"
 ```
 
 ## relative
@@ -193,7 +199,7 @@ Formats a date with tokens, in any language and time zone.
 | `dddd` / `ddd` | Monday / Mon | | `A` / `a` | PM / pm |
 | `d` | weekday, 0 is Sunday | | `Z` / `ZZ` | +02:00 / +0200 |
 | `W` / `WW` | ISO week | | `X` / `x` | Unix seconds / ms |
-| `Do` | 5th | | `z` | zone name, like CET |
+| `Do` | 5th | | `z` | zone name, like EST or GMT+1 |
 
 Text in brackets stays as is: `"[Today is] dddd"`.
 
@@ -260,17 +266,19 @@ time.toISODate(new Date(2024, 0, 5)); // "2024-01-05"
 add(date: DateInput, amount: string | number, unit?: CalendarUnit, options?: TimeZoneOptions): Date
 ```
 
-Adds time to a date and returns a new `Date`. Months and years follow the
-calendar: January 31 plus one month is the end of February.
+Adds time to a date and returns a new `Date`. Whole days, weeks, months
+and years follow the calendar: one day later is the same time tomorrow,
+even when the clocks change in between, and January 31 plus one month is
+the end of February. Hours and smaller units are exact.
 
 | Parameter | Type | Description |
 | --- | --- | --- |
 | `date` | [`DateInput`](#dateinput) |  |
 | `amount` | `number \| string` | A number with `unit`, or a duration like `"1h30m"` or `"1 month"`. |
 | `unit?` | [`CalendarUnit`](#calendarunit) | Defaults to `"ms"`. |
-| `options?` | [`TimeZoneOptions`](#timezoneoptions) | The zone whose calendar months and years follow. |
+| `options?` | [`TimeZoneOptions`](#timezoneoptions) | The zone whose calendar is followed. |
 
-**Throws** `TypeError`: If a text amount isn't a duration.
+**Throws** `TypeError`: If a text amount isn't a duration, or the unit isn't one.
 
 ```js
 time.add(new Date(), "2h30m");
@@ -316,6 +324,8 @@ whole calendar months and years.
 | `b` | [`DateInput`](#dateinput) |  |
 | `unit?` | [`CalendarUnit`](#calendarunit) | Defaults to `"ms"`. |
 | `options?` | [`TimeZoneOptions`](#timezoneoptions) | The zone whose calendar months and years follow. |
+
+**Throws** `TypeError`: If the unit isn't one.
 
 ```js
 time.diff("2024-01-03", "2024-01-01", "days");   // 2
@@ -728,7 +738,7 @@ Options for `range()`.
 | Property | Type | Description |
 | --- | --- | --- |
 | `step?` | `number` | How many units between two dates. Defaults to `1`. |
-| `timeZone?` | `string` | Zone whose calendar is used for days, months and years. |
+| `timeZone?` | `string` | Zone whose calendar is used for days, weeks, months and years. |
 
 ### DurationUnit
 

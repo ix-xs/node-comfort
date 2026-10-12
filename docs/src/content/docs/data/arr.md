@@ -34,6 +34,23 @@ arr.partition(people, (p) => p.age >= 18); // [adults, minors]
 arr.pluck(users, "email");              // ["ada@x.io", "bob@x.io"]
 ```
 
+The keys come from your data, so any text is a valid key, including names that every object already has:
+
+```js
+arr.countBy(["constructor", "toString", "constructor"]); // { constructor: 2, toString: 1 }
+```
+
+## Duplicates
+
+```js
+arr.unique([1, 1, 2, 3]);           // [1, 2, 3]
+arr.unique(users, "email");         // one user per email, the first one is kept
+arr.duplicates([1, 2, 2, 3, 3, 3]); // [2, 3]
+arr.duplicates(users, "email");     // one user for each email used more than once
+```
+
+`duplicates` lists each repeated value once, whatever the number of copies: the item you get is its second occurrence.
+
 ## Sorting
 
 `sortBy` sorts by one or more keys. It's stable, and `null`/`undefined` always go last:
@@ -44,6 +61,8 @@ arr.sortBy(users, "age", "desc");               // oldest first
 arr.sortBy(users, [["age", "desc"], "lastName"]); // each key has its own direction
 arr.sortBy(files, "name", { natural: true });   // "file2" before "file10", accents respected
 ```
+
+The key of each item is computed once, not at every comparison, so an iteratee that does real work (parsing a date, measuring a distance) stays cheap.
 
 ## Pagination
 
@@ -63,12 +82,20 @@ arr.first(list, 3);
 arr.last(list);
 ```
 
+`takeWhile` and `dropWhile` cut at the first item that fails a test:
+
+```js
+arr.takeWhile([1, 2, 5, 1], (n) => n < 3); // [1, 2]
+arr.dropWhile([1, 2, 5, 1], (n) => n < 3); // [5, 1]
+```
+
 ## Sets
 
 ```js
 arr.difference([1, 2, 3, 4], [2, 4]);         // [1, 3]
 arr.intersection([1, 2, 3], [2, 3, 4]);       // [2, 3]
 arr.union([1, 2], [2, 3]);                    // [1, 2, 3]
+arr.xor([1, 2, 3], [2, 3, 4]);                // [1, 4], what only one array has
 arr.without([1, 2, 3, 2], 2);                 // [1, 3]
 ```
 
@@ -94,6 +121,16 @@ arr.flatten([1, [2, [3]]], Infinity);         // [1, 2, 3]
 arr.times(3, (i) => i * 2);                   // [0, 2, 4]
 ```
 
+## Lists in a sentence
+
+```js
+arr.toSentence(["Ada", "Bob", "Cy"]);                     // "Ada, Bob, and Cy"
+arr.toSentence(["Ada", "Bob", "Cy"], { locale: "fr" });   // "Ada, Bob et Cy"
+arr.toSentence(["red", "blue"], { type: "disjunction" }); // "red or blue"
+```
+
+`toSentence` joins with the words and the punctuation of the language, through `Intl.ListFormat`. It speaks English unless you pass a `locale`.
+
 ## Aggregates and randomness
 
 ```js
@@ -106,4 +143,8 @@ arr.sample(deck);
 arr.sampleSize(players, 3);
 ```
 
+`sumBy` adds the way [`num.sum()`](/data/num/) does: three orders of `0.1`, `0.2` and `0.3` total `0.6`, not `0.6000000000000001`.
+
 `shuffle` and `sample` use `Math.random`. For draws that must be fair and unpredictable, use [`crypto.randomInt()`](/system/crypto/).
+
+The [`nc.arr` reference](/reference/arr/) lists every function with its options.

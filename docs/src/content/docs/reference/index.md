@@ -1,6 +1,6 @@
 ---
 title: "All exports"
-description: "Everything in @ix-xs/node-comfort 2.0.0: 23 namespaces and classes, 573 functions and methods, each with a line that says what it does."
+description: "Everything in @ix-xs/node-comfort 2.1.0: 23 namespaces and classes, 573 functions and methods, each with a line that says what it does."
 sidebar:
   label: "All exports"
   order: 0
@@ -291,7 +291,7 @@ Numbers: clamping, rounding that gets decimals right, statistics, and formatting
 
 | Name | What it does |
 | --- | --- |
-| [`setLocale()`](/reference/num/#setlocale) | Sets the default language of `format`, `currency`, `percent`, `abbreviate`, `ordinal` and `formatBytes`. |
+| [`setLocale()`](/reference/num/#setlocale) | Sets the default language of `format`, `currency`, `ordinal` and `formatBytes`. |
 | [`getLocale()`](/reference/num/#getlocale) | The current default language. |
 | [`clamp()`](/reference/num/#clamp) | Keeps a number between `min` and `max`. |
 | [`inRange()`](/reference/num/#inrange) | Is the number between `min` and `max`, both included? |
@@ -418,7 +418,7 @@ Object helpers: deep clone, merge, equality, diff, typed dot paths, pick and omi
 | [`entries()`](/reference/obj/#entries) | `Object.entries`, with typed keys and values. |
 | [`fromEntries()`](/reference/obj/#fromentries) | `Object.fromEntries` that accepts any iterable (a `Map` too) and skips unsafe keys. |
 | [`size()`](/reference/obj/#size) | How many entries: own keys of an object, size of a map or set, length of an array or string. |
-| [`isEmpty()`](/reference/obj/#isempty) | Does the object have no own keys? |
+| [`isEmpty()`](/reference/obj/#isempty) | Is there nothing in it? |
 | [`deepFreeze()`](/reference/obj/#deepfreeze) | Freezes an object and everything inside it. |
 
 ### nc.time

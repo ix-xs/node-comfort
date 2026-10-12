@@ -236,7 +236,7 @@ Decodes a Snowflake. With the default epoch, it reads Discord ids.
 | `id` | `string \| bigint` |  |
 | `options?` | [`SnowflakeOptions`](#snowflakeoptions) | Use the epoch it was created with. |
 
-**Throws** `TypeError`: If the id is not a whole positive number.
+**Throws** `TypeError`: If the id is not a string of digits or a bigint.
 
 ```js
 id.parseSnowflake("175928847299117063").date; // 2016-04-30T11:18:25.796Z

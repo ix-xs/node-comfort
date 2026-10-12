@@ -1,6 +1,6 @@
 {
   "name": "@ix-xs/node-comfort",
-  "version": "2.0.0",
+  "version": "2.1.0",
   "description": "The zero-dependency standard library for Node.js: logger, filesystem, SQLite, schema validation, HTTP client, CLI toolkit, cache, env, async pools, colors, events, i18n dates, ids, crypto and hundreds of fully typed helpers.",
   "keywords": [
     "utils",
@@ -184,14 +184,15 @@
     "access": "public"
   },
   "scripts": {
-    "build": "node scripts/build-types.js && node scripts/build-docs.js",
+    "build": "node scripts/build-types.js && node scripts/build-reference.js",
     "build:types": "node scripts/build-types.js",
-    "build:docs": "node scripts/build-docs.js",
-    "build:site": "node scripts/build-site.js",
-    "site:serve": "node scripts/serve-site.js",
+    "build:reference": "node scripts/build-reference.js",
     "test": "node --test \"test/**/*.test.js\"",
     "test:types": "node scripts/check-types.js",
-    "check": "npm run build && npm run build:site && npm test && npm run test:types",
+    "docs:install": "npm ci --prefix docs",
+    "docs:dev": "npm run dev --prefix docs",
+    "docs:build": "npm run build --prefix docs && npm run check-links --prefix docs && npm run check-translation --prefix docs",
+    "check": "npm run build && npm test && npm run test:types",
     "prepublishOnly": "npm run check"
   },
   "devDependencies": {
