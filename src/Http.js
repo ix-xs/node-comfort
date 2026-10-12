@@ -81,7 +81,7 @@ const { toMs, setLongTimeout, sleep } = require("./internal/shared.js");
  * @property {number | string | false} [timeout] Time limit per attempt, like `"10s"`. `false` turns it off. Defaults to 30 seconds. With `responseType: "stream"`, it only covers the wait for the response headers.
  * @property {number | false | HttpRetryOptions} [retry] Number of attempts, `false`, or retry settings. A request whose body is a stream is never retried.
  * @property {"auto" | "json" | "text" | "buffer" | "stream"} [responseType] How to read the body. `"auto"` reads JSON or text based on the content type, a Buffer otherwise.
- * @property {{ parse(data: unknown): unknown }} [schema] Checks the body of a 2xx response, and replaces it with the result: pass a `nc.schema` and bad data from an API stops at the door, with a `ValidationError`.
+ * @property {{ parse(data: unknown): unknown }} [schema] Checks the body of a 2xx response, and replaces it with the result: pass a `nc.schema` and bad data from an API stops at the door, with a `ValidationError`. `data` takes the type the schema describes.
  * @property {boolean} [throwHttpErrors] Throw an `HttpError` when the status isn't 2xx. Defaults to `true`.
  * @property {AbortSignal} [signal] Cancels the request.
  * @property {HttpHooks} [hooks]
@@ -105,15 +105,27 @@ const { toMs, setLongTimeout, sleep } = require("./internal/shared.js");
  */
 
 /**
+ * What the `schema` option takes: a `nc.schema`, or anything else with a
+ * `parse()` method that returns the checked value or throws.
+ * @typedef {{ parse(data: unknown): unknown }} ResponseSchema
+ */
+
+/**
+ * Request options, where `schema` gives `response.data` its type.
+ * @template {ResponseSchema} S
+ * @typedef {Omit<HttpOptions, "schema"> & { schema?: S }} HttpOptionsOf
+ */
+
+/**
  * A client with its own defaults, from `create()`.
  * @typedef {object} HttpClient
- * @property {<T = any>(url: string | URL, options?: HttpOptions) => Promise<HttpResponse<T>>} request Sends a request.
- * @property {<T = any>(url: string | URL, options?: HttpOptions) => Promise<HttpResponse<T>>} get Sends a GET request.
+ * @property {<T = any, S extends ResponseSchema = { parse(data: unknown): T }>(url: string | URL, options?: HttpOptionsOf<S>) => Promise<HttpResponse<ReturnType<S["parse"]>>>} request Sends a request.
+ * @property {<T = any, S extends ResponseSchema = { parse(data: unknown): T }>(url: string | URL, options?: HttpOptionsOf<S>) => Promise<HttpResponse<ReturnType<S["parse"]>>>} get Sends a GET request.
  * @property {<T = any>(url: string | URL, options?: HttpOptions) => Promise<HttpResponse<T>>} head Sends a HEAD request.
- * @property {<T = any>(url: string | URL, options?: HttpOptions) => Promise<HttpResponse<T>>} delete Sends a DELETE request.
- * @property {<T = any>(url: string | URL, data?: unknown, options?: HttpOptions) => Promise<HttpResponse<T>>} post Sends a POST request. Objects and arrays go as JSON.
- * @property {<T = any>(url: string | URL, data?: unknown, options?: HttpOptions) => Promise<HttpResponse<T>>} put Sends a PUT request. Objects and arrays go as JSON.
- * @property {<T = any>(url: string | URL, data?: unknown, options?: HttpOptions) => Promise<HttpResponse<T>>} patch Sends a PATCH request. Objects and arrays go as JSON.
+ * @property {<T = any, S extends ResponseSchema = { parse(data: unknown): T }>(url: string | URL, options?: HttpOptionsOf<S>) => Promise<HttpResponse<ReturnType<S["parse"]>>>} delete Sends a DELETE request.
+ * @property {<T = any, S extends ResponseSchema = { parse(data: unknown): T }>(url: string | URL, data?: unknown, options?: HttpOptionsOf<S>) => Promise<HttpResponse<ReturnType<S["parse"]>>>} post Sends a POST request. Objects and arrays go as JSON.
+ * @property {<T = any, S extends ResponseSchema = { parse(data: unknown): T }>(url: string | URL, data?: unknown, options?: HttpOptionsOf<S>) => Promise<HttpResponse<ReturnType<S["parse"]>>>} put Sends a PUT request. Objects and arrays go as JSON.
+ * @property {<T = any, S extends ResponseSchema = { parse(data: unknown): T }>(url: string | URL, data?: unknown, options?: HttpOptionsOf<S>) => Promise<HttpResponse<ReturnType<S["parse"]>>>} patch Sends a PATCH request. Objects and arrays go as JSON.
  * @property {(url: string | URL, destination: string, options?: HttpOptions) => Promise<{ path: string, size: number }>} download Saves a response to a file.
  * @property {(defaults: HttpOptions) => HttpClient} extend A new client with these defaults added.
  * @property {Readonly<HttpOptions>} defaults
@@ -495,10 +507,11 @@ const _client = (defaults) => {
  * });
  * res.data; // parsed JSON
  *
- * @template [T=any]
+ * @template [T=any] The type of `data`, when no `schema` says it.
+ * @template {ResponseSchema} [S={ parse(data: unknown): T }]
  * @param {string | URL} url An absolute URL, or a path when `baseURL` is set.
- * @param {HttpOptions} [options]
- * @returns {Promise<HttpResponse<T>>}
+ * @param {HttpOptionsOf<S>} [options]
+ * @returns {Promise<HttpResponse<ReturnType<S["parse"]>>>}
  * @throws {HttpError | TimeoutError | AbortError}
  */
 function request(url, options = {}) {
@@ -511,10 +524,11 @@ function request(url, options = {}) {
  * @example
  * const { data } = await http.get("https://api.example.com/users", { query: { page: 2, tags: ["a", "b"] } });
  *
- * @template [T=any]
+ * @template [T=any] The type of `data`, when no `schema` says it.
+ * @template {ResponseSchema} [S={ parse(data: unknown): T }]
  * @param {string | URL} url
- * @param {HttpOptions} [options]
- * @returns {Promise<HttpResponse<T>>}
+ * @param {HttpOptionsOf<S>} [options]
+ * @returns {Promise<HttpResponse<ReturnType<S["parse"]>>>}
  */
 function get(url, options = {}) {
   return _send(url, { ...options, method: "GET" });
@@ -544,11 +558,12 @@ function head(url, options = {}) {
  * const { data: user } = await http.post("https://api.example.com/users", { name: "Ada" });
  * await http.post(uploadUrl, formData);
  *
- * @template [T=any]
+ * @template [T=any] The type of `data`, when no `schema` says it.
+ * @template {ResponseSchema} [S={ parse(data: unknown): T }]
  * @param {string | URL} url
  * @param {unknown} [data]
- * @param {HttpOptions} [options]
- * @returns {Promise<HttpResponse<T>>}
+ * @param {HttpOptionsOf<S>} [options]
+ * @returns {Promise<HttpResponse<ReturnType<S["parse"]>>>}
  */
 function post(url, data, options = {}) {
   return _send(url, { ..._withData(data, options), method: "POST" });
@@ -557,11 +572,12 @@ function post(url, data, options = {}) {
 /**
  * Sends a PUT request. The body works like in `post()`.
  *
- * @template [T=any]
+ * @template [T=any] The type of `data`, when no `schema` says it.
+ * @template {ResponseSchema} [S={ parse(data: unknown): T }]
  * @param {string | URL} url
  * @param {unknown} [data]
- * @param {HttpOptions} [options]
- * @returns {Promise<HttpResponse<T>>}
+ * @param {HttpOptionsOf<S>} [options]
+ * @returns {Promise<HttpResponse<ReturnType<S["parse"]>>>}
  */
 function put(url, data, options = {}) {
   return _send(url, { ..._withData(data, options), method: "PUT" });
@@ -570,11 +586,12 @@ function put(url, data, options = {}) {
 /**
  * Sends a PATCH request. The body works like in `post()`.
  *
- * @template [T=any]
+ * @template [T=any] The type of `data`, when no `schema` says it.
+ * @template {ResponseSchema} [S={ parse(data: unknown): T }]
  * @param {string | URL} url
  * @param {unknown} [data]
- * @param {HttpOptions} [options]
- * @returns {Promise<HttpResponse<T>>}
+ * @param {HttpOptionsOf<S>} [options]
+ * @returns {Promise<HttpResponse<ReturnType<S["parse"]>>>}
  */
 function patch(url, data, options = {}) {
   return _send(url, { ..._withData(data, options), method: "PATCH" });
@@ -586,10 +603,11 @@ function patch(url, data, options = {}) {
  * @example
  * await http.delete(`https://api.example.com/users/${id}`);
  *
- * @template [T=any]
+ * @template [T=any] The type of `data`, when no `schema` says it.
+ * @template {ResponseSchema} [S={ parse(data: unknown): T }]
  * @param {string | URL} url
- * @param {HttpOptions} [options]
- * @returns {Promise<HttpResponse<T>>}
+ * @param {HttpOptionsOf<S>} [options]
+ * @returns {Promise<HttpResponse<ReturnType<S["parse"]>>>}
  */
 function del(url, options = {}) {
   return _send(url, { ...options, method: "DELETE" });

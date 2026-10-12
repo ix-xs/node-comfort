@@ -898,8 +898,8 @@ function ordinal(value, options = {}) {
 }
 
 /**
- * Sets the default language of `format`, `currency`, `percent`,
- * `abbreviate`, `ordinal` and `formatBytes`.
+ * Sets the default language of `format`, `currency`, `ordinal` and
+ * `formatBytes`.
  *
  * @example
  * num.setLocale("fr");

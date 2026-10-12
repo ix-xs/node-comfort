@@ -88,7 +88,7 @@ const { types } = require("node:util");
  * Options for `range()`.
  * @typedef {object} DateRangeOptions
  * @property {number} [step] How many units between two dates. Defaults to `1`.
- * @property {string} [timeZone] Zone whose calendar is used for days, months and years.
+ * @property {string} [timeZone] Zone whose calendar is used for days, weeks, months and years.
  */
 
 /**
@@ -261,7 +261,8 @@ const _instantOf = (year, month, day, hour, minute, second, ms, timeZone) => {
  * @param {{ year: number, month: number, day: number, hour: number, minute: number, second: number, weekday: number }} at
  * @param {string} unit
  * @param {number} [weekStartsOn]
- * @returns {[number, number, number, number, number, number] | undefined}
+ * @returns {[number, number, number, number, number, number]}
+ * @throws {TypeError} If the unit isn't one.
  */
 const _startWall = (at, unit, weekStartsOn) => {
   switch (unit) {
@@ -278,7 +279,7 @@ const _startWall = (at, unit, weekStartsOn) => {
     case "hour": return [at.year, at.month, at.day, at.hour, 0, 0];
     case "minute": return [at.year, at.month, at.day, at.hour, at.minute, 0];
     case "second": return [at.year, at.month, at.day, at.hour, at.minute, at.second];
-    default: return undefined;
+    default: throw new TypeError(`Unknown unit: ${JSON.stringify(unit)}`);
   }
 };
 
@@ -293,6 +294,32 @@ const _dayDelta = (a, b, timeZone) => {
   const x = _parts(a, timeZone);
   const y = _parts(b, timeZone);
   return Math.round((Date.UTC(x.year, x.month - 1, x.day) - Date.UTC(y.year, y.month - 1, y.day)) / MS.d);
+};
+
+/**
+ * Adds calendar days: the same wall-clock time, that many days later.
+ * @param {Date} d
+ * @param {number} days
+ * @param {string} [timeZone]
+ * @returns {Date}
+ */
+const _addDays = (d, days, timeZone) => {
+  if (timeZone === "UTC") return new Date(d.getTime() + days * MS.d);
+  const at = _parts(d, timeZone);
+  // Date.UTC carries a day past the end of the month into the next one.
+  const day = new Date(Date.UTC(at.year, at.month - 1, at.day + days));
+  return _instantOf(day.getUTCFullYear(), day.getUTCMonth() + 1, day.getUTCDate(), at.hour, at.minute, at.second, at.ms, timeZone);
+};
+
+/**
+ * The short name of a unit, or an error that names what was given.
+ * @param {string} unit
+ * @returns {"ms" | "s" | "m" | "h" | "d" | "w" | "M" | "y"}
+ */
+const _knownUnit = (unit) => {
+  const known = _unit(unit);
+  if (!known) throw new TypeError(`Unknown unit: ${JSON.stringify(unit)}`);
+  return known;
 };
 
 /**
@@ -321,9 +348,11 @@ const _addMonths = (d, months, timeZone) => {
  */
 const _addText = (d, text, sign, timeZone) => {
   const fixed = shared.parseDuration(text);
-  if (fixed !== null) return new Date(d.getTime() + sign * fixed);
+  // Under a day there is no calendar to follow.
+  if (fixed !== null && Math.abs(fixed) < MS.d) return new Date(d.getTime() + sign * fixed);
   const regex = /([-+]?\d*\.?\d+)\s*([a-zA-Z]+)/g;
   let months = 0;
+  let days = 0;
   let ms = 0;
   let consumed = "";
   let match;
@@ -333,11 +362,17 @@ const _addText = (d, text, sign, timeZone) => {
     const amount = Number(match[1]);
     if (unit === "M") months += amount;
     else if (unit === "y") months += amount * 12;
+    else if ((unit === "d" || unit === "w") && Number.isInteger(amount)) days += unit === "w" ? amount * 7 : amount;
     else ms += amount * MS[unit];
     consumed += match[0];
   }
-  if (!consumed || consumed.replace(/\s+/g, "") !== text.replace(/[\s,]+|and/g, "")) throw new TypeError(`Invalid duration: ${JSON.stringify(text)}`);
-  const moved = months ? _addMonths(d, sign * months, timeZone) : d;
+  if (!consumed || consumed.replace(/\s+/g, "") !== text.replace(/[\s,]+|and/g, "")) {
+    // A bare number of milliseconds, as text.
+    if (fixed !== null) return new Date(d.getTime() + sign * fixed);
+    throw new TypeError(`Invalid duration: ${JSON.stringify(text)}`);
+  }
+  let moved = months ? _addMonths(d, sign * months, timeZone) : d;
+  if (days) moved = _addDays(moved, sign * days, timeZone);
   return new Date(moved.getTime() + sign * ms);
 };
 
@@ -565,7 +600,7 @@ function calendar(date, options = {}) {
  * | `dddd` / `ddd` | Monday / Mon | | `A` / `a` | PM / pm |
  * | `d` | weekday, 0 is Sunday | | `Z` / `ZZ` | +02:00 / +0200 |
  * | `W` / `WW` | ISO week | | `X` / `x` | Unix seconds / ms |
- * | `Do` | 5th | | `z` | zone name, like CET |
+ * | `Do` | 5th | | `z` | zone name, like EST or GMT+1 |
  *
  * Text in brackets stays as is: `"[Today is] dddd"`.
  *
@@ -842,8 +877,10 @@ function toISODate(date, options = {}) {
 }
 
 /**
- * Adds time to a date and returns a new `Date`. Months and years follow the
- * calendar: January 31 plus one month is the end of February.
+ * Adds time to a date and returns a new `Date`. Whole days, weeks, months
+ * and years follow the calendar: one day later is the same time tomorrow,
+ * even when the clocks change in between, and January 31 plus one month is
+ * the end of February. Hours and smaller units are exact.
  *
  * @example
  * time.add(new Date(), "2h30m");
@@ -854,17 +891,18 @@ function toISODate(date, options = {}) {
  * @param {DateInput} date
  * @param {number | string} amount A number with `unit`, or a duration like `"1h30m"` or `"1 month"`.
  * @param {CalendarUnit} [unit="ms"]
- * @param {TimeZoneOptions} [options] The zone whose calendar months and years follow.
+ * @param {TimeZoneOptions} [options] The zone whose calendar is followed.
  * @returns {Date}
- * @throws {TypeError} If a text amount isn't a duration.
+ * @throws {TypeError} If a text amount isn't a duration, or the unit isn't one.
  */
 function add(date, amount, unit = "ms", options = {}) {
   const d = _toDate(date);
   const timeZone = options.timeZone ?? _config.timeZone;
   if (typeof amount === "string") return _addText(d, amount, 1, timeZone);
-  const u = _unit(unit) ?? "ms";
+  const u = _knownUnit(unit);
   if (u === "M") return _addMonths(d, amount, timeZone);
   if (u === "y") return _addMonths(d, amount * 12, timeZone);
+  if ((u === "d" || u === "w") && Number.isInteger(amount)) return _addDays(d, u === "w" ? amount * 7 : amount, timeZone);
   return new Date(d.getTime() + amount * MS[u]);
 }
 
@@ -900,11 +938,12 @@ function subtract(date, amount, unit = "ms", options = {}) {
  * @param {CalendarUnit} [unit="ms"]
  * @param {TimeZoneOptions} [options] The zone whose calendar months and years follow.
  * @returns {number}
+ * @throws {TypeError} If the unit isn't one.
  */
 function diff(a, b, unit = "ms", options = {}) {
   const da = _toDate(a);
   const db = _toDate(b);
-  const u = _unit(unit) ?? "ms";
+  const u = _knownUnit(unit);
   if (u === "M" || u === "y") {
     const timeZone = options.timeZone ?? _config.timeZone;
     const sign = da >= db ? 1 : -1;
@@ -937,7 +976,7 @@ function startOf(date, unit, options = {}) {
   const d = _toDate(date);
   const timeZone = options.timeZone ?? _config.timeZone;
   const wall = _startWall(_parts(d, timeZone), unit, options.weekStartsOn);
-  return wall ? _instantOf(wall[0], wall[1], wall[2], wall[3], wall[4], wall[5], 0, timeZone) : d;
+  return _instantOf(wall[0], wall[1], wall[2], wall[3], wall[4], wall[5], 0, timeZone);
 }
 
 /**
@@ -955,7 +994,6 @@ function endOf(date, unit, options = {}) {
   const d = _toDate(date);
   const timeZone = options.timeZone ?? _config.timeZone;
   const wall = _startWall(_parts(d, timeZone), unit, options.weekStartsOn);
-  if (!wall) return d;
   // The start of the next unit, minus one millisecond.
   const step = unit === "year" ? 0 : unit === "quarter" || unit === "month" ? 1 : unit === "week" || unit === "isoWeek" || unit === "day" ? 2 : unit === "hour" ? 3 : unit === "minute" ? 4 : 5;
   wall[step] += unit === "quarter" ? 3 : unit === "week" || unit === "isoWeek" ? 7 : 1;

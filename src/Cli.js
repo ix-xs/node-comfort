@@ -167,7 +167,7 @@ const { AbortError } = require("./errors.js");
  * @property {string} [name] Program name in the help. Defaults to the script name.
  * @property {string} [description] Shown at the top of the help.
  * @property {string} [usage] A usage line, like `"<file> [options]"`.
- * @property {Record<string, string>} [commands] Subcommands and what they do, like `{ build: "Build the project" }`. The first argument must then be one of them, and comes back as `command`.
+ * @property {Record<string, string>} [commands] Subcommands and what they do, like `{ build: "Build the project" }`. The first argument, when there is one, must be one of them and comes back as `command`. They share the flags of the program.
  * @property {string[]} [examples] Command lines shown at the end of the help.
  * @property {boolean} [help] Answer `--help` and `-h` by printing the help and exiting. Defaults to `true`.
  * @property {string} [version] Answer `--version` with this version.
@@ -396,10 +396,10 @@ function table(rows, options = {}) {
  *
  * @example
  * console.log(cli.box("Server ready\nhttp://localhost:3000", { title: "my-app", borderColor: "green" }));
- * // ╭─ my-app ──────────────────╮
- * // │  Server ready             │
- * // │  http://localhost:3000    │
- * // ╰───────────────────────────╯
+ * // ╭─ my-app ────────────────╮
+ * // │  Server ready           │
+ * // │  http://localhost:3000  │
+ * // ╰─────────────────────────╯
  *
  * @param {string} text
  * @param {BoxOptions} [options]
