@@ -1409,3 +1409,133 @@ describe("http", () => {
     }
   });
 });
+
+describe("schema", () => {
+  const s = nc.schema;
+  /**
+   * @param {import("..").Schema<any>} schema
+   * @param {unknown} value
+   */
+  const issuesOf = (schema, value) => (schema.safeParse(value).issues ?? []).map((issue) => `${issue.path.join(".")}: ${issue.code}`);
+
+  it("issues keep the right path however deep they are", () => {
+    const schema = s.object({ list: s.array(s.object({ pair: s.tuple([s.string(), s.number()]), tags: s.record(s.number()) })) });
+    assert.deepEqual(issuesOf(schema, { list: [{ pair: ["a", 1], tags: {} }, { pair: ["a", "b"], tags: { x: "y" } }] }), ["list.1.pair.1: invalid_type", "list.1.tags.x: invalid_type"]);
+    const form = s.object({ password: s.string(), confirm: s.string() }).refine((value) => value.password === value.confirm, { message: "Mismatch", path: ["confirm"] });
+    assert.deepEqual(issuesOf(s.object({ form }), { form: { password: "a", confirm: "b" } }), ["form.confirm: custom"]);
+  });
+
+  it("safeParse gives the issues at once and builds the error on demand", () => {
+    const result = s.object({ name: s.string() }).safeParse({});
+    assert.equal(result.success, false);
+    assert.deepEqual(result.issues?.map((issue) => issue.code), ["invalid_type"]);
+    assert.ok(result.error instanceof nc.errors.ValidationError);
+    assert.equal(result.error, result.error);
+    assert.equal(JSON.parse(JSON.stringify(result)).error.name, "ValidationError");
+    assert.ok("error" in { ...result });
+  });
+
+  it("names every object inherits are not read as data", () => {
+    assert.deepEqual(s.object({ toString: s.string().optional(), constructor: s.string().optional() }).parse({}), {});
+    assert.deepEqual(issuesOf(s.object({ a: s.string() }).strict(), { a: "x", constructor: 1, toString: 2 }), [": unrecognized_keys"]);
+    const kept = s.object({ a: s.string() }).passthrough().parse(JSON.parse('{"a":"x","b":1,"__proto__":{"admin":true}}'));
+    assert.deepEqual(Object.keys(kept), ["a", "b"]);
+    assert.equal(/** @type {any} */ (kept).admin, undefined);
+  });
+
+  it("pick, omit, partial and extend keep strict()", () => {
+    const Strict = s.object({ a: s.string(), b: s.number() }).strict();
+    assert.deepEqual(issuesOf(Strict.partial(), { x: 1 }), [": unrecognized_keys"]);
+    assert.deepEqual(issuesOf(Strict.pick(["a"]), { a: "x", x: 1 }), [": unrecognized_keys"]);
+    assert.deepEqual(issuesOf(Strict.omit(["a"]), { b: 1, x: 1 }), [": unrecognized_keys"]);
+    assert.deepEqual(issuesOf(Strict.extend({ c: s.boolean() }), { a: "x", b: 1, c: true, x: 1 }), [": unrecognized_keys"]);
+  });
+
+  it("an object default is a fresh copy each time", () => {
+    const schema = s.object({ list: s.array(s.string()).default([]), meta: s.object({ n: s.number() }).default({ n: 1 }) });
+    const first = schema.parse({});
+    first.list.push("x");
+    first.meta.n = 9;
+    assert.deepEqual(schema.parse({}), { list: [], meta: { n: 1 } });
+  });
+
+  it("required, merge and keyof", () => {
+    const User = s.object({ name: s.string(), age: s.number().optional() });
+    assert.deepEqual(issuesOf(User.required(), { name: "a" }), ["age: invalid_type"]);
+    const merged = User.merge(s.object({ age: s.string(), admin: s.boolean() }));
+    assert.deepEqual(merged.parse({ name: "a", age: "old", admin: true }), { name: "a", age: "old", admin: true });
+    assert.deepEqual(User.keyof().options, ["name", "age"]);
+    assert.equal(User.keyof().is("email"), false);
+  });
+
+  it("pipe validates what a transformation produced", () => {
+    const Port = s.string().transform(Number).pipe(s.number().int().min(1).max(65535));
+    assert.equal(Port.parse("8080"), 8080);
+    assert.deepEqual(issuesOf(Port, "abc"), [": invalid_type"]);
+    assert.deepEqual(issuesOf(s.object({ port: Port }), { port: "70000" }), ["port: too_big"]);
+  });
+
+  it("discriminatedUnion goes to the schema the key names", () => {
+    const Event = s.discriminatedUnion("type", [
+      s.object({ type: s.literal("click"), x: s.number() }),
+      s.object({ type: s.enum(["key", "keyup"]), key: s.string() }),
+    ]);
+    assert.deepEqual(Event.parse({ type: "keyup", key: "a", extra: 1 }), { type: "keyup", key: "a" });
+    assert.deepEqual(issuesOf(Event, { type: "click" }), ["x: invalid_type"]);
+    assert.deepEqual(issuesOf(Event, { type: "nope" }), ["type: invalid_union_discriminator"]);
+    assert.deepEqual(issuesOf(Event, "text"), [": invalid_type"]);
+    assert.throws(() => s.discriminatedUnion("type", [s.object({ a: s.string() })]), TypeError);
+    assert.throws(() => s.discriminatedUnion("t", [s.object({ t: s.literal("a") }), s.object({ t: s.literal("a") })]), /two options/);
+  });
+
+  it("new string and number rules", () => {
+    assert.equal(s.string().date().is("2024-02-29"), true);
+    assert.equal(s.string().date().is("2024-02-30"), false);
+    assert.equal(s.string().date().is("2024-2-9"), false);
+    assert.equal(s.string().slug().is("my-post"), true);
+    assert.equal(s.string().slug().is("My Post"), false);
+    assert.equal(s.string().hex().is("c0ffee"), true);
+    assert.equal(s.string().base64().is("aGVsbG8="), true);
+    assert.equal(s.string().ulid().is("01HQ3Z8K9V3N5W7Y2XJ4T6R8PB"), true);
+    assert.equal(s.string().semver().is("1.2"), false);
+    assert.equal(s.string().hostname().is("api.example.com"), true);
+    assert.deepEqual([s.number().gt(0).is(0), s.number().lt(10).is(10), s.number().gt(0).lt(10).is(5)], [false, false, true]);
+    assert.deepEqual([s.number().safe().is(2 ** 53), s.number().safe().is(42)], [false, true]);
+    assert.deepEqual([s.literal(0).is(-0), s.literal(0).is(0), s.literal(NaN).is(NaN)], [false, true, true]);
+  });
+
+  it("toJSONSchema describes what the schema accepts", () => {
+    const schema = s.object({
+      name: s.string().trim().min(2).describe("Display name"),
+      email: s.string().email(),
+      age: s.number().int().min(18).optional(),
+      score: s.number().positive().nullable(),
+      role: s.enum(["admin", "user"]).default("user"),
+      tags: s.array(s.string()).max(5).unique(),
+      pair: s.tuple([s.string(), s.number()]),
+      meta: s.record(s.boolean()),
+      anything: s.any(),
+    }).strict();
+    assert.deepEqual(schema.toJSONSchema(), {
+      type: "object",
+      properties: {
+        name: { type: "string", minLength: 2, description: "Display name" },
+        email: { type: "string", format: "email" },
+        age: { type: "integer", minimum: 18 },
+        score: { anyOf: [{ type: "number", exclusiveMinimum: 0 }, { type: "null" }] },
+        role: { type: "string", enum: ["admin", "user"], default: "user" },
+        tags: { type: "array", items: { type: "string" }, maxItems: 5, uniqueItems: true },
+        pair: { type: "array", prefixItems: [{ type: "string" }, { type: "number" }], items: false, minItems: 2, maxItems: 2 },
+        meta: { type: "object", additionalProperties: { type: "boolean" } },
+        anything: {},
+      },
+      required: ["name", "email", "score", "tags", "pair", "meta"],
+      additionalProperties: false,
+    });
+    /** @type {import("..").Schema<any>} */
+    const Category = s.object({ name: s.string(), children: s.lazy(() => s.array(Category)).optional() });
+    const json = Category.toJSONSchema();
+    assert.deepEqual(json.properties.children, { $ref: "#/$defs/schema1" });
+    assert.deepEqual(json.$defs.schema1.items.properties.children, { $ref: "#/$defs/schema1" });
+  });
+});
