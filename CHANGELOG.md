@@ -136,6 +136,8 @@ Behaviours that differ from 2.0. Each one fixes something that was wrong or unsa
 - `isYesterday()` and `isTomorrow()` are right on the days the clocks change.
 - `cache.getOrSet()` respects a `delete()`, a `clear()` or a `set()` made while the value was loading.
 - A shutdown handler that never finishes can no longer let the process end with a success code.
+- `sys.run()` and `sys.exec()` settle after a timeout or an abort even when something the command started
+  keeps its output open. They used to wait for it.
 - An async `onLog` hook that fails no longer stops the process.
 - Deleting a watched folder on Windows sent events without end. The watcher now reports it once and stops.
 - `http.download()` reports a connection cut in the middle as an `HttpError` with the code `ERR_NETWORK`.
