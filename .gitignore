@@ -39,3 +39,4 @@ desktop.ini
 # extra TypeScript versions installed by CI / check-types
 .typescript/
 .ts*/
+.release-notes.md

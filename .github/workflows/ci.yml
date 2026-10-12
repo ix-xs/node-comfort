@@ -67,7 +67,8 @@ jobs:
           node-version: 24
           cache: npm
       - run: npm ci
-      - run: npm run build
+      # Only the types: building the reference pages here would make the check below pass whatever was committed.
+      - run: npm run build:types
       - name: Check that the generated reference pages are committed and up to date
         run: node scripts/build-reference.js --check
       - name: Pack
