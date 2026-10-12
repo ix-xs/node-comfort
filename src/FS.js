@@ -1541,6 +1541,11 @@ function watch(options = {}) {
   });
   watcher.on("error", (error) => {
     if (gone) return;
+    // Some systems report the deleted folder here: it is the same news, told once.
+    if (isDir && !fs.existsSync(real)) {
+      gone = true;
+      controller.stop();
+    }
     for (const cb of listeners.error) cb(error);
   });
 

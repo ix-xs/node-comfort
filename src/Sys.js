@@ -195,7 +195,9 @@ const _spawn = (file, args, shell, display, options) =>
       child.stdin.end(options.input);
     }
 
+    let stopped = false;
     const kill = () => {
+      stopped = true;
       if (process.platform === "win32" && child.pid !== undefined) {
         // On Windows, child.kill() ends cmd.exe and leaves what it started running.
         const killer = _cp().spawn("taskkill", ["/pid", String(child.pid), "/T", "/F"], { stdio: "ignore", windowsHide: true });
@@ -219,6 +221,13 @@ const _spawn = (file, args, shell, display, options) =>
       clearTimeout(killTimer);
       options.signal?.removeEventListener("abort", onAbort);
       reject(new ProcessError(`Failed to start "${display}": ${error.message}`, { command: display, cause: error }));
+    });
+    child.on("exit", () => {
+      // What the command started may outlive it and keep its output open:
+      // once the command was stopped on purpose, there is nothing more to wait for.
+      if (!stopped) return;
+      child.stdout?.destroy();
+      child.stderr?.destroy();
     });
     child.on("close", (exitCode, signal) => {
       clearTimeout(killTimer);
