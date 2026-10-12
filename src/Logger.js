@@ -11,8 +11,8 @@
  *
  * Levels, from chatty to severe: `trace`, `debug`, `info`, `warn`, `error`,
  * `fatal`. The default is `info`; `LOG_LEVEL` changes it. `DEBUG=1` shows
- * debug messages, and `DEBUG=db,http:*` only those of the loggers with these
- * scopes. Warnings and errors go to stderr.
+ * debug messages, and `DEBUG=db,http:*` only the debug and trace messages of
+ * the loggers with these scopes. Warnings and errors go to stderr.
  *
  * @example
  * nc.info("Server listening on port 3000");
@@ -71,7 +71,7 @@ const { timeConfig } = require("./internal/shared.js");
  * @property {string | LogFileOptions} [file] Also write every message to a file.
  * @property {Record<string, unknown>} [fields] Added to every JSON record, like a service name.
  * @property {string[]} [redact] Keys whose values are replaced by `"[redacted]"` wherever they appear in logged objects, like `["password", "authorization"]`. Case doesn't matter.
- * @property {(entry: LogEntry) => void} [onLog] Called for every message that passes the level, to send logs somewhere else. An error it throws is ignored: logging never breaks the program.
+ * @property {(entry: LogEntry) => void | Promise<void>} [onLog] Called for every message that passes the level, to send logs somewhere else. It isn't awaited, and an error it throws (or a promise it rejects) is ignored: logging never breaks the program.
  */
 
 /**
@@ -534,7 +534,10 @@ const _create = (options) => {
     }
     if (settings.onLog) {
       try {
-        settings.onLog({ time: now, level: badge.level, kind: /** @type {LogEntry["kind"]} */ (kind), scope: settings.scope, message: render(faceOf("file"), kind, args, now, false), args });
+        /** @type {unknown} */
+        const pending = settings.onLog({ time: now, level: badge.level, kind: /** @type {LogEntry["kind"]} */ (kind), scope: settings.scope, message: render(faceOf("file"), kind, args, now, false), args });
+        // An async hook that fails would otherwise be an unhandled rejection.
+        if (pending && typeof (/** @type {any} */ (pending).then) === "function") /** @type {PromiseLike<unknown>} */ (pending).then(undefined, () => {});
       } catch {
         // A broken hook must not take the program down with it.
       }
@@ -641,7 +644,7 @@ function createLogger(options = {}) {
  * pretty-printed, and several arguments are joined with spaces.
  *
  * @example
- * nc.log("<% green ✔ Saved %> in <% bold 12ms %>");
+ * nc.log("<% green ✔ Saved%> in <% bold 12ms%>");
  * nc.log("user:", { id: 1, roles: ["admin"] });
  *
  * @param {...unknown} args
@@ -776,7 +779,7 @@ function groupEnd() {
  * @example
  * nc.timeStart("import");
  * await importProducts();
- * nc.timeEnd("import"); // "import: 1.24s"
+ * nc.timeEnd("import"); // "import: 1s 240ms"
  *
  * @param {string} [label="default"]
  * @returns {typeof import("./Logger")}

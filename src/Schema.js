@@ -458,7 +458,8 @@ class Schema {
    * Describes what this schema accepts as a JSON Schema (draft 2020-12).
    * Use it for an OpenAPI document, a form generator, or the input of a
    * tool you give to a language model. Rules that only exist in code,
-   * like `refine()` and `transform()`, can't be expressed and are left out.
+   * like `refine()`, `transform()` and what follows a `pipe()`, can't be
+   * expressed and are left out.
    *
    * @example
    * s.object({ name: s.string().min(2), age: s.number().int().optional() }).toJSONSchema();

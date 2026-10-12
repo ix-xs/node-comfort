@@ -88,6 +88,8 @@ const { sleepSync, toMs } = require("./internal/shared.js");
  * @property {number} [spaces] Defaults to `2`.
  * @property {boolean} [atomic] Defaults to `true`.
  * @property {(key: string, value: unknown) => unknown} [replacer] Passed to `JSON.stringify`.
+ * @property {number} [mode] Permissions, like `0o600` for secrets. A file that already exists keeps the ones it has.
+ * @property {boolean} [fsync] Wait until the data is on the disk before returning.
  */
 
 /**
@@ -821,7 +823,7 @@ function writeJSON(path, data, options = {}) {
   try {
     const text = JSON.stringify(data, /** @type {any} */ (options.replacer), options.spaces ?? 2);
     if (text === undefined) return false;
-    _write(_abs(path), `${text}\n`, { atomic: options.atomic });
+    _write(_abs(path), `${text}\n`, { atomic: options.atomic, mode: options.mode, fsync: options.fsync });
     return true;
   } catch {
     return false;
@@ -1514,9 +1516,21 @@ function watch(options = {}) {
   const isDir = fs.statSync(target).isDirectory();
   // Watching a short (8.3) or symlinked path crashes libuv on Windows, so
   // watch the real one and keep reporting paths under the one you passed.
-  const watcher = fs.watch(_realPath(target), { recursive: options.recursive ?? false }, (event, fileName) => {
+  const real = _realPath(target);
+  let gone = false;
+  const watcher = fs.watch(real, { recursive: options.recursive ?? false }, (event, fileName) => {
+    if (gone) return;
     const file = fileName && isDir ? nodePath.join(target, String(fileName)) : target;
     const kind = event === "rename" ? "rename" : "change";
+    // A folder that was deleted keeps sending events on some systems, without
+    // end and without an error: say it once, then stop listening.
+    if (kind === "rename" && isDir && !fs.existsSync(real)) {
+      gone = true;
+      controller.stop();
+      const error = Object.assign(new Error(`The watched folder no longer exists: ${target}`), { code: "ENOENT", path: target });
+      for (const cb of listeners.error) cb(error);
+      return;
+    }
     if (!(debounce > 0)) return dispatch(kind, file);
     const key = `${kind}:${file}`;
     clearTimeout(pending.get(key));
@@ -1526,6 +1540,7 @@ function watch(options = {}) {
     }, debounce));
   });
   watcher.on("error", (error) => {
+    if (gone) return;
     for (const cb of listeners.error) cb(error);
   });
 
