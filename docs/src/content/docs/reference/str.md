@@ -798,7 +798,7 @@ Options for `truncate()`.
 | Property | Type | Description |
 | --- | --- | --- |
 | `omission?` | `string` | Added where the text is cut, and counted in the length. Defaults to `"…"`. |
-| `words?` | `boolean` | Cut at the previous space rather than inside a word. |
+| `words?` | `boolean` | Cut at the previous space rather than inside a word, when the end is what gets cut. |
 | `position?` | `"end" \| "middle" \| "start"` | Where the text is cut. `"middle"` keeps both ends, which suits paths and ids. Defaults to `"end"`. |
 
 ### WrapOptions
