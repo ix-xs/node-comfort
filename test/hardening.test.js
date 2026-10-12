@@ -1685,6 +1685,8 @@ describe("sqlite", () => {
       assert.deepEqual(old.get("users", { id: 1 }, { columns: ["id", "active", "settings"] }), { id: 1, active: true, settings: { theme: "dark", beta: true, tags: ["a", "b"] } });
       assert.equal(Object.getPrototypeOf(old.getAll("users")[0]), Object.prototype);
       assert.deepEqual(old.queryOne("SELECT id, active FROM users WHERE id = ?", 3), { id: 3, active: false });
+      old.exec("CREATE VIEW admins AS SELECT id, active, settings AS prefs FROM users WHERE role = 'admin'");
+      assert.deepEqual(old.getAll("admins"), [{ id: 2, active: true, prefs: old.get("users", { id: 2 }).settings }]);
     } finally {
       proto.setReturnArrays = saved;
     }

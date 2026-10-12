@@ -800,7 +800,8 @@ class SQLite {
     let table;
     if (!/\bjoin\b/i.test(sql)) {
       const match = /^\s*select\b[\s\S]*?\bfrom\s+"?([A-Za-z_][A-Za-z0-9_]*)"?(?:\s+(?:as\s+)?(?!where\b|order\b|limit\b|group\b)[A-Za-z_]\w*)?\s*(?:where\b|order\b|limit\b|group\b|;|$)/i.exec(sql);
-      if (match && this.hasTable(match[1])) table = match[1];
+      // A view has column types too: SQLite takes them from the tables it reads.
+      if (match && (this.#known.has(match[1]) || this.#prepare(SOURCE_EXISTS).get(match[1]) !== undefined)) table = match[1];
     }
     if (this.#sources.size >= 500) this.#sources.clear();
     this.#sources.set(sql, table);
