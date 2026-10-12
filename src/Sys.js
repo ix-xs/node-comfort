@@ -14,21 +14,26 @@
  * });
  */
 
-const { spawn } = require("node:child_process");
 const fs = require("node:fs");
 const os = require("node:os");
 const nodePath = require("node:path");
 const { ProcessError, AbortError } = require("./errors.js");
+const { toMs } = require("./internal/shared.js");
+
+// Loaded on first use: most programs never start another one.
+/** @type {typeof import("node:child_process") | undefined} */
+let _childProcess;
+const _cp = () => (_childProcess ??= require("node:child_process"));
 
 /**
  * Options for `run()` and `exec()`.
  * @typedef {object} RunOptions
  * @property {string} [cwd] Where to run the command.
- * @property {Record<string, string | undefined>} [env] Extra environment variables, added to `process.env`.
+ * @property {Record<string, string | undefined>} [env] Extra environment variables, added to `process.env`. `undefined` removes one.
  * @property {boolean} [extendEnv] Set to `false` to pass only `env`, without `process.env`.
  * @property {string | Buffer} [input] Written to the command's stdin.
- * @property {number | string} [timeout] Kill the command after this long, like `"30s"`.
- * @property {AbortSignal} [signal] Kills the command when aborted.
+ * @property {number | string} [timeout] Kill the command, and everything it started, after this long, like `"30s"`.
+ * @property {AbortSignal} [signal] Kills the command, and everything it started, when aborted.
  * @property {"pipe" | "inherit"} [stdio] `"inherit"` shows the output live instead of capturing it. Defaults to `"pipe"`.
  * @property {(line: string) => void} [onStdout] Called for each line of stdout.
  * @property {(line: string) => void} [onStderr] Called for each line of stderr.
@@ -53,6 +58,12 @@ const { ProcessError, AbortError } = require("./errors.js");
  * @property {number | string} [timeout] How long the handlers get before the exit is forced. Defaults to 10 seconds.
  * @property {number} [exitCode] Exit code after a clean shutdown. Defaults to `0`.
  * @property {NodeJS.Signals[]} [signals] Signals that trigger it. Defaults to `SIGINT`, `SIGTERM` and `SIGHUP`.
+ */
+
+/**
+ * Why the process is stopping: the signal it got, or `"shutdown"` when
+ * `sys.shutdown()` was called.
+ * @typedef {NodeJS.Signals | "shutdown"} ShutdownReason
  */
 
 /**
@@ -106,6 +117,23 @@ const _prepare = (file, args) => {
 };
 
 /**
+ * @param {RunOptions} options
+ * @returns {Record<string, string | undefined> | undefined}
+ */
+const _env = (options) => {
+  if (options.extendEnv === false) return options.env;
+  if (!options.env) return process.env;
+  /** @type {Record<string, string | undefined>} */
+  const merged = { ...process.env };
+  if (process.platform === "win32") {
+    // Windows reads PATH and Path as one variable: ours has to replace it, not sit next to it.
+    const given = new Set(Object.keys(options.env).map((key) => key.toUpperCase()));
+    for (const key of Object.keys(merged)) if (given.has(key.toUpperCase())) delete merged[key];
+  }
+  return Object.assign(merged, options.env);
+};
+
+/**
  * @param {string} file
  * @param {string[]} args
  * @param {boolean} shell
@@ -117,14 +145,13 @@ const _spawn = (file, args, shell, display, options) =>
   new Promise((resolve, reject) => {
     const started = Date.now();
     const inherit = options.stdio === "inherit";
-    const env = options.extendEnv === false ? options.env : { ...process.env, ...options.env };
     const prepared = shell ? { file, args, verbatim: false } : _prepare(file, args);
-    const timeoutMs = options.timeout === undefined ? undefined : typeof options.timeout === "number" ? options.timeout : require("./Time.js").parseDuration(options.timeout) ?? undefined;
+    const timeoutMs = options.timeout === undefined ? undefined : toMs(options.timeout, "timeout");
     if (options.signal?.aborted) return reject(new AbortError(`Command aborted: ${display}`, { cause: options.signal.reason }));
 
-    const child = spawn(prepared.file, prepared.args, {
+    const child = _cp().spawn(prepared.file, prepared.args, {
       cwd: options.cwd,
-      env: /** @type {NodeJS.ProcessEnv} */ (env),
+      env: /** @type {NodeJS.ProcessEnv} */ (_env(options)),
       shell,
       windowsHide: true,
       windowsVerbatimArguments: prepared.verbatim,
@@ -169,11 +196,17 @@ const _spawn = (file, args, shell, display, options) =>
     }
 
     const kill = () => {
+      if (process.platform === "win32" && child.pid !== undefined) {
+        // On Windows, child.kill() ends cmd.exe and leaves what it started running.
+        const killer = _cp().spawn("taskkill", ["/pid", String(child.pid), "/T", "/F"], { stdio: "ignore", windowsHide: true });
+        killer.on("error", () => child.kill());
+        return;
+      }
       child.kill("SIGTERM");
       forceTimer = setTimeout(() => child.kill("SIGKILL"), 2000);
       forceTimer.unref();
     };
-    if (timeoutMs !== undefined) {
+    if (timeoutMs !== undefined && timeoutMs !== Infinity) {
       killTimer = setTimeout(() => {
         timedOut = true;
         kill();
@@ -248,6 +281,20 @@ function exec(command, options = {}) {
   return _spawn(command, [], true, command, options);
 }
 
+/** @type {Map<string, string>} */
+const _found = new Map();
+
+/** @param {string} file */
+const _runnable = (file) => {
+  try {
+    if (!fs.statSync(file).isFile()) return false;
+    if (process.platform !== "win32") fs.accessSync(file, fs.constants.X_OK);
+    return true;
+  } catch {
+    return false;
+  }
+};
+
 /**
  * Finds an executable in `PATH`, like the `which` command.
  *
@@ -259,27 +306,33 @@ function exec(command, options = {}) {
  * @returns {string | undefined}
  */
 function which(command) {
+  if (typeof command !== "string" || !command) return undefined;
   const isWin = process.platform === "win32";
+  const searchPath = process.env.PATH ?? process.env.Path ?? "";
+  const key = `${command}\0${searchPath}\0${process.cwd()}`;
+  const known = _found.get(key);
+  // A found program is checked again with one call, in case it was removed since.
+  if (known !== undefined && _runnable(known)) return known;
   const exts = isWin ? (process.env.PATHEXT ?? ".COM;.EXE;.BAT;.CMD").split(";").filter(Boolean) : [""];
   const candidates = (/** @type {string} */ base) => (isWin && !nodePath.extname(base) ? exts.map((e) => base + e.toLowerCase()) : isWin ? [base, ...exts.map((e) => base + e.toLowerCase())] : [base]);
-  const usable = (/** @type {string} */ file) => {
-    try {
-      if (!fs.statSync(file).isFile()) return false;
-      if (!isWin) fs.accessSync(file, fs.constants.X_OK);
-      return true;
-    } catch {
-      return false;
-    }
-  };
+  /** @type {string | undefined} */
+  let found;
   if (command.includes("/") || command.includes("\\")) {
-    return candidates(nodePath.resolve(command)).find(usable);
+    found = candidates(nodePath.resolve(command)).find(_runnable);
+  } else {
+    for (const dir of searchPath.split(nodePath.delimiter)) {
+      if (!dir) continue;
+      found = candidates(nodePath.join(dir.replace(/^"|"$/g, ""), command)).find(_runnable);
+      if (found) break;
+    }
   }
-  for (const dir of (process.env.PATH ?? process.env.Path ?? "").split(nodePath.delimiter)) {
-    if (!dir) continue;
-    const found = candidates(nodePath.join(dir.replace(/^"|"$/g, ""), command)).find(usable);
-    if (found) return found;
+  if (found) {
+    if (_found.size >= 200) _found.clear();
+    _found.set(key, found);
+  } else {
+    _found.delete(key);
   }
-  return undefined;
+  return found;
 }
 
 /**
@@ -296,8 +349,8 @@ function open(target) {
     const value = /^[a-z][a-z\d+.-]*:/i.test(target) ? target : nodePath.resolve(target);
     const child =
       process.platform === "win32"
-        ? spawn(process.env.comspec || "cmd.exe", ["/d", "/s", "/c", `start "" ${_escapeArg(value, false)}`], { detached: true, stdio: "ignore", windowsHide: true, windowsVerbatimArguments: true })
-        : spawn(process.platform === "darwin" ? "open" : "xdg-open", [value], { detached: true, stdio: "ignore" });
+        ? _cp().spawn(process.env.comspec || "cmd.exe", ["/d", "/s", "/c", `start "" ${_escapeArg(value, false)}`], { detached: true, stdio: "ignore", windowsHide: true, windowsVerbatimArguments: true })
+        : _cp().spawn(process.platform === "darwin" ? "open" : "xdg-open", [value], { detached: true, stdio: "ignore" });
     child.on("error", () => {});
     child.unref();
     return true;
@@ -306,9 +359,10 @@ function open(target) {
   }
 }
 
-/** @type {Array<() => unknown>} */
+/** @type {Array<(reason: ShutdownReason) => unknown>} */
 const _shutdownHandlers = [];
-let _shutdownInstalled = false;
+/** @type {Set<string>} */
+const _shutdownSignals = new Set();
 let _shuttingDown = false;
 /** @type {{ timeout: number, exitCode: number }} */
 const _shutdownConfig = { timeout: 10_000, exitCode: 0 };
@@ -322,29 +376,26 @@ const _shutdownConfig = { timeout: 10_000, exitCode: 0 };
  * @example
  * const server = app.listen(3000);
  * sys.onShutdown(() => new Promise((done) => server.close(done)));
- * sys.onShutdown(() => db.close());
+ * sys.onShutdown((reason) => log.info(`Stopping (${reason})`));
  *
- * @param {() => unknown} handler Can be async.
+ * @param {(reason: ShutdownReason) => unknown} handler Can be async. Gets the signal that stopped the process.
  * @param {ShutdownOptions} [options]
  * @returns {() => void} Removes the handler.
  */
 function onShutdown(handler, options = {}) {
-  if (options.timeout !== undefined) {
-    _shutdownConfig.timeout = typeof options.timeout === "number" ? options.timeout : require("./Time.js").parseDuration(options.timeout) ?? 10_000;
-  }
+  if (options.timeout !== undefined) _shutdownConfig.timeout = toMs(options.timeout, "timeout");
   if (options.exitCode !== undefined) _shutdownConfig.exitCode = options.exitCode;
   _shutdownHandlers.push(handler);
-  if (!_shutdownInstalled) {
-    _shutdownInstalled = true;
-    const signals = options.signals ?? /** @type {NodeJS.Signals[]} */ (["SIGINT", "SIGTERM", "SIGHUP", ...(process.platform === "win32" ? ["SIGBREAK"] : [])]);
-    for (const signal of signals) {
-      try {
-        process.on(signal, () => {
-          void _shutdown(signal);
-        });
-      } catch {
-        // unsupported signal on this platform
-      }
+  const signals = options.signals ?? /** @type {NodeJS.Signals[]} */ (["SIGINT", "SIGTERM", "SIGHUP", ...(process.platform === "win32" ? ["SIGBREAK"] : [])]);
+  for (const signal of signals) {
+    if (_shutdownSignals.has(signal)) continue;
+    _shutdownSignals.add(signal);
+    try {
+      process.on(signal, () => {
+        void _shutdown(signal, undefined);
+      });
+    } catch {
+      // unsupported signal on this platform
     }
   }
   return () => {
@@ -354,9 +405,11 @@ function onShutdown(handler, options = {}) {
 }
 
 /**
- * @param {string} reason
+ * @param {ShutdownReason} reason
+ * @param {number | undefined} exitCode
+ * @returns {Promise<void>}
  */
-const _shutdown = async (reason) => {
+const _shutdown = async (reason, exitCode) => {
   if (_shuttingDown) {
     process.exit(1);
     return;
@@ -365,20 +418,38 @@ const _shutdown = async (reason) => {
   const force = setTimeout(() => {
     process.stderr.write(`[@ix-xs/node-comfort] Shutdown (${reason}) took longer than ${_shutdownConfig.timeout}ms, forcing exit\n`);
     process.exit(1);
-  }, _shutdownConfig.timeout);
+  }, Math.min(_shutdownConfig.timeout, 2 ** 31 - 1));
   force.unref();
   let failed = false;
   for (const handler of [..._shutdownHandlers].reverse()) {
     try {
-      await handler();
+      await handler(reason);
     } catch (error) {
       failed = true;
       process.stderr.write(`[@ix-xs/node-comfort] Shutdown handler failed: ${error instanceof Error ? error.stack : String(error)}\n`);
     }
   }
   clearTimeout(force);
-  process.exit(failed ? 1 : _shutdownConfig.exitCode);
+  process.exit(failed ? 1 : exitCode ?? _shutdownConfig.exitCode);
 };
+
+/**
+ * Stops the process the clean way: runs the `onShutdown()` handlers, then
+ * exits. Use it instead of `process.exit()` when something goes wrong for
+ * good, so servers and databases still get closed.
+ *
+ * @example
+ * process.on("uncaughtException", (error) => {
+ *   log.fatal(error);
+ *   sys.shutdown(1);
+ * });
+ *
+ * @param {number} [exitCode] Defaults to the `exitCode` given to `onShutdown()`, or `0`. A failing handler makes it `1`.
+ * @returns {Promise<void>} Never resolves: the process exits first.
+ */
+function shutdown(exitCode) {
+  return _shutdown("shutdown", exitCode);
+}
 
 /**
  * Are we on Windows?
@@ -423,19 +494,23 @@ function isCI() {
   );
 }
 
+/** @type {boolean | undefined} */
+let _docker;
+
 /**
  * Are we running inside a container?
  *
  * @returns {boolean}
  */
 function isDocker() {
-  if (process.platform !== "linux") return false;
+  if (_docker !== undefined) return _docker;
+  if (process.platform !== "linux") return (_docker = false);
   try {
-    if (fs.existsSync("/.dockerenv") || fs.existsSync("/run/.containerenv")) return true;
-    return /docker|kubepods|containerd/.test(fs.readFileSync("/proc/self/cgroup", "utf8"));
+    _docker = fs.existsSync("/.dockerenv") || fs.existsSync("/run/.containerenv") || /docker|kubepods|containerd/.test(fs.readFileSync("/proc/self/cgroup", "utf8"));
   } catch {
-    return false;
+    _docker = false;
   }
+  return _docker;
 }
 
 /**
@@ -482,6 +557,61 @@ function info() {
 }
 
 /**
+ * Finds a TCP port nobody is listening on. Give a preferred port to get it
+ * back when it's free, and another one when it's taken.
+ *
+ * @example
+ * const port = await sys.freePort(3000); // 3000, or a free one if 3000 is in use
+ * app.listen(port);
+ *
+ * @param {number} [preferred] Tried first.
+ * @param {string} [host] The address to check. Defaults to all of them.
+ * @returns {Promise<number>}
+ */
+function freePort(preferred, host) {
+  const net = require("node:net");
+  /**
+   * @param {number} port
+   * @returns {Promise<number>}
+   */
+  const listen = (port) =>
+    new Promise((resolve, reject) => {
+      const server = net.createServer();
+      server.unref();
+      server.once("error", reject);
+      server.listen({ port, host, exclusive: true }, () => {
+        const address = server.address();
+        server.close(() => resolve(address !== null && typeof address === "object" ? address.port : port));
+      });
+    });
+  if (preferred === undefined) return listen(0);
+  if (!Number.isInteger(preferred) || preferred < 0 || preferred > 65535) return Promise.reject(new RangeError(`freePort(): expected a port from 0 to 65535, got ${preferred}`));
+  return listen(preferred).catch(() => listen(0));
+}
+
+/**
+ * The address of this machine on the local network, like `"192.168.1.20"`.
+ * It's what you print next to `localhost` so a phone on the same Wi-Fi can
+ * reach a dev server.
+ *
+ * @example
+ * console.log(`http://${sys.localIP() ?? "localhost"}:3000`);
+ *
+ * @param {4 | 6} [family=4] IPv4 or IPv6.
+ * @returns {string | undefined} `undefined` when the machine has no network.
+ */
+function localIP(family = 4) {
+  const wanted = family === 6 ? "IPv6" : "IPv4";
+  for (const addresses of Object.values(os.networkInterfaces())) {
+    for (const address of addresses ?? []) {
+      // fe80:: addresses only work with an interface name attached, so they're no use in a URL
+      if (address.family === wanted && !address.internal && !address.address.startsWith("fe80:")) return address.address;
+    }
+  }
+  return undefined;
+}
+
+/**
  * Memory used by this process, in bytes.
  *
  * @example
@@ -500,6 +630,9 @@ module.exports = {
   which,
   open,
   onShutdown,
+  shutdown,
+  freePort,
+  localIP,
   isWindows,
   isMac,
   isLinux,
