@@ -13,15 +13,39 @@ Measured on a Windows machine with Node.js 24 (median of 15 runs):
 
 | Scenario | Time |
 | --- | --- |
-| `require()` the package | about 3 ms |
-| ... then use `nc.str` and `nc.isEmail` | about 10 ms in total |
-| ... then touch all 23 namespaces | about 37 ms in total |
+| `require()` the package | about 4 ms |
+| ... then use `nc.str` and `nc.isEmail` | about 13 ms in total |
+| ... then touch all 23 namespaces | about 43 ms in total |
 
 You pay for what you use. A script that only logs and reads a JSON file never loads the SQLite, HTTP or crypto code.
 
+## What runs fast
+
+The functions a program calls thousands of times a second are written for that. What is slow in JavaScript is done once and kept: `Intl` formatters, compiled date patterns, parsed durations, prepared SQL statements, a pool of random bytes. On the same machine, on one core:
+
+| Operation | Per second |
+| --- | --- |
+| `nc.info()` to a terminal | 2.9 million |
+| `nc.debug()` when debug is off | more than 100 million |
+| `time.format()` with month and day names | 280,000 |
+| `time.parseDuration("5m")` | 90 million |
+| `id.uuidv7()` | 7 million |
+| `id.nano()` | 5.8 million |
+| `str.slugify()` | 3.4 million |
+| `num.format()` | 1.3 million |
+| `obj.get()` with a dot path | 24 million |
+| `schema.parse()` on a five-field object | 1.6 million |
+| `emitter.emit()` to two listeners | 35 to 60 million |
+| `db.get()` by primary key | 460,000 |
+| `db.getAll()` of 200 rows | 7,400 |
+
+Compared with 2.0, the logger is about a hundred times faster, dates with names thirty times, ids ten to forty times and SQLite reads three to four times. The [changelog](https://github.com/ix-xs/node-comfort/blob/main/CHANGELOG.md) has the list.
+
+These are micro-benchmarks: they say what the library costs, not how fast your program is. Measure your own code with `time.stopwatch()` or `time.measure()` before you optimize it.
+
 ## ES modules
 
-When you `import` the root package from an ES module, Node.js has to read every named export up front, which loads every namespace (about 40 ms). To keep startup lean in ES modules, import the namespaces you need from their own entry points:
+When you `import` the root package from an ES module, Node.js has to read every named export up front, which loads every namespace (about 45 ms). To keep startup lean in ES modules, import the namespaces you need from their own entry points:
 
 ```js
 import { slugify } from "@ix-xs/node-comfort/str";
@@ -33,6 +57,6 @@ Each entry point loads only its own module and the few it depends on.
 ## Tips
 
 - **Import namespaces directly in hot paths of short-lived scripts** (CLIs, serverless functions), where startup time matters most.
-- **Enable Node's compile cache in your app** for faster startups across the board: `node --enable-compile-cache app.js`, or `NODE_COMPILE_CACHE=.cache` (Node 22.1+). This speeds up every module, not just this one.
+- **Enable Node's compile cache in your app** for faster startups across the board: set `NODE_COMPILE_CACHE=.cache`, or call `require("node:module").enableCompileCache()` at the top of your entry file. This speeds up every module, not just this one.
 - **Reuse clients and caches.** `nc.http.create()` and `new nc.Cache()` are cheap, but creating them once and sharing them avoids repeated work.
 - **Use `db.insertMany()`** for bulk inserts: one transaction is dramatically faster than thousands of separate ones.

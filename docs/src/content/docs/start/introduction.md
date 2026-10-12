@@ -22,7 +22,7 @@ node-comfort is built only on those native modules. You get:
 - **One dependency instead of twenty.** Nothing gets installed alongside it, and nothing runs at install time.
 - **Consistent APIs.** Durations are always `"5m"` or milliseconds, options are always the last argument, and errors always carry a stable `code`.
 - **Documentation where you work.** Every function, parameter and option is described and typed, so your editor can answer most questions before you open a browser.
-- **Speed.** Requiring the package costs about 3 ms; each namespace loads the first time you use it.
+- **Speed.** Requiring the package costs about 4 ms; each namespace loads the first time you use it.
 
 ## What's inside
 

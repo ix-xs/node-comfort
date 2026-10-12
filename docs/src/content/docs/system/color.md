@@ -18,7 +18,7 @@ Modifiers: `bold`, `dim`, `italic`, `underline`, `overline`, `inverse`, `hidden`
 
 Colors: `black`, `red`, `green`, `yellow`, `blue`, `magenta`, `cyan`, `white`, `gray`, and their `Bright` versions (`redBright`...). Backgrounds use a `bg` prefix: `bgRed`, `bgBlueBright`...
 
-Nesting works: `color.red(`a ${color.blue("b")} c`)` keeps the red after the blue part.
+Nesting works: ``color.red(`a ${color.blue("b")} c`)`` keeps the red after the blue part.
 
 ## Any color
 

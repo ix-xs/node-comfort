@@ -116,7 +116,7 @@ The codes work with Google Authenticator, 1Password, Authy and the rest. Codes f
 ## Webhook signatures
 
 ```js
-// sign the raw body, not the parsed JSON
+// check the raw body, not the parsed JSON
 if (!crypto.verifyHmac(req.rawBody, req.headers["x-hub-signature-256"], process.env.WEBHOOK_SECRET)) {
   return res.status(401).end();
 }

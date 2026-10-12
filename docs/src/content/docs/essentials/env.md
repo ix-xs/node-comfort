@@ -111,7 +111,7 @@ nc.env.load([".env.local", ".env"]);
 
 The `.env` loaded at startup is the exception: what it set has the lowest priority, so a file you load yourself wins over it. `nc.env.load(".env.local")` does what you expect, with nothing to turn off. The real environment still wins over every file.
 
-A reference such as `${HOST}` takes the value `HOST` ends up with. If the environment or `.env.local` sets `HOST`, a `URL=http://${HOST}` in `.env` follows it.
+A reference such as `${HOST}` uses the final value of `HOST`. If the environment or `.env.local` sets `HOST`, a `URL=http://${HOST}` in `.env` follows it.
 
 `load()` returns everything it read from the files. Missing files are skipped, unless you pass `required: true`.
 
