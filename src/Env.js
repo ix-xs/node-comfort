@@ -21,6 +21,7 @@
 const fs = require("node:fs");
 const nodePath = require("node:path");
 const { ValidationError } = require("./errors.js");
+const { parseDuration } = require("./internal/shared.js");
 
 /**
  * Options for `load()`.
@@ -28,6 +29,7 @@ const { ValidationError } = require("./errors.js");
  * @property {boolean} [override] Overwrite variables that are already set.
  * @property {boolean} [expand] Replace `${OTHER}` references. Defaults to `true`.
  * @property {boolean} [required] Throw if a file is missing.
+ * @property {boolean | string} [cascade] Also load the files that go with each one: `.env.production.local`, `.env.local`, `.env.production`, then `.env`. `true` takes the mode from `NODE_ENV`; a string names it. `.env.local` is skipped in test mode, so tests run the same for everyone.
  * @property {NodeJS.ProcessEnv} [target] Where to put the variables. Defaults to `process.env`.
  */
 
@@ -77,6 +79,18 @@ const { ValidationError } = require("./errors.js");
  * @typedef {{ -readonly [K in keyof T]: T[K] extends { optional: true } ? EnvVarValue<T[K]> | undefined : EnvVarValue<T[K]> }} EnvConfig
  */
 
+const _TRUE = ["true", "1", "yes", "y", "on"];
+const _FALSE = ["false", "0", "no", "n", "off", ""];
+
+/**
+ * Reads a variable, ignoring what objects inherit: without this,
+ * `TOSTRING` is fine but `toString` would come back as a function.
+ * @param {Record<string, string | undefined>} source
+ * @param {string} name
+ * @returns {string | undefined}
+ */
+const _raw = (source, name) => (Object.hasOwn(source, name) ? source[name] : undefined);
+
 /**
  * @param {string} name
  * @param {string} code
@@ -116,8 +130,8 @@ const _convert = (name, raw, spec) => {
     }
     case "boolean": {
       const lower = value.toLowerCase();
-      if (["true", "1", "yes", "y", "on"].includes(lower)) return true;
-      if (["false", "0", "no", "n", "off", ""].includes(lower)) return false;
+      if (_TRUE.includes(lower)) return true;
+      if (_FALSE.includes(lower)) return false;
       return _fail(name, "invalid_type", `must be a boolean (true/false, 1/0, yes/no, on/off), got "${raw}"`);
     }
     case "url": {
@@ -138,7 +152,6 @@ const _convert = (name, raw, spec) => {
       return value;
     }
     case "duration": {
-      const { parseDuration } = require("./Time.js");
       const ms = parseDuration(value);
       if (ms === null) _fail(name, "invalid_type", `must be a duration such as "30s", "5m" or "1h", got "${raw}"`);
       return ms;
@@ -166,16 +179,22 @@ const _convert = (name, raw, spec) => {
  * @returns {unknown}
  */
 const _read = (name, spec, source) => {
-  const raw = source[name];
+  const raw = _raw(source, name);
   if (raw === undefined || raw.trim() === "") {
     if ("default" in spec && spec.default !== undefined) {
       return spec.type === "duration" && typeof spec.default === "string" ? _convert(name, spec.default, spec) : spec.default;
     }
     if (spec.optional) return undefined;
-    return _fail(name, "required", "is required but is not set");
+    return _fail(name, "required", `is required but is not set${spec.description ? ` (${spec.description})` : ""}`);
   }
   return _convert(name, raw, spec);
 };
+
+const _LINE = /^[ \t]*(?:export[ \t]+)?([\w.-]+)[ \t]*[=:][ \t]*(?:("(?:\\.|[^"\\])*"|'[^']*'|`[^`]*`)[ \t]*(?:#[^\n]*)?|([^\n]*))$/gm;
+const _ESCAPE = /\\([nrt"\\$])/g;
+const _REFERENCE = /\\\$|\$\{([\w.]+)(?::?-([^}]*))?\}|\$([A-Za-z_]\w*)/g;
+/** @type {Record<string, string>} */
+const _ESCAPED = { n: "\n", r: "\r", t: "\t" };
 
 /**
  * Parses the text of a `.env` file: quotes, multi-line values, `export`,
@@ -190,51 +209,64 @@ const _read = (name, spec, source) => {
  * @returns {Record<string, string>}
  */
 function parse(content, options = {}) {
-  /** @type {Record<string, string>} */
-  const out = {};
+  // A Map, so that a variable called __proto__ or toString is a variable like any other.
+  /** @type {Map<string, string>} */
+  const out = new Map();
   /** @type {Set<string>} */
   const literal = new Set();
   const text = String(content).replace(/^\uFEFF/, "").replace(/\r\n?/g, "\n");
-  const regex = /^[ \t]*(?:export[ \t]+)?([\w.-]+)[ \t]*[=:][ \t]*(?:("(?:\\.|[^"\\])*"|'[^']*'|`[^`]*`)[ \t]*(?:#[^\n]*)?|([^\n]*))$/gm;
-  let match;
-  while ((match = regex.exec(text)) !== null) {
-    const [, key, quoted, bare] = match;
+  for (const [, key, quoted, bare] of text.matchAll(_LINE)) {
     let value;
     if (quoted !== undefined) {
       const quote = quoted[0];
       value = quoted.slice(1, -1);
-      if (quote === '"') value = value.replace(/\\([nrt"\\$])/g, (_, c) => ({ n: "\n", r: "\r", t: "\t" })[/** @type {"n"} */ (c)] ?? c);
+      if (quote === '"') value = value.replace(_ESCAPE, (_, char) => _ESCAPED[char] ?? char);
       if (quote === "'") literal.add(key);
+      else literal.delete(key);
     } else {
       value = (bare ?? "").replace(/(?:^|[ \t]+)#.*$/, "").trim();
+      literal.delete(key);
     }
-    out[key] = value;
+    out.set(key, value);
   }
   if (options.expand !== false) {
     const base = options.env ?? process.env;
-    const resolve = (/** @type {string} */ name, /** @type {Set<string>} */ seen) => {
-      if (seen.has(name)) return "";
-      if (name in out) return expandValue(out[name], new Set([...seen, name]), name);
-      return base[name] ?? "";
+    /**
+     * @param {string} name
+     * @param {string[]} seen The variables being expanded, to stop at a loop.
+     * @returns {string}
+     */
+    const resolve = (name, seen) => {
+      if (seen.includes(name)) return "";
+      const own = out.get(name);
+      return own !== undefined ? expand(own, [...seen, name], name) : _raw(base, name) ?? "";
     };
     /**
      * @param {string} value
-     * @param {Set<string>} seen
+     * @param {string[]} seen
      * @param {string} key
      * @returns {string}
      */
-    const expandValue = (value, seen, key) => {
-      if (literal.has(key)) return value;
-      return value.replace(/\\\$|\$\{([\w.]+)(?::?-([^}]*))?\}|\$([A-Za-z_]\w*)/g, (m, braced, fallback, bare) => {
-        if (m === "\\$") return "$";
-        const resolved = resolve(braced ?? bare, seen);
+    const expand = (value, seen, key) => {
+      if (literal.has(key) || !value.includes("$")) return value;
+      return value.replace(_REFERENCE, (match, braced, fallback, plain) => {
+        if (match === "\\$") return "$";
+        const resolved = resolve(braced ?? plain, seen);
         return resolved === "" && fallback !== undefined ? fallback : resolved;
       });
     };
-    for (const key of Object.keys(out)) out[key] = expandValue(out[key], new Set([key]), key);
+    for (const [key, value] of out) out.set(key, expand(value, [key], key));
   }
-  return out;
+  return Object.fromEntries(out);
 }
+
+/**
+ * The files that go with a `.env` file, most specific first.
+ * @param {string} file
+ * @param {string} mode
+ * @returns {string[]}
+ */
+const _cascade = (file, mode) => [`${file}.${mode}.local`, ...(mode === "test" ? [] : [`${file}.local`]), `${file}.${mode}`, file];
 
 /**
  * Loads `.env` files into `process.env`. The first file to set a variable
@@ -245,6 +277,7 @@ function parse(content, options = {}) {
  * env.load();                                // ./.env
  * env.load([".env.local", ".env"]);          // local values win
  * env.load(".env.test", { override: true });
+ * env.load(".env", { cascade: true });       // .env.production.local, .env.local, .env.production, .env
  *
  * @param {string | string[]} [files=".env"] Relative to the working directory.
  * @param {EnvLoadOptions} [options]
@@ -253,21 +286,31 @@ function parse(content, options = {}) {
  */
 function load(files = ".env", options = {}) {
   const target = options.target ?? process.env;
-  /** @type {Record<string, string>} */
-  const loaded = {};
-  for (const file of Array.isArray(files) ? files : [files]) {
-    const full = nodePath.resolve(process.cwd(), file);
-    if (!fs.existsSync(full)) {
-      if (options.required) throw new Error(`Environment file not found: ${full}`);
-      continue;
-    }
-    const values = parse(fs.readFileSync(full, "utf8"), { expand: options.expand, env: { ...target, ...loaded } });
-    for (const [key, value] of Object.entries(values)) {
-      if (!(key in loaded)) loaded[key] = value;
-      if (options.override || target[key] === undefined) target[key] = value;
+  const given = Array.isArray(files) ? files : [files];
+  const cascade = options.cascade === true ? mode() : options.cascade;
+  /** @type {Map<string, string>} */
+  const loaded = new Map();
+  for (const name of given) {
+    for (const file of cascade ? _cascade(name, cascade) : [name]) {
+      const full = nodePath.resolve(process.cwd(), file);
+      let content;
+      try {
+        content = fs.readFileSync(full, "utf8");
+      } catch (error) {
+        // Only the file you named has to exist, not the ones that go with it.
+        if (options.required && file === name) throw new Error(`Environment file not found: ${full}`, { cause: error });
+        continue;
+      }
+      const values = parse(content, { expand: options.expand, env: { ...target, ...Object.fromEntries(loaded) } });
+      for (const [key, value] of Object.entries(values)) {
+        if (!loaded.has(key)) loaded.set(key, value);
+      }
     }
   }
-  return loaded;
+  for (const [key, value] of loaded) {
+    if (options.override || _raw(target, key) === undefined) target[key] = value;
+  }
+  return Object.fromEntries(loaded);
 }
 
 /**
@@ -281,7 +324,7 @@ function load(files = ".env", options = {}) {
  * @returns {string | undefined}
  */
 function get(name, fallback) {
-  return process.env[name] ?? fallback;
+  return _raw(process.env, name) ?? fallback;
 }
 
 /**
@@ -291,7 +334,7 @@ function get(name, fallback) {
  * @returns {boolean}
  */
 function has(name) {
-  return process.env[name] !== undefined;
+  return _raw(process.env, name) !== undefined;
 }
 
 /**
@@ -490,6 +533,53 @@ function validate(spec, options = {}) {
 }
 
 /**
+ * Quotes a value when spaces, `#` or `$` would otherwise change its meaning.
+ * @param {string} text
+ */
+const _quote = (text) => {
+  if (!/[\s#"'`$\\]/.test(text)) return text;
+  if (!text.includes("'") && !text.includes("\n")) return `'${text}'`;
+  return `"${text.replace(/[\\"$]/g, "\\$&").replace(/\n/g, "\\n")}"`;
+};
+
+/**
+ * Writes the `.env.example` that goes with a `validate()` spec: one entry
+ * per variable, with its description, type and default. Keep the file in
+ * the repository so nobody has to read the code to know what to set.
+ *
+ * @example
+ * const spec = {
+ *   PORT: { type: "port", default: 3000, description: "Port to listen on" },
+ *   DATABASE_URL: { type: "url", description: "Postgres connection string" },
+ * };
+ * fs.writeFileSync(".env.example", env.example(spec));
+ * // # Port to listen on
+ * // # port, default: 3000
+ * // PORT=3000
+ * //
+ * // # Postgres connection string
+ * // # url, required
+ * // DATABASE_URL=
+ *
+ * @param {Record<string, EnvVarSpec>} spec
+ * @returns {string}
+ */
+function example(spec) {
+  const blocks = [];
+  for (const [name, entry] of Object.entries(spec)) {
+    const fallback = "default" in entry && entry.default !== undefined ? entry.default : undefined;
+    const text = fallback === undefined ? "" : Array.isArray(fallback) ? fallback.join(entry.type === "list" ? entry.separator ?? "," : ",") : typeof fallback === "object" ? JSON.stringify(fallback) : String(fallback);
+    const kind = entry.type === "enum" ? entry.values.join(" | ") : entry.type;
+    const lines = [];
+    if (entry.description) lines.push(...entry.description.split(/\r?\n/).map((line) => `# ${line}`));
+    lines.push(`# ${kind}, ${fallback !== undefined ? `default: ${text}` : entry.optional ? "optional" : "required"}`);
+    lines.push(`${name}=${_quote(text)}`);
+    blocks.push(lines.join("\n"));
+  }
+  return `${blocks.join("\n\n")}\n`;
+}
+
+/**
  * `NODE_ENV`, or `"development"` when it's not set.
  *
  * @returns {string}
@@ -548,6 +638,7 @@ module.exports = {
   json,
   oneOf,
   validate,
+  example,
   mode,
   isProduction,
   isDevelopment,

@@ -1135,3 +1135,145 @@ describe("cli", () => {
     assert.equal(nc.color.strip(written), "100% $& $1 $& $1\n");
   });
 });
+
+describe("sys", () => {
+  const { sys } = nc;
+  const node = process.execPath;
+
+  it("a timeout also stops what the command started", async () => {
+    const os = require("node:os");
+    const path = require("node:path");
+    const fs = require("node:fs");
+    const pidFile = path.join(fs.realpathSync(os.tmpdir()), `nc-tree-${process.pid}.pid`);
+    const script = "require('fs').writeFileSync(process.argv[1], String(process.pid)); setInterval(() => {}, 1000)";
+    // exec goes through a shell: the script is the grandchild
+    await assert.rejects(sys.exec(`"${node}" -e "${script}" "${pidFile}"`, { timeout: 3000 }), { timedOut: true });
+    const pid = Number(fs.readFileSync(pidFile, "utf8"));
+    fs.rmSync(pidFile, { force: true });
+    let alive = true;
+    for (let i = 0; i < 40 && alive; i++) {
+      await sleep(100);
+      try {
+        process.kill(pid, 0);
+      } catch {
+        alive = false;
+      }
+    }
+    if (alive) process.kill(pid);
+    // Without a process group, a POSIX shell may leave the script running: Windows is where this used to leak.
+    if (process.platform === "win32") assert.equal(alive, false, "the script outlived its shell");
+  });
+
+  it("a timeout that can't be read is refused", async () => {
+    await assert.rejects(sys.run(node, ["-e", "1"], { timeout: "soon" }), TypeError);
+    assert.equal((await sys.run(node, ["-e", "console.log('ok')"], { timeout: "30s" })).stdout, "ok");
+  });
+
+  it("env replaces a variable whatever its case on Windows, and undefined removes it", async () => {
+    process.env.NC_HARDENING_GONE = "here";
+    try {
+      const { stdout } = await sys.run(node, ["-e", "console.log(String(process.env.NC_HARDENING_GONE), Object.keys(process.env).filter((k) => k.toUpperCase() === 'PATH').length)"], {
+        env: { NC_HARDENING_GONE: undefined, PATH: process.env.PATH },
+      });
+      assert.equal(stdout, "undefined 1");
+    } finally {
+      delete process.env.NC_HARDENING_GONE;
+    }
+  });
+
+  it("which answers the same question quickly the second time", () => {
+    const first = sys.which("node");
+    assert.ok(first);
+    assert.equal(sys.which("node"), first);
+    assert.equal(sys.which(""), undefined);
+    assert.equal(sys.which(/** @type {any} */ (undefined)), undefined);
+  });
+
+  it("shutdown runs the handlers with the reason, last one first", async () => {
+    const sysPath = JSON.stringify(require.resolve("../src/Sys.js"));
+    const script = `
+      const sys = require(${sysPath});
+      sys.onShutdown((reason) => console.log("first", reason));
+      sys.onShutdown(async (reason) => { await new Promise((done) => setTimeout(done, 20)); console.log("second", reason); }, { timeout: "5s" });
+      sys.shutdown(3);
+    `;
+    const result = await sys.run(node, ["-e", script], { reject: false });
+    assert.deepEqual(result.stdout.split(/\r?\n/), ["second shutdown", "first shutdown"]);
+    assert.equal(result.exitCode, 3);
+  });
+
+  it("freePort and localIP", async () => {
+    const net = require("node:net");
+    const server = net.createServer().listen(0);
+    await new Promise((resolve) => server.once("listening", resolve));
+    const taken = /** @type {import("node:net").AddressInfo} */ (server.address()).port;
+    try {
+      const other = await sys.freePort(taken);
+      assert.notEqual(other, taken);
+      assert.ok(other > 0 && other < 65536);
+      assert.ok((await sys.freePort()) > 0);
+      await assert.rejects(sys.freePort(70_000), RangeError);
+    } finally {
+      server.close();
+    }
+    const ip = sys.localIP();
+    assert.ok(ip === undefined || net.isIPv4(ip));
+  });
+});
+
+describe("env", () => {
+  const { env } = nc;
+
+  it("a variable named like something every object has is still a variable", () => {
+    assert.deepEqual(env.parse("A=${toString}\nB=${constructor}", { env: {} }), { A: "", B: "" });
+    assert.deepEqual(Object.keys(env.parse("__proto__=x\nconstructor=y")), ["__proto__", "constructor"]);
+    assert.deepEqual(env.parse("toString=y\nA=${toString}", { env: {} }), { toString: "y", A: "y" });
+    assert.throws(() => env.string("toString", { env: {} }), /is required but is not set/);
+    assert.equal(env.get("toString", "fallback"), "fallback");
+    assert.equal(env.has("constructor"), false);
+  });
+
+  it("a later plain value isn't treated as the earlier single-quoted one", () => {
+    assert.deepEqual(env.parse("A='$X'\nA=$X", { env: { X: "expanded" } }), { A: "expanded" });
+  });
+
+  it("load: the first file wins, cascade adds the files that go with it", () => {
+    const fs = require("node:fs");
+    const path = require("node:path");
+    const dir = fs.mkdtempSync(path.join(require("node:os").tmpdir(), "nc-env-"));
+    const write = (/** @type {string} */ name, /** @type {string} */ text) => fs.writeFileSync(path.join(dir, name), text);
+    write(".env", "A=base\nB=base\nC=base\nREF=${A}-ref");
+    write(".env.local", "B=local");
+    write(".env.production", "B=prod\nC=prod");
+    write(".env.production.local", "D=prod-local");
+    const file = path.join(dir, ".env");
+    try {
+      /** @type {Record<string, string>} */
+      let target = { A: "already" };
+      assert.deepEqual(env.load([path.join(dir, ".env.local"), file], { target, override: true }), { B: "local", A: "base", C: "base", REF: "base-ref" });
+      assert.deepEqual(target, { A: "base", B: "local", C: "base", REF: "base-ref" });
+      target = {};
+      assert.deepEqual(env.load(file, { target, cascade: "production" }), { D: "prod-local", B: "local", C: "prod", A: "base", REF: "base-ref" });
+      assert.equal(env.load(file, { target: {}, cascade: "test" }).B, "base", ".env.local is left out of tests");
+      assert.throws(() => env.load(path.join(dir, ".nope"), { target: {}, required: true }), /not found/);
+    } finally {
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("example writes a file that parse reads back", () => {
+    const spec = /** @type {const} */ ({
+      PORT: { type: "port", default: 3000, description: "Port to listen on" },
+      DATABASE_URL: { type: "url", description: "Postgres connection string" },
+      GREETING: { type: "string", default: "hello world # not a comment" },
+      QUOTE: { type: "string", default: "it's $5" },
+      TAGS: { type: "list", default: ["a", "b"] },
+      SENTRY_DSN: { type: "url", optional: true },
+    });
+    const text = env.example(spec);
+    assert.ok(text.startsWith("# Port to listen on\n# port, default: 3000\nPORT=3000\n\n# Postgres connection string\n# url, required\nDATABASE_URL=\n"));
+    assert.ok(text.includes("# url, optional\nSENTRY_DSN=\n"));
+    assert.deepEqual(env.parse(text, { expand: false }), { PORT: "3000", DATABASE_URL: "", GREETING: "hello world # not a comment", QUOTE: "it's $5", TAGS: "a,b", SENTRY_DSN: "" });
+    assert.throws(() => env.validate(spec, { env: {} }), /DATABASE_URL: is required but is not set \(Postgres connection string\)/);
+  });
+});
