@@ -74,6 +74,21 @@ const { types } = require("node:util");
  * Week settings.
  * @typedef {object} WeekOptions
  * @property {0 | 1 | 2 | 3 | 4 | 5 | 6} [weekStartsOn] First day of the week: `0` for Sunday, `1` for Monday. Defaults to `1`.
+ * @property {string} [timeZone] Zone whose calendar is used. Defaults to the global zone, then the system's.
+ */
+
+/**
+ * Options for `parse()`.
+ * @typedef {object} ParseDateOptions
+ * @property {string} [locale] Language of month names in the text. Defaults to the global locale.
+ * @property {string} [timeZone] Zone the text is written in, unless it carries its own offset. Defaults to the global zone, then the system's.
+ */
+
+/**
+ * Options for `range()`.
+ * @typedef {object} DateRangeOptions
+ * @property {number} [step] How many units between two dates. Defaults to `1`.
+ * @property {string} [timeZone] Zone whose calendar is used for days, months and years.
  */
 
 /**
@@ -97,6 +112,7 @@ const { types } = require("node:util");
  * @property {DateInput} [from] `nextRun()` only: search after this date. Defaults to now.
  * @property {boolean} [unref] Let the process exit even if the schedule is active.
  * @property {boolean} [overlap] Start a run even if the previous one hasn't finished. By default it's skipped.
+ * @property {boolean} [immediate] `cron()` only: also run once right away.
  * @property {(error: unknown) => void} [onError] Called when the task fails.
  */
 
@@ -119,19 +135,9 @@ const { types } = require("node:util");
  * @property {() => void} reset Starts over.
  */
 
-const MS = { ms: 1, s: 1000, m: 60_000, h: 3_600_000, d: 86_400_000, w: 604_800_000 };
+const shared = require("./internal/shared.js");
 
-/** @type {Record<string, keyof typeof MS | "M" | "y">} */
-const UNIT_ALIASES = {
-  ms: "ms", msec: "ms", milli: "ms", millis: "ms", millisecond: "ms", milliseconds: "ms",
-  s: "s", sec: "s", secs: "s", second: "s", seconds: "s",
-  m: "m", min: "m", mins: "m", minute: "m", minutes: "m",
-  h: "h", hr: "h", hrs: "h", hour: "h", hours: "h",
-  d: "d", day: "d", days: "d",
-  w: "w", wk: "w", wks: "w", week: "w", weeks: "w",
-  M: "M", mo: "M", month: "M", months: "M",
-  y: "y", yr: "y", yrs: "y", year: "y", years: "y",
-};
+const { MS, intl, unitOf: _unit, setLongTimeout: _longTimeout } = shared;
 
 /** Global defaults. English by default so output never depends on the machine. */
 const _config = { locale: "en", timeZone: /** @type {string | undefined} */ (undefined) };
@@ -148,11 +154,6 @@ const _toDate = (value) => (types.isDate(value) ? new Date(value.getTime()) : va
  */
 const _pad = (n, len = 2) => String(Math.abs(n)).padStart(len, "0");
 
-/**
- * @param {string} unit
- * @returns {keyof typeof MS | "M" | "y" | undefined}
- */
-const _unit = (unit) => UNIT_ALIASES[unit] ?? UNIT_ALIASES[unit.toLowerCase()];
 
 /** @type {Map<string, Intl.DateTimeFormat>} */
 const _dtfCache = new Map();
@@ -227,41 +228,120 @@ const _fromWall = (year, month, day, hour, minute, second, timeZone) => {
  * @param {number} year
  * @param {number} month 1-12
  */
-const _daysIn = (year, month) => new Date(Date.UTC(year, month, 0)).getUTCDate();
+const _daysIn = (year, month) => (month === 2 ? ((year % 4 === 0 && year % 100 !== 0) || year % 400 === 0 ? 29 : 28) : month === 4 || month === 6 || month === 9 || month === 11 ? 30 : 31);
+
+/**
+ * Wall-clock time in a zone to an instant. A time that happens twice (clocks
+ * going back) keeps its first occurrence; one that never happens (clocks
+ * going forward) moves past the gap.
+ * @param {number} year
+ * @param {number} month 1-12
+ * @param {number} day
+ * @param {number} hour
+ * @param {number} minute
+ * @param {number} second
+ * @param {number} ms
+ * @param {string} [timeZone]
+ * @returns {Date}
+ */
+const _instantOf = (year, month, day, hour, minute, second, ms, timeZone) => {
+  if (!timeZone) return new Date(year, month - 1, day, hour, minute, second, ms);
+  const guess = Date.UTC(year, month - 1, day, hour, minute, second, ms);
+  // The offsets a day before and a day after frame any clock change.
+  const early = guess - _offset(new Date(guess - MS.d), timeZone) * 60_000;
+  const late = guess - _offset(new Date(guess + MS.d), timeZone) * 60_000;
+  if (early === late) return new Date(early);
+  const first = Math.min(early, late);
+  const at = _parts(new Date(first), timeZone);
+  if (at.day === day && at.hour === hour && at.minute === minute) return new Date(first);
+  return new Date(Math.max(early, late));
+};
+
+/**
+ * The first moment of a unit, as wall-clock fields.
+ * @param {{ year: number, month: number, day: number, hour: number, minute: number, second: number, weekday: number }} at
+ * @param {string} unit
+ * @param {number} [weekStartsOn]
+ * @returns {[number, number, number, number, number, number] | undefined}
+ */
+const _startWall = (at, unit, weekStartsOn) => {
+  switch (unit) {
+    case "year": return [at.year, 1, 1, 0, 0, 0];
+    case "quarter": return [at.year, Math.floor((at.month - 1) / 3) * 3 + 1, 1, 0, 0, 0];
+    case "month": return [at.year, at.month, 1, 0, 0, 0];
+    case "week":
+    case "isoWeek": {
+      const first = unit === "isoWeek" ? 1 : weekStartsOn ?? 1;
+      const monday = new Date(Date.UTC(at.year, at.month - 1, at.day - ((at.weekday - first + 7) % 7)));
+      return [monday.getUTCFullYear(), monday.getUTCMonth() + 1, monday.getUTCDate(), 0, 0, 0];
+    }
+    case "day": return [at.year, at.month, at.day, 0, 0, 0];
+    case "hour": return [at.year, at.month, at.day, at.hour, 0, 0];
+    case "minute": return [at.year, at.month, at.day, at.hour, at.minute, 0];
+    case "second": return [at.year, at.month, at.day, at.hour, at.minute, at.second];
+    default: return undefined;
+  }
+};
+
+/**
+ * Calendar days from `b` to `a` in a zone: 1 means "the day after".
+ * @param {Date} a
+ * @param {Date} b
+ * @param {string} [timeZone]
+ * @returns {number}
+ */
+const _dayDelta = (a, b, timeZone) => {
+  const x = _parts(a, timeZone);
+  const y = _parts(b, timeZone);
+  return Math.round((Date.UTC(x.year, x.month - 1, x.day) - Date.UTC(y.year, y.month - 1, y.day)) / MS.d);
+};
 
 /**
  * Adds calendar months, keeping the day in range (Jan 31 + 1 month = end of Feb).
  * @param {Date} d
  * @param {number} months
+ * @param {string} [timeZone]
  * @returns {Date}
  */
-const _addMonths = (d, months) => {
-  const out = new Date(d.getTime());
-  const day = out.getDate();
-  out.setDate(1);
-  out.setMonth(out.getMonth() + months);
-  out.setDate(Math.min(day, _daysIn(out.getFullYear(), out.getMonth() + 1)));
-  return out;
+const _addMonths = (d, months, timeZone) => {
+  const at = _parts(d, timeZone);
+  const index = at.year * 12 + at.month - 1 + Math.trunc(months);
+  const year = Math.floor(index / 12);
+  const month = index - year * 12 + 1;
+  return _instantOf(year, month, Math.min(at.day, _daysIn(year, month)), at.hour, at.minute, at.second, at.ms, timeZone);
 };
 
 /**
- * `setTimeout` that also works past its 24.8-day limit.
- * @param {() => void} fn
- * @param {number} ms
- * @param {boolean} unref
- * @returns {() => void}
+ * Adds a duration written as text: a fixed one (`"1h30m"`) or one with
+ * calendar units (`"1 month"`, `"2y 3d"`).
+ * @param {Date} d
+ * @param {string} text
+ * @param {1 | -1} sign
+ * @param {string} [timeZone]
+ * @returns {Date}
  */
-const _longTimeout = (fn, ms, unref) => {
-  const MAX = 2 ** 31 - 1;
-  /** @type {NodeJS.Timeout} */
-  let timer;
-  const schedule = (/** @type {number} */ remaining) => {
-    timer = setTimeout(() => (remaining > MAX ? schedule(remaining - MAX) : fn()), Math.min(remaining, MAX));
-    if (unref) timer.unref();
-  };
-  schedule(Math.max(0, ms));
-  return () => clearTimeout(timer);
+const _addText = (d, text, sign, timeZone) => {
+  const fixed = shared.parseDuration(text);
+  if (fixed !== null) return new Date(d.getTime() + sign * fixed);
+  const regex = /([-+]?\d*\.?\d+)\s*([a-zA-Z]+)/g;
+  let months = 0;
+  let ms = 0;
+  let consumed = "";
+  let match;
+  while ((match = regex.exec(text)) !== null) {
+    const unit = _unit(match[2]);
+    if (!unit) break;
+    const amount = Number(match[1]);
+    if (unit === "M") months += amount;
+    else if (unit === "y") months += amount * 12;
+    else ms += amount * MS[unit];
+    consumed += match[0];
+  }
+  if (!consumed || consumed.replace(/\s+/g, "") !== text.replace(/[\s,]+|and/g, "")) throw new TypeError(`Invalid duration: ${JSON.stringify(text)}`);
+  const moved = months ? _addMonths(d, sign * months, timeZone) : d;
+  return new Date(moved.getTime() + sign * ms);
 };
+
 
 /**
  * @param {() => unknown} task
@@ -364,39 +444,7 @@ function offset(timeZone, date) {
  * @returns {number | null} `null` when it isn't a duration.
  */
 function parseDuration(input) {
-  if (typeof input === "number") return Number.isFinite(input) ? input : null;
-  if (typeof input !== "string") return null;
-  const text = input.trim();
-  if (!text) return null;
-  if (/^[-+]?\d+(?:\.\d+)?$/.test(text)) return Number(text);
-
-  const iso = /^([-+])?P(?:(\d+(?:[.,]\d+)?)W)?(?:(\d+(?:[.,]\d+)?)D)?(?:T(?:(\d+(?:[.,]\d+)?)H)?(?:(\d+(?:[.,]\d+)?)M)?(?:(\d+(?:[.,]\d+)?)S)?)?$/i.exec(text);
-  if (iso && /\d/.test(text)) {
-    const [, sign, w, d, h, m, s] = iso;
-    const n = (/** @type {string | undefined} */ v) => (v ? Number(v.replace(",", ".")) : 0);
-    const total = n(w) * MS.w + n(d) * MS.d + n(h) * MS.h + n(m) * MS.m + n(s) * MS.s;
-    return sign === "-" ? -total : total;
-  }
-
-  const clock = /^([-+])?(?:(\d+):)?(\d+):(\d{1,2})(?:\.(\d{1,3}))?$/.exec(text);
-  if (clock) {
-    const [, sign, h, m, s, ms] = clock;
-    const total = Number(h ?? 0) * MS.h + Number(m) * MS.m + Number(s) * MS.s + (ms ? Number(ms.padEnd(3, "0")) : 0);
-    return sign === "-" ? -total : total;
-  }
-
-  const regex = /(-?\d*\.?\d+)\s*([a-zA-Z]+)/g;
-  let total = 0;
-  let consumed = "";
-  let match;
-  while ((match = regex.exec(text)) !== null) {
-    const unit = _unit(match[2]);
-    if (!unit || unit === "M" || unit === "y") return null;
-    total += Number(match[1]) * MS[unit];
-    consumed += match[0];
-  }
-  if (!consumed || consumed.replace(/\s+/g, "") !== text.replace(/[\s,]+|and/g, "")) return null;
-  return total;
+  return shared.parseDuration(input);
 }
 
 /**
@@ -428,20 +476,21 @@ function formatDuration(ms, options = {}) {
 
   const locale = options.locale ?? _config.locale;
   const showMs = options.milliseconds ?? true;
-  /** @type {Array<{ v: number, short: string, unit: string }>} */
-  const parts = [];
-  for (const [size, short, unit] of /** @type {Array<[number, string, string]>} */ ([[MS.d, "d", "day"], [MS.h, "h", "hour"], [MS.m, "m", "minute"], [MS.s, "s", "second"], [1, "ms", "millisecond"]])) {
-    const v = Math.floor(rest / size);
-    rest -= v * size;
-    if (v > 0 && (unit !== "millisecond" || showMs)) parts.push({ v, short, unit });
+  const limit = options.units ?? Infinity;
+  /** @param {string} unit */
+  const long = (unit) => intl.number(locale, { style: "unit", unit, unitDisplay: "long" });
+  let out = "";
+  let shown = 0;
+  for (let i = 0; i < _DURATION_UNITS.length && shown < limit; i++) {
+    const [size, short, unit] = _DURATION_UNITS[i];
+    const value = Math.floor(rest / size);
+    rest -= value * size;
+    if (value === 0 || (unit === "millisecond" && !showMs)) continue;
+    out += `${shown ? " " : ""}${options.long ? long(unit).format(value) : `${value}${short}`}`;
+    shown++;
   }
-  if (!parts.length) {
-    return options.long ? new Intl.NumberFormat(locale, { style: "unit", unit: "second", unitDisplay: "long" }).format(0) : "0s";
-  }
-  return sign + parts
-    .slice(0, options.units ?? Infinity)
-    .map((p) => (options.long ? new Intl.NumberFormat(locale, { style: "unit", unit: p.unit, unitDisplay: "long" }).format(p.v) : `${p.v}${p.short}`))
-    .join(" ");
+  if (!shown) return options.long ? long("second").format(0) : "0s";
+  return sign + out;
 }
 
 /**
@@ -460,16 +509,13 @@ function formatDuration(ms, options = {}) {
  */
 function relative(date, from, options = {}) {
   const locale = options.locale ?? _config.locale;
+  const style = options.style ?? "long";
   const diffMs = _toDate(date).getTime() - _toDate(from).getTime();
   const abs = Math.abs(diffMs);
-  if (abs < MS.s) return new Intl.RelativeTimeFormat(locale, { numeric: "auto", style: options.style ?? "long" }).format(0, "second");
-  /** @type {Array<[number, number, Intl.RelativeTimeFormatUnit]>} */
-  const scale = [
-    [MS.m, MS.s, "second"], [MS.h, MS.m, "minute"], [MS.d, MS.h, "hour"], [MS.w, MS.d, "day"],
-    [MS.d * 30, MS.w, "week"], [MS.d * 365, MS.d * 30, "month"], [Infinity, MS.d * 365, "year"],
-  ];
-  const rtf = new Intl.RelativeTimeFormat(locale, { numeric: options.numeric ?? "always", style: options.style ?? "long" });
-  for (const [limit, size, unit] of scale) {
+  if (abs < MS.s) return intl.relativeTime(locale, { numeric: "auto", style }).format(0, "second");
+  const rtf = intl.relativeTime(locale, { numeric: options.numeric ?? "always", style });
+  for (let i = 0; i < _RELATIVE_SCALE.length; i++) {
+    const [limit, size, unit] = _RELATIVE_SCALE[i];
     if (abs < limit) {
       const value = Math.floor(abs / size);
       return rtf.format(diffMs < 0 ? -value : value, unit);
@@ -495,24 +541,14 @@ function calendar(date, options = {}) {
   const locale = options.locale ?? _config.locale;
   const timeZone = options.timeZone ?? _config.timeZone;
   const d = _toDate(date);
-  const now = _toDate(options.now);
-  const p = _parts(d, timeZone);
-  const n = _parts(now, timeZone);
-  const dayIndex = (/** @type {{ year: number, month: number, day: number }} */ x) => Date.UTC(x.year, x.month - 1, x.day) / MS.d;
-  const delta = dayIndex(p) - dayIndex(n);
-  const hhmm = new Intl.DateTimeFormat(locale, { timeStyle: "short", timeZone }).format(d);
-  const at = (/** @type {string} */ label) => {
-    const joined = new Intl.DateTimeFormat(locale, { dateStyle: "full", timeStyle: "short", timeZone }).formatToParts(d);
-    const literal = joined.find((part, i) => part.type === "literal" && joined[i + 1]?.type === "hour")?.value ?? " ";
-    return `${label.charAt(0).toUpperCase()}${label.slice(1)}${literal}${hhmm}`;
-  };
-  if (Math.abs(delta) <= 1) {
-    return at(new Intl.RelativeTimeFormat(locale, { numeric: "auto" }).format(delta, "day"));
-  }
-  if (delta > 1 && delta < 7) {
-    return at(new Intl.DateTimeFormat(locale, { weekday: "long", timeZone }).format(d));
-  }
-  return new Intl.DateTimeFormat(locale, { dateStyle: "long", timeZone }).format(d);
+  const delta = _dayDelta(d, _toDate(options.now), timeZone);
+  if (delta < -1 || delta >= 7) return intl.dateTime(locale, { dateStyle: "long", timeZone }).format(d);
+  const hhmm = intl.dateTime(locale, { timeStyle: "short", timeZone }).format(d);
+  const label = delta <= 1 ? intl.relativeTime(locale, { numeric: "auto" }).format(delta, "day") : intl.dateTime(locale, { weekday: "long", timeZone }).format(d);
+  // The word that joins a date and a time in this language ("at", "à", "um").
+  const joined = intl.dateTime(locale, { dateStyle: "full", timeStyle: "short", timeZone }).formatToParts(d);
+  const literal = joined.find((part, i) => part.type === "literal" && joined[i + 1]?.type === "hour")?.value ?? " ";
+  return `${label.charAt(0).toUpperCase()}${label.slice(1)}${literal}${hhmm}`;
 }
 
 /**
@@ -528,6 +564,7 @@ function calendar(date, options = {}) {
  * | `dddd` / `ddd` | Monday / Mon | | `A` / `a` | PM / pm |
  * | `d` | weekday, 0 is Sunday | | `Z` / `ZZ` | +02:00 / +0200 |
  * | `W` / `WW` | ISO week | | `X` / `x` | Unix seconds / ms |
+ * | `Do` | 5th | | `z` | zone name, like CET |
  *
  * Text in brackets stays as is: `"[Today is] dddd"`.
  *
@@ -546,53 +583,246 @@ function format(date, pattern = "YYYY-MM-DD HH:mm:ss", options = {}) {
   if (Number.isNaN(d.getTime())) return "Invalid Date";
   const locale = options.locale ?? _config.locale;
   const timeZone = options.timeZone ?? _config.timeZone;
-  const p = _parts(d, timeZone);
-  const named = (/** @type {Intl.DateTimeFormatOptions} */ opt) => new Intl.DateTimeFormat(locale, { ...opt, timeZone }).format(d);
-  const tz = (/** @type {string} */ sep) => {
-    const off = _offset(d, timeZone);
-    return `${off < 0 ? "-" : "+"}${_pad(Math.floor(Math.abs(off) / 60))}${sep}${_pad(Math.abs(off) % 60)}`;
-  };
-  const h12 = p.hour % 12 === 0 ? 12 : p.hour % 12;
-  const isoWeek = () => weekOfYear(Date.UTC(p.year, p.month - 1, p.day), { utc: true });
+  const at = _parts(d, timeZone);
+  let compiled = _patterns.get(pattern);
+  if (compiled === undefined) {
+    compiled = _compile(pattern);
+    if (_patterns.size >= 200) _patterns.clear();
+    _patterns.set(pattern, compiled);
+  }
+  // Literal text and tokens alternate, starting with text.
+  let out = compiled[0];
+  for (let i = 1; i < compiled.length; i += 2) out += _token(compiled[i], d, at, locale, timeZone) + compiled[i + 1];
+  return out;
+}
 
-  return pattern.replace(
-    /\[([^\]]*)\]|YYYY|MMMM|dddd|SSS|MMM|ddd|YY|MM|DD|HH|hh|mm|ss|ZZ|WW|M|D|d|H|h|m|s|A|a|Z|Q|X|x|W/g,
-    (token, escaped) => {
-      if (escaped !== undefined) return escaped;
-      switch (token) {
-        case "YYYY": return String(p.year);
-        case "YY": return String(p.year).slice(-2);
-        case "Q": return String(Math.ceil(p.month / 3));
-        case "MMMM": return named({ month: "long" });
-        case "MMM": return named({ month: "short" });
-        case "MM": return _pad(p.month);
-        case "M": return String(p.month);
-        case "DD": return _pad(p.day);
-        case "D": return String(p.day);
-        case "dddd": return named({ weekday: "long" });
-        case "ddd": return named({ weekday: "short" });
-        case "d": return String(p.weekday);
-        case "HH": return _pad(p.hour);
-        case "H": return String(p.hour);
-        case "hh": return _pad(h12);
-        case "h": return String(h12);
-        case "mm": return _pad(p.minute);
-        case "m": return String(p.minute);
-        case "ss": return _pad(p.second);
-        case "s": return String(p.second);
-        case "SSS": return _pad(p.ms, 3);
-        case "A": return p.hour < 12 ? "AM" : "PM";
-        case "a": return p.hour < 12 ? "am" : "pm";
-        case "Z": return tz(":");
-        case "ZZ": return tz("");
-        case "X": return String(Math.floor(d.getTime() / 1000));
-        case "x": return String(d.getTime());
-        case "W": return String(isoWeek());
-        case "WW": return _pad(isoWeek());
-        default: return token;
+const _TOKENS = /\[([^\]]*)\]|YYYY|MMMM|dddd|SSS|MMM|ddd|Do|YY|MM|DD|HH|hh|mm|ss|ZZ|WW|M|D|d|H|h|m|s|A|a|Z|z|Q|X|x|W/g;
+
+/** @type {Map<string, string[]>} */
+const _patterns = new Map();
+
+/**
+ * Splits a pattern into literal text and tokens, alternating.
+ * @param {string} pattern
+ * @returns {string[]}
+ */
+const _compile = (pattern) => {
+  /** @type {string[]} */
+  const out = [""];
+  let last = 0;
+  for (const match of pattern.matchAll(_TOKENS)) {
+    const literal = pattern.slice(last, match.index);
+    last = match.index + match[0].length;
+    if (match[1] !== undefined) {
+      out[out.length - 1] += literal + match[1];
+      continue;
+    }
+    out[out.length - 1] += literal;
+    out.push(match[0], "");
+  }
+  out[out.length - 1] += pattern.slice(last);
+  return out;
+};
+
+/**
+ * @param {Date} d
+ * @param {string | undefined} timeZone
+ * @param {string} separator
+ */
+const _offsetText = (d, timeZone, separator) => {
+  const offset = _offset(d, timeZone);
+  const abs = Math.abs(offset);
+  return `${offset < 0 ? "-" : "+"}${_pad(Math.floor(abs / 60))}${separator}${_pad(abs % 60)}`;
+};
+
+/**
+ * @param {string} token
+ * @param {Date} d
+ * @param {{ year: number, month: number, day: number, hour: number, minute: number, second: number, ms: number, weekday: number }} at
+ * @param {string} locale
+ * @param {string} [timeZone]
+ * @returns {string}
+ */
+const _token = (token, d, at, locale, timeZone) => {
+  switch (token) {
+    case "YYYY": return String(at.year);
+    case "YY": return String(at.year).slice(-2);
+    case "Q": return String(Math.ceil(at.month / 3));
+    case "MMMM": return intl.dateTime(locale, { month: "long", timeZone }).format(d);
+    case "MMM": return intl.dateTime(locale, { month: "short", timeZone }).format(d);
+    case "MM": return _pad(at.month);
+    case "M": return String(at.month);
+    case "DD": return _pad(at.day);
+    case "D": return String(at.day);
+    case "Do": return require("./Num.js").ordinal(at.day, { locale });
+    case "dddd": return intl.dateTime(locale, { weekday: "long", timeZone }).format(d);
+    case "ddd": return intl.dateTime(locale, { weekday: "short", timeZone }).format(d);
+    case "d": return String(at.weekday);
+    case "HH": return _pad(at.hour);
+    case "H": return String(at.hour);
+    case "hh": return _pad(at.hour % 12 === 0 ? 12 : at.hour % 12);
+    case "h": return String(at.hour % 12 === 0 ? 12 : at.hour % 12);
+    case "mm": return _pad(at.minute);
+    case "m": return String(at.minute);
+    case "ss": return _pad(at.second);
+    case "s": return String(at.second);
+    case "SSS": return _pad(at.ms, 3);
+    case "A": return at.hour < 12 ? "AM" : "PM";
+    case "a": return at.hour < 12 ? "am" : "pm";
+    case "Z": return _offsetText(d, timeZone, ":");
+    case "ZZ": return _offsetText(d, timeZone, "");
+    case "z": return intl.dateTime(locale, { timeZoneName: "short", timeZone }).formatToParts(d).find((part) => part.type === "timeZoneName")?.value ?? "";
+    case "X": return String(Math.floor(d.getTime() / 1000));
+    case "x": return String(d.getTime());
+    case "W": return String(_isoWeek(at.year, at.month, at.day));
+    case "WW": return _pad(_isoWeek(at.year, at.month, at.day));
+    default: return token;
+  }
+};
+
+/**
+ * ISO week number of a calendar date.
+ * @param {number} year
+ * @param {number} month 1-12
+ * @param {number} day
+ * @returns {number}
+ */
+const _isoWeek = (year, month, day) => {
+  const utc = new Date(Date.UTC(year, month - 1, day));
+  utc.setUTCDate(utc.getUTCDate() + 4 - (utc.getUTCDay() || 7));
+  return Math.ceil(((utc.getTime() - Date.UTC(utc.getUTCFullYear(), 0, 1)) / MS.d + 1) / 7);
+};
+
+/** @type {Array<[number, string, string]>} */
+const _DURATION_UNITS = [[MS.d, "d", "day"], [MS.h, "h", "hour"], [MS.m, "m", "minute"], [MS.s, "s", "second"], [1, "ms", "millisecond"]];
+
+/** @type {Array<[number, number, Intl.RelativeTimeFormatUnit]>} */
+const _RELATIVE_SCALE = [
+  [MS.m, MS.s, "second"], [MS.h, MS.m, "minute"], [MS.d, MS.h, "hour"], [MS.w, MS.d, "day"],
+  [MS.d * 30, MS.w, "week"], [MS.d * 365, MS.d * 30, "month"], [Infinity, MS.d * 365, "year"],
+];
+
+/** @type {Map<string, { regex: RegExp, tokens: string[] }>} */
+const _parsers = new Map();
+
+/** @type {Record<string, string>} */
+const _PARSE_TOKENS = {
+  YYYY: "(\\d{4})", YY: "(\\d{2})", MM: "(\\d{2})", M: "(\\d{1,2})", DD: "(\\d{2})", D: "(\\d{1,2})", Do: "(\\d{1,2})\\D{0,4}?",
+  HH: "(\\d{2})", H: "(\\d{1,2})", hh: "(\\d{2})", h: "(\\d{1,2})", mm: "(\\d{2})", m: "(\\d{1,2})", ss: "(\\d{2})", s: "(\\d{1,2})",
+  SSS: "(\\d{3})", A: "([AaPp][Mm])", a: "([AaPp][Mm])", Z: "(Z|[+-]\\d{2}:\\d{2})", ZZ: "(Z|[+-]\\d{4})", X: "(-?\\d+)", x: "(-?\\d+)",
+  MMMM: "([^\\d\\s,./-]+\\.?)", MMM: "([^\\d\\s,./-]+\\.?)", dddd: "[^\\d\\s,]+\\.?", ddd: "[^\\d\\s,]+\\.?",
+};
+
+/** @type {Map<string, Map<string, number>>} */
+const _monthNames = new Map();
+
+/**
+ * Month names of a language, long and short, mapped to 1-12.
+ * @param {string} locale
+ * @returns {Map<string, number>}
+ */
+const _monthsOf = (locale) => {
+  let names = _monthNames.get(locale);
+  if (!names) {
+    names = new Map();
+    for (let month = 1; month <= 12; month++) {
+      const sample = new Date(Date.UTC(2024, month - 1, 15));
+      for (const style of /** @type {const} */ (["long", "short"])) {
+        names.set(intl.dateTime(locale, { month: style, timeZone: "UTC" }).format(sample).toLowerCase().replace(/\.$/, ""), month);
       }
-    },
-  );
+    }
+    _monthNames.set(locale, names);
+  }
+  return names;
+};
+
+/**
+ * Reads a date written in a known format: the opposite of `format()`, with
+ * the same tokens. Parts the pattern doesn't have default to today's date
+ * and to midnight.
+ *
+ * @example
+ * time.parse("15/01/2024 14:30", "DD/MM/YYYY HH:mm");
+ * time.parse("15 janvier 2024", "D MMMM YYYY", { locale: "fr" });
+ * time.parse("2024-01-15 09:00", "YYYY-MM-DD HH:mm", { timeZone: "Asia/Tokyo" });
+ * time.parse("31/02/2024", "DD/MM/YYYY"); // undefined, no such day
+ *
+ * @param {string} text
+ * @param {string} pattern Tokens like `YYYY`, `MM`, `DD`, `HH`, `mm`, `ss`, `A`, `Z`. Text in brackets must match as is.
+ * @param {ParseDateOptions} [options]
+ * @returns {Date | undefined} `undefined` when the text doesn't match or isn't a real date.
+ */
+function parse(text, pattern, options = {}) {
+  let parser = _parsers.get(pattern);
+  if (!parser) {
+    const compiled = _compile(pattern);
+    const escape = (/** @type {string} */ literal) => literal.replace(/[.*+?^${}()|[\]\\]/g, "\\$&").replace(/\s+/g, "\\s+");
+    let source = escape(compiled[0]);
+    /** @type {string[]} */
+    const tokens = [];
+    for (let i = 1; i < compiled.length; i += 2) {
+      const expression = _PARSE_TOKENS[compiled[i]];
+      if (!expression) throw new TypeError(`parse() does not support the "${compiled[i]}" token`);
+      if (expression.startsWith("(")) tokens.push(compiled[i]);
+      source += expression + escape(compiled[i + 1]);
+    }
+    parser = { regex: new RegExp(`^\\s*${source}\\s*$`), tokens };
+    if (_parsers.size >= 200) _parsers.clear();
+    _parsers.set(pattern, parser);
+  }
+  const match = parser.regex.exec(String(text));
+  if (!match) return undefined;
+
+  const locale = options.locale ?? _config.locale;
+  const timeZone = options.timeZone ?? _config.timeZone;
+  /** @type {Record<string, number | undefined>} */
+  const found = {};
+  /** @type {string | undefined} */
+  let meridiem;
+  /** @type {number | undefined} */
+  let offset;
+  for (let i = 0; i < parser.tokens.length; i++) {
+    const token = parser.tokens[i];
+    const value = match[i + 1];
+    switch (token) {
+      case "YYYY": found.year = Number(value); break;
+      case "YY": found.year = 2000 + Number(value); break;
+      case "MM": case "M": found.month = Number(value); break;
+      case "MMMM": case "MMM": {
+        const month = _monthsOf(locale).get(value.toLowerCase().replace(/\.$/, ""));
+        if (month === undefined) return undefined;
+        found.month = month;
+        break;
+      }
+      case "DD": case "D": case "Do": found.day = Number(value); break;
+      case "HH": case "H": case "hh": case "h": found.hour = Number(value); break;
+      case "mm": case "m": found.minute = Number(value); break;
+      case "ss": case "s": found.second = Number(value); break;
+      case "SSS": found.ms = Number(value); break;
+      case "A": case "a": meridiem = value.toLowerCase(); break;
+      case "Z": case "ZZ": {
+        const digits = value.replace(":", "");
+        offset = value === "Z" ? 0 : (digits[0] === "-" ? -1 : 1) * (Number(digits.slice(1, 3)) * 60 + Number(digits.slice(3, 5)));
+        break;
+      }
+      case "X": return new Date(Number(value) * 1000);
+      case "x": return new Date(Number(value));
+    }
+  }
+  const today = _parts(new Date(), offset === undefined ? timeZone : "UTC");
+  const year = found.year ?? today.year;
+  const month = found.month ?? (found.year === undefined ? today.month : 1);
+  const day = found.day ?? (found.year === undefined && found.month === undefined ? today.day : 1);
+  let hour = found.hour ?? 0;
+  if (meridiem !== undefined) {
+    if (hour < 1 || hour > 12) return undefined;
+    hour = (hour % 12) + (meridiem === "pm" ? 12 : 0);
+  }
+  const minute = found.minute ?? 0;
+  const second = found.second ?? 0;
+  if (month < 1 || month > 12 || day < 1 || day > _daysIn(year, month) || hour > 23 || minute > 59 || second > 59) return undefined;
+  if (offset !== undefined) return new Date(Date.UTC(year, month - 1, day, hour, minute, second, found.ms ?? 0) - offset * 60_000);
+  return _instantOf(year, month, day, hour, minute, second, found.ms ?? 0, timeZone);
 }
 
 /**
@@ -617,19 +847,23 @@ function toISODate(date, options = {}) {
  * @example
  * time.add(new Date(), "2h30m");
  * time.add(new Date(), 3, "days");
+ * time.add(new Date(), "1 month");
  * time.add(new Date(2024, 0, 31), 1, "month"); // 2024-02-29
  *
  * @param {DateInput} date
- * @param {number | string} amount A number with `unit`, or a duration like `"1h30m"`.
+ * @param {number | string} amount A number with `unit`, or a duration like `"1h30m"` or `"1 month"`.
  * @param {CalendarUnit} [unit="ms"]
+ * @param {TimeZoneOptions} [options] The zone whose calendar months and years follow.
  * @returns {Date}
+ * @throws {TypeError} If a text amount isn't a duration.
  */
-function add(date, amount, unit = "ms") {
+function add(date, amount, unit = "ms", options = {}) {
   const d = _toDate(date);
-  if (typeof amount === "string") return new Date(d.getTime() + (parseDuration(amount) ?? 0));
+  const timeZone = options.timeZone ?? _config.timeZone;
+  if (typeof amount === "string") return _addText(d, amount, 1, timeZone);
   const u = _unit(unit) ?? "ms";
-  if (u === "M") return _addMonths(d, amount);
-  if (u === "y") return _addMonths(d, amount * 12);
+  if (u === "M") return _addMonths(d, amount, timeZone);
+  if (u === "y") return _addMonths(d, amount * 12, timeZone);
   return new Date(d.getTime() + amount * MS[u]);
 }
 
@@ -643,11 +877,13 @@ function add(date, amount, unit = "ms") {
  * @param {DateInput} date
  * @param {number | string} amount
  * @param {CalendarUnit} [unit="ms"]
+ * @param {TimeZoneOptions} [options]
  * @returns {Date}
+ * @throws {TypeError} If a text amount isn't a duration.
  */
-function subtract(date, amount, unit = "ms") {
-  if (typeof amount === "string") return add(date, -(parseDuration(amount) ?? 0));
-  return add(date, -amount, unit);
+function subtract(date, amount, unit = "ms", options = {}) {
+  if (typeof amount === "string") return _addText(_toDate(date), amount, -1, options.timeZone ?? _config.timeZone);
+  return add(date, -amount, unit, options);
 }
 
 /**
@@ -661,29 +897,35 @@ function subtract(date, amount, unit = "ms") {
  * @param {DateInput} a
  * @param {DateInput} b
  * @param {CalendarUnit} [unit="ms"]
+ * @param {TimeZoneOptions} [options] The zone whose calendar months and years follow.
  * @returns {number}
  */
-function diff(a, b, unit = "ms") {
+function diff(a, b, unit = "ms", options = {}) {
   const da = _toDate(a);
   const db = _toDate(b);
   const u = _unit(unit) ?? "ms";
   if (u === "M" || u === "y") {
+    const timeZone = options.timeZone ?? _config.timeZone;
     const sign = da >= db ? 1 : -1;
     const [late, early] = sign > 0 ? [da, db] : [db, da];
-    let months = (late.getFullYear() - early.getFullYear()) * 12 + late.getMonth() - early.getMonth();
-    if (_addMonths(early, months) > late) months--;
+    const x = _parts(late, timeZone);
+    const y = _parts(early, timeZone);
+    let months = (x.year - y.year) * 12 + x.month - y.month;
+    if (_addMonths(early, months, timeZone) > late) months--;
     return sign * (u === "y" ? Math.trunc(months / 12) : months) || 0;
   }
   return (da.getTime() - db.getTime()) / MS[u];
 }
 
 /**
- * A new `Date` at the start of the day, week, month... in local time.
+ * A new `Date` at the start of the day, week, month... in the global time
+ * zone, or the one you name.
  *
  * @example
- * time.startOf(new Date(), "day");                         // today at 00:00
- * time.startOf(new Date(), "week");                        // Monday at 00:00
- * time.startOf(new Date(), "week", { weekStartsOn: 0 });   // Sunday at 00:00
+ * time.startOf(new Date(), "day");                              // today at 00:00
+ * time.startOf(new Date(), "week");                             // Monday at 00:00
+ * time.startOf(new Date(), "week", { weekStartsOn: 0 });        // Sunday at 00:00
+ * time.startOf(new Date(), "day", { timeZone: "Asia/Tokyo" });  // midnight in Tokyo
  *
  * @param {DateInput} date
  * @param {StartOfUnit} unit
@@ -692,40 +934,9 @@ function diff(a, b, unit = "ms") {
  */
 function startOf(date, unit, options = {}) {
   const d = _toDate(date);
-  switch (unit) {
-    case "year":
-      d.setMonth(0, 1);
-      d.setHours(0, 0, 0, 0);
-      break;
-    case "quarter":
-      d.setMonth(Math.floor(d.getMonth() / 3) * 3, 1);
-      d.setHours(0, 0, 0, 0);
-      break;
-    case "month":
-      d.setDate(1);
-      d.setHours(0, 0, 0, 0);
-      break;
-    case "week":
-    case "isoWeek": {
-      const start = unit === "isoWeek" ? 1 : options.weekStartsOn ?? 1;
-      d.setDate(d.getDate() - ((d.getDay() - start + 7) % 7));
-      d.setHours(0, 0, 0, 0);
-      break;
-    }
-    case "day":
-      d.setHours(0, 0, 0, 0);
-      break;
-    case "hour":
-      d.setMinutes(0, 0, 0);
-      break;
-    case "minute":
-      d.setSeconds(0, 0);
-      break;
-    case "second":
-      d.setMilliseconds(0);
-      break;
-  }
-  return d;
+  const timeZone = options.timeZone ?? _config.timeZone;
+  const wall = _startWall(_parts(d, timeZone), unit, options.weekStartsOn);
+  return wall ? _instantOf(wall[0], wall[1], wall[2], wall[3], wall[4], wall[5], 0, timeZone) : d;
 }
 
 /**
@@ -740,21 +951,32 @@ function startOf(date, unit, options = {}) {
  * @returns {Date}
  */
 function endOf(date, unit, options = {}) {
-  const start = startOf(date, unit, options);
-  /** @type {Date} */
-  let next;
-  switch (unit) {
-    case "year": next = _addMonths(start, 12); break;
-    case "quarter": next = _addMonths(start, 3); break;
-    case "month": next = _addMonths(start, 1); break;
-    case "week":
-    case "isoWeek": next = new Date(start); next.setDate(next.getDate() + 7); break;
-    case "day": next = new Date(start); next.setDate(next.getDate() + 1); break;
-    case "hour": next = new Date(start.getTime() + MS.h); break;
-    case "minute": next = new Date(start.getTime() + MS.m); break;
-    default: next = new Date(start.getTime() + MS.s); break;
-  }
-  return new Date(next.getTime() - 1);
+  const d = _toDate(date);
+  const timeZone = options.timeZone ?? _config.timeZone;
+  const wall = _startWall(_parts(d, timeZone), unit, options.weekStartsOn);
+  if (!wall) return d;
+  // The start of the next unit, minus one millisecond.
+  const step = unit === "year" ? 0 : unit === "quarter" || unit === "month" ? 1 : unit === "week" || unit === "isoWeek" || unit === "day" ? 2 : unit === "hour" ? 3 : unit === "minute" ? 4 : 5;
+  wall[step] += unit === "quarter" ? 3 : unit === "week" || unit === "isoWeek" ? 7 : 1;
+  const next = new Date(Date.UTC(wall[0], wall[1] - 1, wall[2], wall[3], wall[4], wall[5]));
+  return new Date(_instantOf(next.getUTCFullYear(), next.getUTCMonth() + 1, next.getUTCDate(), next.getUTCHours(), next.getUTCMinutes(), next.getUTCSeconds(), 0, timeZone).getTime() - 1);
+}
+
+/**
+ * Are both dates in the same year, month, week, day, hour...?
+ *
+ * @example
+ * time.isSame(a, b, "month");
+ * time.isSame(a, b, "day", { timeZone: "America/New_York" });
+ *
+ * @param {DateInput} a
+ * @param {DateInput} b
+ * @param {StartOfUnit} unit
+ * @param {WeekOptions} [options]
+ * @returns {boolean}
+ */
+function isSame(a, b, unit, options = {}) {
+  return startOf(a, unit, options).getTime() === startOf(b, unit, options).getTime();
 }
 
 /**
@@ -833,7 +1055,7 @@ function isToday(date, options = {}) {
  * @returns {boolean}
  */
 function isYesterday(date, options = {}) {
-  return isSameDay(date, add(new Date(), -1, "d"), options);
+  return _dayDelta(_toDate(date), new Date(), options.timeZone ?? _config.timeZone) === -1;
 }
 
 /**
@@ -844,7 +1066,7 @@ function isYesterday(date, options = {}) {
  * @returns {boolean}
  */
 function isTomorrow(date, options = {}) {
-  return isSameDay(date, add(new Date(), 1, "d"), options);
+  return _dayDelta(_toDate(date), new Date(), options.timeZone ?? _config.timeZone) === 1;
 }
 
 /**
@@ -915,11 +1137,12 @@ function daysInMonth(dateOrYear, month) {
  * Day of the year, from 1 to 366.
  *
  * @param {DateInput} [date] Defaults to now.
+ * @param {TimeZoneOptions} [options]
  * @returns {number}
  */
-function dayOfYear(date) {
-  const d = _toDate(date);
-  return Math.round((Date.UTC(d.getFullYear(), d.getMonth(), d.getDate()) - Date.UTC(d.getFullYear(), 0, 1)) / MS.d) + 1;
+function dayOfYear(date, options = {}) {
+  const at = _parts(_toDate(date), options.timeZone ?? _config.timeZone);
+  return Math.round((Date.UTC(at.year, at.month - 1, at.day) - Date.UTC(at.year, 0, 1)) / MS.d) + 1;
 }
 
 /**
@@ -930,18 +1153,12 @@ function dayOfYear(date) {
  * time.weekOfYear(new Date(2021, 0, 3)); // 53, the last week of 2020
  *
  * @param {DateInput} [date] Defaults to now.
- * @param {{ utc?: boolean }} [options] Read the date in UTC.
+ * @param {{ utc?: boolean, timeZone?: string }} [options] `utc` reads the date in UTC, `timeZone` in another zone.
  * @returns {number}
  */
 function weekOfYear(date, options = {}) {
-  const d = _toDate(date);
-  const utc = options.utc
-    ? new Date(Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate()))
-    : new Date(Date.UTC(d.getFullYear(), d.getMonth(), d.getDate()));
-  const day = utc.getUTCDay() || 7;
-  utc.setUTCDate(utc.getUTCDate() + 4 - day);
-  const yearStart = Date.UTC(utc.getUTCFullYear(), 0, 1);
-  return Math.ceil(((utc.getTime() - yearStart) / MS.d + 1) / 7);
+  const at = _parts(_toDate(date), options.utc ? "UTC" : options.timeZone ?? _config.timeZone);
+  return _isoWeek(at.year, at.month, at.day);
 }
 
 /**
@@ -983,6 +1200,52 @@ function max(dates) {
  */
 function unix() {
   return Math.floor(Date.now() / 1000);
+}
+
+/**
+ * A `Date` from a Unix timestamp in seconds, as found in JWTs and many APIs.
+ *
+ * @example
+ * time.fromUnix(1705329000); // 2024-01-15T14:30:00.000Z
+ *
+ * @param {number} seconds
+ * @returns {Date}
+ */
+function fromUnix(seconds) {
+  return new Date(seconds * 1000);
+}
+
+/**
+ * Every date from `start` to `end`, both included, one unit apart. Handy
+ * for charts, calendars and reports.
+ *
+ * @example
+ * time.range("2024-01-01", "2024-01-07", "day");           // 7 dates
+ * time.range(start, end, "month");                          // the same day each month
+ * time.range(start, end, "minute", { step: 15 });           // every quarter of an hour
+ *
+ * @param {DateInput} start
+ * @param {DateInput} end
+ * @param {CalendarUnit} [unit="day"]
+ * @param {DateRangeOptions} [options]
+ * @returns {Date[]}
+ * @throws {RangeError} If the step isn't positive, or the range would hold more than a million dates.
+ */
+function range(start, end, unit = "day", options = {}) {
+  const from = _toDate(start);
+  const to = _toDate(end).getTime();
+  const step = options.step ?? 1;
+  if (!(step > 0)) throw new RangeError("range() needs a positive step");
+  /** @type {Date[]} */
+  const out = [];
+  // Each date is computed from the start, so a month-end start never drifts.
+  for (let i = 0; ; i++) {
+    const next = add(from, i * step, unit, options);
+    if (!(next.getTime() <= to)) break;
+    if (out.length >= 1_000_000) throw new RangeError("range() would return more than a million dates");
+    out.push(next);
+  }
+  return out;
 }
 
 /**
@@ -1057,7 +1320,7 @@ async function measure(fn) {
  * @throws {RangeError} If the interval isn't a positive duration.
  */
 function every(interval, task, options = {}) {
-  const ms = parseDuration(interval);
+  const ms = shared.parseDuration(interval);
   if (ms === null || ms <= 0) throw new RangeError(`Invalid interval: ${String(interval)}`);
   let stopped = false;
   let running = false;
@@ -1091,72 +1354,10 @@ function every(interval, task, options = {}) {
   };
 }
 
-/**
- * Parsed cron fields.
- * @typedef {{ seconds: Set<number>, minutes: Set<number>, hours: Set<number>, days: Set<number>, months: Set<number>, weekdays: Set<number>, anyDay: boolean, anyWeekday: boolean }} CronSpec
- */
-
-/** @type {Record<string, string>} */
-const _CRON_MACROS = {
-  "@yearly": "0 0 1 1 *", "@annually": "0 0 1 1 *", "@monthly": "0 0 1 * *", "@weekly": "0 0 * * 0",
-  "@daily": "0 0 * * *", "@midnight": "0 0 * * *", "@hourly": "0 * * * *",
-};
-const _MONTH_NAMES = ["jan", "feb", "mar", "apr", "may", "jun", "jul", "aug", "sep", "oct", "nov", "dec"];
-const _DAY_NAMES = ["sun", "mon", "tue", "wed", "thu", "fri", "sat"];
+const _parseCron = shared.parseCron;
 
 /**
- * @param {string} expression
- * @returns {CronSpec}
- */
-const _parseCron = (expression) => {
-  const text = _CRON_MACROS[expression.trim().toLowerCase()] ?? expression.trim();
-  const fields = text.split(/\s+/);
-  if (fields.length !== 5 && fields.length !== 6) throw new SyntaxError(`Invalid cron expression "${expression}": expected 5 or 6 fields`);
-  if (fields.length === 5) fields.unshift("0");
-  /** @type {(field: string, min: number, max: number, names?: string[]) => Set<number>} */
-  const parse = (field, min, max, names) => {
-    const values = new Set();
-    for (const part of field.split(",")) {
-      const [rangePart, stepPart] = part.split("/");
-      const step = stepPart === undefined ? 1 : Number(stepPart);
-      if (!Number.isInteger(step) || step < 1) throw new SyntaxError(`Invalid step "${part}" in cron expression "${expression}"`);
-      const toNumber = (/** @type {string} */ token) => {
-        const index = names ? names.indexOf(token.toLowerCase()) : -1;
-        const n = index >= 0 ? index + (min === 1 ? 1 : 0) : Number(token);
-        if (!Number.isInteger(n)) throw new SyntaxError(`Invalid value "${token}" in cron expression "${expression}"`);
-        return n;
-      };
-      let from = min;
-      let to = max;
-      if (rangePart !== "*" && rangePart !== "?") {
-        const [a, b] = rangePart.split("-");
-        from = toNumber(a);
-        to = b === undefined ? (stepPart === undefined ? from : max) : toNumber(b);
-      }
-      if (from < min || to > max || from > to) throw new SyntaxError(`Value out of range in "${part}" (allowed ${min}-${max}) in cron expression "${expression}"`);
-      for (let v = from; v <= to; v += step) values.add(v);
-    }
-    return values;
-  };
-  const weekdays = parse(fields[5], 0, 7, _DAY_NAMES);
-  if (weekdays.has(7)) {
-    weekdays.delete(7);
-    weekdays.add(0);
-  }
-  return {
-    seconds: parse(fields[0], 0, 59),
-    minutes: parse(fields[1], 0, 59),
-    hours: parse(fields[2], 0, 23),
-    days: parse(fields[3], 1, 31),
-    months: parse(fields[4], 1, 12, _MONTH_NAMES),
-    weekdays,
-    anyDay: fields[3] === "*" || fields[3] === "?",
-    anyWeekday: fields[5] === "*" || fields[5] === "?",
-  };
-};
-
-/**
- * @param {CronSpec} spec
+ * @param {import("./internal/shared").CronSpec} spec
  * @param {Date} from
  * @param {string | undefined} timeZone
  * @returns {Date | undefined}
@@ -1167,7 +1368,7 @@ const _nextCron = (spec, from, timeZone) => {
   const wall = new Date(Date.UTC(start.year, start.month - 1, start.day, start.hour, start.minute, start.second));
   const limit = wall.getTime() + 8 * 366 * MS.d;
   const dayMatches = () => {
-    const dom = spec.days.has(wall.getUTCDate());
+    const dom = spec.days.has(wall.getUTCDate()) || (spec.lastDay && wall.getUTCDate() === _daysIn(wall.getUTCFullYear(), wall.getUTCMonth() + 1));
     const dow = spec.weekdays.has(wall.getUTCDay());
     if (spec.anyDay && spec.anyWeekday) return true;
     if (spec.anyDay) return dow;
@@ -1209,9 +1410,10 @@ const _nextCron = (spec, from, timeZone) => {
  *
  * Expressions have 5 fields (`minute hour day month weekday`), or 6 with
  * seconds first. You can use `*`, lists (`1,15`), ranges (`1-5`), steps
- * (`*\/15`), names (`jan`, `mon-fri`) and `@daily`, `@hourly`, `@weekly`,
- * `@monthly`, `@yearly`. As in classic cron, when both the day and the
- * weekday are set, either one matching is enough.
+ * (`*\/15`), names (`jan`, `mon-fri`), `L` for the last day of the month,
+ * and `@daily`, `@hourly`, `@weekly`, `@monthly`, `@yearly`. As in classic
+ * cron, when both the day and the weekday are set, either one matching is
+ * enough.
  *
  * @example
  * time.nextRun("0 9 * * mon-fri");                              // next weekday at 09:00
@@ -1269,6 +1471,13 @@ function cron(expression, task, options = {}) {
     }, target.getTime() - Date.now(), options.unref ?? false);
   };
   plan(new Date());
+  if (options.immediate) {
+    running = true;
+    runs++;
+    void _run(task, options.onError).finally(() => {
+      running = false;
+    });
+  }
 
   return {
     stop: () => {
@@ -1293,6 +1502,7 @@ module.exports = {
   relative,
   calendar,
   format,
+  parse,
   toISODate,
   add,
   subtract,
@@ -1302,6 +1512,7 @@ module.exports = {
   isBefore,
   isAfter,
   isBetween,
+  isSame,
   isSameDay,
   isToday,
   isYesterday,
@@ -1315,6 +1526,8 @@ module.exports = {
   min,
   max,
   unix,
+  fromUnix,
+  range,
   stopwatch,
   measure,
   every,
