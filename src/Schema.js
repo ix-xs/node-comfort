@@ -15,11 +15,12 @@
  * });
  *
  * const user = User.parse(req.body);    // typed, or a ValidationError listing every issue
- * const result = User.safeParse(input); // { success, data } or { success, error }
+ * const result = User.safeParse(input); // { success, data } or { success, error, issues }
  */
 
-const { ValidationError } = require("./errors.js");
 const { types } = require("node:util");
+const { ValidationError } = require("./errors.js");
+const { UNSAFE_KEYS } = require("./internal/shared.js");
 
 /**
  * The type a schema produces.
@@ -49,9 +50,10 @@ const { types } = require("node:util");
  */
 
 /**
- * What `safeParse()` returns.
+ * What `safeParse()` returns. On failure, `issues` is the plain list and
+ * `error` the same thing as a `ValidationError`, built when you read it.
  * @template T
- * @typedef {{ success: true, data: T, error?: undefined } | { success: false, data?: undefined, error: ValidationError }} SafeParseResult
+ * @typedef {{ success: true, data: T, error?: undefined, issues?: undefined } | { success: false, data?: undefined, error: ValidationError, issues: import("./errors").ValidationIssue[] }} SafeParseResult
  */
 
 /**
@@ -72,11 +74,44 @@ const { types } = require("node:util");
  */
 
 /**
- * A step in a schema: a check, a transformation or a refinement.
- * @typedef {{ kind: "check", test: (value: any) => boolean, code: string, message: Message, details?: Record<string, unknown> } | { kind: "transform", fn: (value: any) => any } | { kind: "refine", test: (value: any) => boolean, options: RefineOptions }} Step
+ * A step in a schema: a check, a transformation, a refinement or a pipe
+ * into another schema.
+ * @typedef {{ kind: "check", test: (value: any) => boolean, code: string, message: Message, details?: Record<string, unknown>, json?: Record<string, unknown> } | { kind: "transform", fn: (value: any) => any } | { kind: "refine", test: (value: any) => boolean, options: RefineOptions } | { kind: "pipe", schema: Schema<any> }} Step
+ */
+
+/**
+ * A JSON Schema, as made by `toJSONSchema()`.
+ * @typedef {{ [keyword: string]: any }} JSONSchema
+ */
+
+/**
+ * @typedef {{ defs: Record<string, JSONSchema>, names: Map<Schema<any>, string> }} _JSONContext
  */
 
 const INVALID = Symbol("invalid");
+
+const _TRUE = ["true", "1", "yes", "on", "y"];
+const _FALSE = ["false", "0", "no", "off", "n", ""];
+const _DATE = /^\d{4}-\d{2}-\d{2}$/;
+
+/**
+ * What a failed `safeParse()` returns. The error is only built if it's
+ * read: capturing a stack trace costs far more than the validation itself.
+ * @param {import("./errors").ValidationIssue[]} issues
+ * @returns {{ success: false, error: ValidationError, issues: import("./errors").ValidationIssue[] }}
+ */
+const _failure = (issues) => {
+  /** @type {ValidationError | undefined} */
+  let error;
+  return /** @type {any} */ (Object.defineProperty({ success: false, issues }, "error", { enumerable: true, get: () => (error ??= new ValidationError(issues)) }));
+};
+
+/**
+ * @param {Schema<any>} schema
+ * @param {_JSONContext} ctx
+ * @returns {JSONSchema}
+ */
+const _jsonOf = (schema, ctx) => /** @type {any} */ (schema)._toJSON(ctx);
 
 /** @param {unknown} value */
 const _typeName = (value) => {
@@ -188,7 +223,7 @@ class Schema {
     let value = input;
     if (value === undefined && this._default) {
       const def = this._default.value;
-      value = typeof def === "function" ? def() : structuredClone(def);
+      value = typeof def === "function" ? def() : def !== null && typeof def === "object" ? require("./Obj.js").clone(def) : def;
     }
     if (value === undefined && this._optional) return undefined;
     if (value === null && this._nullable) return null;
@@ -196,14 +231,18 @@ class Schema {
     let out = this._check(value, ctx);
     if (ctx.issues.length === before) {
       for (const step of this._steps) {
-        if (step.kind === "transform") {
-          if (ctx.issues.length > before) break;
-          out = step.fn(out);
-        } else if (step.kind === "check") {
+        if (step.kind === "check") {
           if (!step.test(out)) _issue(ctx, step.code, _message(step.message, out), step.details);
-        } else if (ctx.issues.length === before && !step.test(out)) {
+        } else if (ctx.issues.length > before) {
+          // What follows needs a value that passed everything before it.
+          if (step.kind !== "refine") break;
+        } else if (step.kind === "transform") {
+          out = step.fn(out);
+        } else if (step.kind === "pipe") {
+          out = _runChild(step.schema, out, ctx);
+        } else if (!step.test(out)) {
           const saved = ctx.path;
-          ctx.path = [...ctx.path, ...(step.options.path ?? [])];
+          if (step.options.path) ctx.path = [...saved, ...step.options.path];
           _issue(ctx, step.options.code ?? "custom", _message(step.options.message ?? "Invalid value", out));
           ctx.path = saved;
         }
@@ -250,14 +289,15 @@ class Schema {
    * @returns {SafeParseResult<T>}
    */
   safeParse(value) {
+    /** @type {ParseContext} */
     const ctx = { issues: [], path: [] };
     const out = this._run(value, ctx);
-    if (ctx.issues.length) return { success: false, error: new ValidationError(ctx.issues) };
+    if (ctx.issues.length) return _failure(ctx.issues);
     return { success: true, data: /** @type {T} */ (out) };
   }
 
   /**
-   * Is the value valid? Works as a type guard. Transformations don't run.
+   * Is the value valid? Works as a type guard, and builds no error.
    *
    * @example
    * if (Email.is(input)) sendMail(input); // input is a string here
@@ -266,7 +306,10 @@ class Schema {
    * @returns {value is T}
    */
   is(value) {
-    return this.safeParse(value).success;
+    /** @type {ParseContext} */
+    const ctx = { issues: [], path: [] };
+    this._run(value, ctx);
+    return ctx.issues.length === 0;
   }
 
   /**
@@ -395,6 +438,75 @@ class Schema {
   }
 
   /**
+   * Sends the result into another schema. With `transform()` in between,
+   * it validates what a conversion produced.
+   *
+   * @example
+   * const Port = s.string().transform(Number).pipe(s.number().int().min(1).max(65535));
+   * Port.parse("8080"); // 8080
+   * Port.parse("abc");  // ValidationError: Expected number, received NaN
+   *
+   * @template U
+   * @param {Schema<U>} next
+   * @returns {Schema<U>}
+   */
+  pipe(next) {
+    return /** @type {any} */ (this._with({ kind: "pipe", schema: next }));
+  }
+
+  /**
+   * Describes what this schema accepts as a JSON Schema (draft 2020-12).
+   * Use it for an OpenAPI document, a form generator, or the input of a
+   * tool you give to a language model. Rules that only exist in code,
+   * like `refine()` and `transform()`, can't be expressed and are left out.
+   *
+   * @example
+   * s.object({ name: s.string().min(2), age: s.number().int().optional() }).toJSONSchema();
+   * // {
+   * //   type: "object",
+   * //   properties: { name: { type: "string", minLength: 2 }, age: { type: "integer" } },
+   * //   required: ["name"],
+   * // }
+   *
+   * @returns {JSONSchema}
+   */
+  toJSONSchema() {
+    /** @type {_JSONContext} */
+    const ctx = { defs: {}, names: new Map() };
+    const out = this._toJSON(ctx);
+    if (ctx.names.size) out.$defs = ctx.defs;
+    return out;
+  }
+
+  /**
+   * The JSON Schema of the type itself. Subclasses override it.
+   * @param {_JSONContext} _ctx
+   * @returns {JSONSchema}
+   * @protected
+   */
+  _json(_ctx) {
+    return {};
+  }
+
+  /**
+   * The JSON Schema with what every schema can carry: rules, `null`,
+   * a description, a default.
+   * @param {_JSONContext} ctx
+   * @returns {JSONSchema}
+   * @protected
+   */
+  _toJSON(ctx) {
+    let out = this._json(ctx);
+    for (const step of this._steps) {
+      if (step.kind === "check" && step.json) Object.assign(out, step.json);
+    }
+    if (this._nullable) out = { anyOf: [out, { type: "null" }] };
+    if (this._description !== undefined) out.description = this._description;
+    if (this._default && typeof this._default.value !== "function") out.default = this._default.value;
+    return out;
+  }
+
+  /**
    * Attaches a description, available as `.description`. Useful to generate
    * docs or forms.
    *
@@ -441,11 +553,12 @@ class StringSchema extends Schema {
    * @param {string} code
    * @param {Message} message
    * @param {Record<string, unknown>} [details]
+   * @param {Record<string, unknown>} [json] What the rule is called in JSON Schema.
    * @returns {this}
    * @protected
    */
-  _rule(test, code, message, details) {
-    return this._with({ kind: "check", test, code, message, details });
+  _rule(test, code, message, details, json) {
+    return this._with({ kind: "check", test, code, message, details, json });
   }
 
   /**
@@ -455,7 +568,7 @@ class StringSchema extends Schema {
    * @returns {this}
    */
   min(length, message = `Must contain at least ${length} character${length > 1 ? "s" : ""}`) {
-    return this._rule((v) => v.length >= length, "too_small", message, { minimum: length });
+    return this._rule((v) => v.length >= length, "too_small", message, { minimum: length }, { minLength: length });
   }
 
   /**
@@ -465,7 +578,7 @@ class StringSchema extends Schema {
    * @returns {this}
    */
   max(length, message = `Must contain at most ${length} character${length > 1 ? "s" : ""}`) {
-    return this._rule((v) => v.length <= length, "too_big", message, { maximum: length });
+    return this._rule((v) => v.length <= length, "too_big", message, { maximum: length }, { maxLength: length });
   }
 
   /**
@@ -475,7 +588,7 @@ class StringSchema extends Schema {
    * @returns {this}
    */
   length(length, message = `Must contain exactly ${length} characters`) {
-    return this._rule((v) => v.length === length, "invalid_length", message, { exact: length });
+    return this._rule((v) => v.length === length, "invalid_length", message, { exact: length }, { minLength: length, maxLength: length });
   }
 
   /**
@@ -484,7 +597,7 @@ class StringSchema extends Schema {
    * @returns {this}
    */
   nonempty(message = "Must not be empty") {
-    return this._rule((v) => v.length > 0, "too_small", message, { minimum: 1 });
+    return this._rule((v) => v.length > 0, "too_small", message, { minimum: 1 }, { minLength: 1 });
   }
 
   /**
@@ -494,7 +607,7 @@ class StringSchema extends Schema {
    */
   email(message = "Invalid email address") {
     const { isEmail } = require("./Checker.js");
-    return this._rule(isEmail, "invalid_string", message, { validation: "email" });
+    return this._rule(isEmail, "invalid_string", message, { validation: "email" }, { format: "email" });
   }
 
   /**
@@ -505,7 +618,7 @@ class StringSchema extends Schema {
   url(options = "Invalid URL") {
     const opts = typeof options === "object" ? options : { message: options };
     const { isURL } = require("./Checker.js");
-    return this._rule((v) => isURL(v, { protocols: opts.protocols }), "invalid_string", opts.message ?? "Invalid URL", { validation: "url" });
+    return this._rule((v) => isURL(v, { protocols: opts.protocols }), "invalid_string", opts.message ?? "Invalid URL", { validation: "url" }, { format: "uri" });
   }
 
   /**
@@ -515,7 +628,7 @@ class StringSchema extends Schema {
    */
   uuid(message = "Invalid UUID") {
     const { isUUID } = require("./Checker.js");
-    return this._rule((v) => isUUID(v), "invalid_string", message, { validation: "uuid" });
+    return this._rule((v) => isUUID(v), "invalid_string", message, { validation: "uuid" }, { format: "uuid" });
   }
 
   /**
@@ -527,7 +640,7 @@ class StringSchema extends Schema {
   ip(versionOrMessage, message = "Invalid IP address") {
     const version = typeof versionOrMessage === "number" ? versionOrMessage : undefined;
     const { isIP } = require("./Checker.js");
-    return this._rule((v) => isIP(v, version), "invalid_string", typeof versionOrMessage === "number" ? message : versionOrMessage ?? message, { validation: "ip" });
+    return this._rule((v) => isIP(v, version), "invalid_string", typeof versionOrMessage === "number" ? message : versionOrMessage ?? message, { validation: "ip" }, version === 4 ? { format: "ipv4" } : version === 6 ? { format: "ipv6" } : undefined);
   }
 
   /**
@@ -537,7 +650,7 @@ class StringSchema extends Schema {
    */
   datetime(message = "Invalid ISO date") {
     const { isISODate } = require("./Checker.js");
-    return this._rule(isISODate, "invalid_string", message, { validation: "datetime" });
+    return this._rule(isISODate, "invalid_string", message, { validation: "datetime" }, { format: "date-time" });
   }
 
   /**
@@ -550,7 +663,7 @@ class StringSchema extends Schema {
     return this._rule((v) => {
       pattern.lastIndex = 0;
       return pattern.test(v);
-    }, "invalid_string", message, { validation: "regex" });
+    }, "invalid_string", message, { validation: "regex" }, { pattern: pattern.source });
   }
 
   /**
@@ -606,6 +719,84 @@ class StringSchema extends Schema {
   toUpperCase() {
     return this._with({ kind: "transform", fn: (/** @type {string} */ v) => v.toUpperCase() });
   }
+
+  /**
+   * A calendar date like `2024-01-31`, without a time.
+   * @param {Message} [message]
+   * @returns {this}
+   */
+  date(message = "Invalid date, expected YYYY-MM-DD") {
+    return this._rule((v) => _DATE.test(v) && new Date(`${v}T00:00:00Z`).toISOString().startsWith(v), "invalid_string", message, { validation: "date" }, { format: "date" });
+  }
+
+  /**
+   * A URL slug like `my-first-post`: lowercase letters, digits and single dashes.
+   * @param {Message} [message]
+   * @returns {this}
+   */
+  slug(message = "Invalid slug") {
+    const { isSlug } = require("./Checker.js");
+    return this._rule(isSlug, "invalid_string", message, { validation: "slug" }, { pattern: "^[a-z0-9]+(?:-[a-z0-9]+)*$" });
+  }
+
+  /**
+   * Hexadecimal digits only.
+   * @param {Message} [message]
+   * @returns {this}
+   */
+  hex(message = "Invalid hexadecimal string") {
+    const { isHex } = require("./Checker.js");
+    return this._rule((v) => isHex(v), "invalid_string", message, { validation: "hex" }, { pattern: "^[0-9a-fA-F]+$" });
+  }
+
+  /**
+   * Base64 data.
+   * @param {Message} [message]
+   * @returns {this}
+   */
+  base64(message = "Invalid Base64 string") {
+    const { isBase64 } = require("./Checker.js");
+    return this._rule((v) => isBase64(v), "invalid_string", message, { validation: "base64" }, { contentEncoding: "base64" });
+  }
+
+  /**
+   * A ULID.
+   * @param {Message} [message]
+   * @returns {this}
+   */
+  ulid(message = "Invalid ULID") {
+    const { isULID } = require("./Checker.js");
+    return this._rule(isULID, "invalid_string", message, { validation: "ulid" });
+  }
+
+  /**
+   * A semantic version like `1.4.0` or `2.0.0-beta.1`.
+   * @param {Message} [message]
+   * @returns {this}
+   */
+  semver(message = "Invalid version") {
+    const { isSemver } = require("./Checker.js");
+    return this._rule(isSemver, "invalid_string", message, { validation: "semver" });
+  }
+
+  /**
+   * A host name like `api.example.com`.
+   * @param {Message} [message]
+   * @returns {this}
+   */
+  hostname(message = "Invalid host name") {
+    const { isHostname } = require("./Checker.js");
+    return this._rule((v) => isHostname(v), "invalid_string", message, { validation: "hostname" }, { format: "hostname" });
+  }
+
+  /**
+   * @returns {JSONSchema}
+   * @override
+   * @protected
+   */
+  _json() {
+    return { type: "string" };
+  }
 }
 
 /**
@@ -642,11 +833,12 @@ class NumberSchema extends Schema {
    * @param {string} code
    * @param {Message} message
    * @param {Record<string, unknown>} [details]
+   * @param {Record<string, unknown>} [json] What the rule is called in JSON Schema.
    * @returns {this}
    * @protected
    */
-  _rule(test, code, message, details) {
-    return this._with({ kind: "check", test, code, message, details });
+  _rule(test, code, message, details, json) {
+    return this._with({ kind: "check", test, code, message, details, json });
   }
 
   /**
@@ -656,7 +848,7 @@ class NumberSchema extends Schema {
    * @returns {this}
    */
   min(value, message = `Must be greater than or equal to ${value}`) {
-    return this._rule((v) => v >= value, "too_small", message, { minimum: value });
+    return this._rule((v) => v >= value, "too_small", message, { minimum: value }, { minimum: value });
   }
 
   /**
@@ -666,7 +858,7 @@ class NumberSchema extends Schema {
    * @returns {this}
    */
   max(value, message = `Must be less than or equal to ${value}`) {
-    return this._rule((v) => v <= value, "too_big", message, { maximum: value });
+    return this._rule((v) => v <= value, "too_big", message, { maximum: value }, { maximum: value });
   }
 
   /**
@@ -675,7 +867,7 @@ class NumberSchema extends Schema {
    * @returns {this}
    */
   int(message = "Must be an integer") {
-    return this._rule(Number.isInteger, "invalid_type", message, { expected: "integer" });
+    return this._rule(Number.isInteger, "invalid_type", message, { expected: "integer" }, { type: "integer" });
   }
 
   /**
@@ -684,7 +876,7 @@ class NumberSchema extends Schema {
    * @returns {this}
    */
   positive(message = "Must be positive") {
-    return this._rule((v) => v > 0, "too_small", message, { minimum: 0, exclusive: true });
+    return this._rule((v) => v > 0, "too_small", message, { minimum: 0, exclusive: true }, { exclusiveMinimum: 0 });
   }
 
   /**
@@ -693,7 +885,7 @@ class NumberSchema extends Schema {
    * @returns {this}
    */
   nonnegative(message = "Must not be negative") {
-    return this._rule((v) => v >= 0, "too_small", message, { minimum: 0 });
+    return this._rule((v) => v >= 0, "too_small", message, { minimum: 0 }, { minimum: 0 });
   }
 
   /**
@@ -702,7 +894,7 @@ class NumberSchema extends Schema {
    * @returns {this}
    */
   negative(message = "Must be negative") {
-    return this._rule((v) => v < 0, "too_big", message, { maximum: 0, exclusive: true });
+    return this._rule((v) => v < 0, "too_big", message, { maximum: 0, exclusive: true }, { exclusiveMaximum: 0 });
   }
 
   /**
@@ -712,7 +904,46 @@ class NumberSchema extends Schema {
    * @returns {this}
    */
   multipleOf(step, message = `Must be a multiple of ${step}`) {
-    return this._rule((v) => Math.abs(v / step - Math.round(v / step)) < 1e-9, "not_multiple_of", message, { multipleOf: step });
+    return this._rule((v) => Math.abs(v / step - Math.round(v / step)) < 1e-9, "not_multiple_of", message, { multipleOf: step }, { multipleOf: step });
+  }
+
+  /**
+   * Greater than `value`, which itself is refused.
+   * @param {number} value
+   * @param {Message} [message]
+   * @returns {this}
+   */
+  gt(value, message = `Must be greater than ${value}`) {
+    return this._rule((v) => v > value, "too_small", message, { minimum: value, exclusive: true }, { exclusiveMinimum: value });
+  }
+
+  /**
+   * Less than `value`, which itself is refused.
+   * @param {number} value
+   * @param {Message} [message]
+   * @returns {this}
+   */
+  lt(value, message = `Must be less than ${value}`) {
+    return this._rule((v) => v < value, "too_big", message, { maximum: value, exclusive: true }, { exclusiveMaximum: value });
+  }
+
+  /**
+   * An integer JavaScript can hold exactly: up to 2^53 - 1 either way.
+   * Ids from a database or an API should pass this before any arithmetic.
+   * @param {Message} [message]
+   * @returns {this}
+   */
+  safe(message = "Must be a safe integer") {
+    return this._rule(Number.isSafeInteger, "invalid_type", message, { expected: "safe integer" }, { type: "integer", minimum: Number.MIN_SAFE_INTEGER, maximum: Number.MAX_SAFE_INTEGER });
+  }
+
+  /**
+   * @returns {JSONSchema}
+   * @override
+   * @protected
+   */
+  _json() {
+    return { type: "number" };
   }
 }
 
@@ -736,10 +967,19 @@ class BooleanSchema extends Schema {
     if (typeof value === "boolean") return value;
     if (this._coerce) {
       const text = String(value).trim().toLowerCase();
-      if (["true", "1", "yes", "on", "y"].includes(text)) return true;
-      if (["false", "0", "no", "off", "n", ""].includes(text)) return false;
+      if (_TRUE.includes(text)) return true;
+      if (_FALSE.includes(text)) return false;
     }
     return _typeIssue(ctx, "boolean", value, this._typeMessage);
+  }
+
+  /**
+   * @returns {JSONSchema}
+   * @override
+   * @protected
+   */
+  _json() {
+    return { type: "boolean" };
   }
 }
 
@@ -769,6 +1009,15 @@ class BigIntSchema extends Schema {
       }
     }
     return _typeIssue(ctx, "bigint", value, this._typeMessage);
+  }
+
+  /**
+   * @returns {JSONSchema}
+   * @override
+   * @protected
+   */
+  _json() {
+    return { type: "integer" };
   }
 }
 
@@ -817,6 +1066,15 @@ class DateSchema extends Schema {
     const limit = new Date(date).getTime();
     return this._with({ kind: "check", test: (/** @type {Date} */ v) => v.getTime() <= limit, code: "too_big", message: message ?? `Must be on or before ${new Date(limit).toISOString()}` });
   }
+
+  /**
+   * @returns {JSONSchema}
+   * @override
+   * @protected
+   */
+  _json() {
+    return { type: "string", format: "date-time" };
+  }
 }
 
 /**
@@ -831,6 +1089,8 @@ class LiteralSchema extends Schema {
     super();
     /** @protected */
     this._values = values;
+    /** @protected @type {Set<unknown>} */
+    this._set = new Set(values);
   }
 
   /**
@@ -841,10 +1101,21 @@ class LiteralSchema extends Schema {
    * @protected
    */
   _check(value, ctx) {
-    if (this._values.some((v) => Object.is(v, value))) return value;
+    // A Set treats 0 and -0 as the same value: tell them apart, as before.
+    if (this._set.has(value) && (value !== 0 || this._values.some((v) => Object.is(v, value)))) return value;
     const list = this._values.map((v) => JSON.stringify(v)).join(" | ");
     const code = this._values.length > 1 ? "invalid_enum_value" : "invalid_literal";
     return _issue(ctx, code, this._typeMessage ? _message(this._typeMessage, value) : `Expected ${list}, received ${JSON.stringify(value) ?? String(value)}`, { expected: list, received: _typeName(value) });
+  }
+
+  /**
+   * @returns {JSONSchema}
+   * @override
+   * @protected
+   */
+  _json() {
+    const values = this._values.map((v) => (typeof v === "bigint" ? Number(v) : v === undefined ? null : v));
+    return values.length === 1 ? { const: values[0] } : values.every((v) => typeof v === "string") ? { type: "string", enum: values } : { enum: values };
   }
 
   /** The accepted values. */
@@ -911,12 +1182,13 @@ class ArraySchema extends Schema {
    */
   _check(value, ctx) {
     if (!Array.isArray(value)) return _typeIssue(ctx, "array", value, this._typeMessage);
-    const out = [];
+    const item = this._item;
+    const path = ctx.path;
+    const out = new Array(value.length);
     for (let i = 0; i < value.length; i++) {
-      const saved = ctx.path;
-      ctx.path = [...saved, i];
-      out.push(_runChild(this._item, value[i], ctx));
-      ctx.path = saved;
+      path.push(i);
+      out[i] = _runChild(item, value[i], ctx);
+      path.pop();
     }
     return out;
   }
@@ -925,11 +1197,13 @@ class ArraySchema extends Schema {
    * @param {(v: T[]) => boolean} test
    * @param {string} code
    * @param {Message} message
+   * @param {Record<string, unknown>} [details]
+   * @param {Record<string, unknown>} [json]
    * @returns {this}
    * @protected
    */
-  _rule(test, code, message) {
-    return this._with({ kind: "check", test, code, message });
+  _rule(test, code, message, details, json) {
+    return this._with({ kind: "check", test, code, message, details, json });
   }
 
   /**
@@ -939,7 +1213,7 @@ class ArraySchema extends Schema {
    * @returns {this}
    */
   min(count, message = `Must contain at least ${count} item${count > 1 ? "s" : ""}`) {
-    return this._rule((v) => v.length >= count, "too_small", message);
+    return this._rule((v) => v.length >= count, "too_small", message, { minimum: count }, { minItems: count });
   }
 
   /**
@@ -949,7 +1223,7 @@ class ArraySchema extends Schema {
    * @returns {this}
    */
   max(count, message = `Must contain at most ${count} item${count > 1 ? "s" : ""}`) {
-    return this._rule((v) => v.length <= count, "too_big", message);
+    return this._rule((v) => v.length <= count, "too_big", message, { maximum: count }, { maxItems: count });
   }
 
   /**
@@ -959,7 +1233,7 @@ class ArraySchema extends Schema {
    * @returns {this}
    */
   length(count, message = `Must contain exactly ${count} items`) {
-    return this._rule((v) => v.length === count, "invalid_length", message);
+    return this._rule((v) => v.length === count, "invalid_length", message, { exact: count }, { minItems: count, maxItems: count });
   }
 
   /**
@@ -968,7 +1242,7 @@ class ArraySchema extends Schema {
    * @returns {this}
    */
   nonempty(message = "Must not be empty") {
-    return this._rule((v) => v.length > 0, "too_small", message);
+    return this._rule((v) => v.length > 0, "too_small", message, { minimum: 1 }, { minItems: 1 });
   }
 
   /**
@@ -978,9 +1252,19 @@ class ArraySchema extends Schema {
    * @returns {this}
    */
   unique(keyOrMessage, message = "Must not contain duplicates") {
-    const key = typeof keyOrMessage === "function" && keyOrMessage.length === 1 ? /** @type {(item: T) => unknown} */ (keyOrMessage) : (/** @type {T} */ item) => item;
+    const byKey = typeof keyOrMessage === "function" && keyOrMessage.length === 1 ? /** @type {(item: T) => unknown} */ (keyOrMessage) : undefined;
     const msg = typeof keyOrMessage === "string" ? keyOrMessage : message;
-    return this._rule((v) => new Set(v.map(key)).size === v.length, "not_unique", msg);
+    return this._rule((v) => new Set(byKey ? v.map(byKey) : v).size === v.length, "not_unique", msg, undefined, byKey ? undefined : { uniqueItems: true });
+  }
+
+  /**
+   * @param {_JSONContext} ctx
+   * @returns {JSONSchema}
+   * @override
+   * @protected
+   */
+  _json(ctx) {
+    return { type: "array", items: _jsonOf(this._item, ctx) };
   }
 
   /** The schema of the items. */
@@ -1004,6 +1288,12 @@ class ObjectSchema extends Schema {
     super();
     /** @protected */
     this._shape = shape;
+    // Read once here rather than on every parse. A key named __proto__ could
+    // only ever replace the prototype of the result, so it's left out.
+    /** @protected @type {string[]} */
+    this._keys = Object.keys(shape).filter((key) => key !== "__proto__");
+    /** @protected @type {Array<Schema<any>>} */
+    this._schemas = this._keys.map((key) => shape[key]);
   }
 
   /**
@@ -1016,22 +1306,65 @@ class ObjectSchema extends Schema {
   _check(value, ctx) {
     if (value === null || typeof value !== "object" || Array.isArray(value)) return _typeIssue(ctx, "object", value, this._typeMessage);
     const input = /** @type {Record<string, unknown>} */ (value);
+    const keys = this._keys;
+    const schemas = this._schemas;
+    const path = ctx.path;
     /** @type {Record<string, unknown>} */
     const out = {};
-    for (const [key, schema] of Object.entries(this._shape)) {
-      const saved = ctx.path;
-      ctx.path = [...saved, key];
-      const result = _runChild(schema, input[key], ctx);
-      ctx.path = saved;
-      if (result !== undefined || Object.prototype.hasOwnProperty.call(input, key)) out[key] = result;
+    for (let i = 0; i < keys.length; i++) {
+      const key = keys[i];
+      let raw = input[key];
+      // What every object inherits, like toString, is not data.
+      if (typeof raw === "function" && !Object.hasOwn(input, key)) raw = undefined;
+      path.push(key);
+      const result = _runChild(schemas[i], raw, ctx);
+      path.pop();
+      if (result !== undefined || Object.hasOwn(input, key)) out[key] = result;
     }
-    const unknownKeys = Object.keys(input).filter((key) => !(key in this._shape));
-    if (unknownKeys.length) {
-      if (this._unknown === "strict") _issue(ctx, "unrecognized_keys", `Unrecognized key${unknownKeys.length > 1 ? "s" : ""}: ${unknownKeys.join(", ")}`, { keys: unknownKeys });
-      else if (this._unknown === "passthrough") {
-        for (const key of unknownKeys) if (key !== "__proto__" && key !== "constructor" && key !== "prototype") out[key] = input[key];
-      }
+    if (this._unknown === "strip") return out;
+    /** @type {string[] | undefined} */
+    let unknown;
+    for (const key of Object.keys(input)) {
+      if (Object.hasOwn(this._shape, key)) continue;
+      if (this._unknown === "strict") (unknown ??= []).push(key);
+      else if (!UNSAFE_KEYS.has(key)) out[key] = input[key];
     }
+    if (unknown) _issue(ctx, "unrecognized_keys", `Unrecognized key${unknown.length > 1 ? "s" : ""}: ${unknown.join(", ")}`, { keys: unknown });
+    return out;
+  }
+
+  /**
+   * A schema with another shape that keeps how this one treats unknown keys.
+   * @param {Shape} shape
+   * @returns {any}
+   * @protected
+   */
+  _reshape(shape) {
+    const copy = new ObjectSchema(shape);
+    copy._unknown = this._unknown;
+    return copy;
+  }
+
+  /**
+   * @param {_JSONContext} ctx
+   * @returns {JSONSchema}
+   * @override
+   * @protected
+   */
+  _json(ctx) {
+    /** @type {Record<string, JSONSchema>} */
+    const properties = {};
+    const required = [];
+    for (let i = 0; i < this._keys.length; i++) {
+      const child = /** @type {any} */ (this._schemas[i]);
+      properties[this._keys[i]] = _jsonOf(child, ctx);
+      // any() and unknown() take undefined too, so a key of theirs can be left out
+      if (!child._optional && !child._default && child.constructor !== Schema) required.push(this._keys[i]);
+    }
+    /** @type {JSONSchema} */
+    const out = { type: "object", properties };
+    if (required.length) out.required = required;
+    if (this._unknown === "strict") out.additionalProperties = false;
     return out;
   }
 
@@ -1067,9 +1400,7 @@ class ObjectSchema extends Schema {
    * @returns {ObjectSchema<Omit<S, keyof M> & M>}
    */
   extend(more) {
-    const copy = /** @type {any} */ (object({ ...this._shape, ...more }));
-    copy._unknown = this._unknown;
-    return copy;
+    return this._reshape({ ...this._shape, ...more });
   }
 
   /**
@@ -1082,7 +1413,7 @@ class ObjectSchema extends Schema {
     /** @type {any} */
     const shape = {};
     for (const key of keys) shape[key] = this._shape[key];
-    return object(shape);
+    return this._reshape(shape);
   }
 
   /**
@@ -1095,7 +1426,7 @@ class ObjectSchema extends Schema {
     /** @type {any} */
     const shape = { ...this._shape };
     for (const key of keys) delete shape[key];
-    return object(shape);
+    return this._reshape(shape);
   }
 
   /**
@@ -1105,8 +1436,54 @@ class ObjectSchema extends Schema {
   partial() {
     /** @type {any} */
     const shape = {};
-    for (const [key, schema] of Object.entries(this._shape)) shape[key] = schema.optional();
-    return object(shape);
+    for (let i = 0; i < this._keys.length; i++) shape[this._keys[i]] = this._schemas[i].optional();
+    return this._reshape(shape);
+  }
+
+  /**
+   * Makes every key required again: the opposite of `partial()`.
+   * @returns {ObjectSchema<{ [K in keyof S]: Schema<Exclude<Infer<S[K]>, undefined>> }>}
+   */
+  required() {
+    /** @type {any} */
+    const shape = {};
+    for (let i = 0; i < this._keys.length; i++) {
+      const copy = /** @type {any} */ (this._schemas[i])._clone();
+      copy._optional = false;
+      shape[this._keys[i]] = copy;
+    }
+    return this._reshape(shape);
+  }
+
+  /**
+   * Combines two object schemas. Keys of the other one win, and so does
+   * its way of treating unknown keys.
+   *
+   * @example
+   * const Timestamps = s.object({ createdAt: s.date(), updatedAt: s.date() });
+   * const Post = s.object({ title: s.string() }).merge(Timestamps);
+   *
+   * @template {Shape} M
+   * @param {ObjectSchema<M>} other
+   * @returns {ObjectSchema<Omit<S, keyof M> & M>}
+   */
+  merge(other) {
+    const copy = /** @type {any} */ (new ObjectSchema({ ...this._shape, ...other._shape }));
+    copy._unknown = other._unknown;
+    return copy;
+  }
+
+  /**
+   * A schema that accepts the name of any key: handy for a `sort` or
+   * `fields` query parameter.
+   *
+   * @example
+   * const SortBy = User.keyof(); // "name" | "email" | "age" | "role"
+   *
+   * @returns {LiteralSchema<keyof S & string>}
+   */
+  keyof() {
+    return new LiteralSchema(/** @type {Array<keyof S & string>} */ (this._keys));
   }
 }
 
@@ -1149,6 +1526,75 @@ class UnionSchema extends Schema {
     ctx.issues.push(...best);
     return INVALID;
   }
+
+  /**
+   * @param {_JSONContext} ctx
+   * @returns {JSONSchema}
+   * @override
+   * @protected
+   */
+  _json(ctx) {
+    return { anyOf: this._options.map((option) => _jsonOf(option, ctx)) };
+  }
+}
+
+/**
+ * A union of objects told apart by one key.
+ *
+ * @template T
+ * @extends {Schema<T>}
+ */
+class DiscriminatedUnionSchema extends Schema {
+  /**
+   * @param {string} key
+   * @param {ReadonlyArray<ObjectSchema<any>>} options
+   */
+  constructor(key, options) {
+    super();
+    /** @protected */
+    this._key = key;
+    /** @protected */
+    this._options = options;
+    /** @protected @type {Map<unknown, Schema<any>>} */
+    this._byValue = new Map();
+    for (const option of options) {
+      const values = /** @type {any} */ (option)?._shape?.[key]?._values;
+      if (!Array.isArray(values)) throw new TypeError(`discriminatedUnion(): every option must be an object with a literal "${key}"`);
+      for (const value of values) {
+        if (this._byValue.has(value)) throw new TypeError(`discriminatedUnion(): two options have "${key}" set to ${JSON.stringify(value)}`);
+        this._byValue.set(value, option);
+      }
+    }
+  }
+
+  /**
+   * @param {unknown} value
+   * @param {ParseContext} ctx
+   * @returns {unknown}
+   * @override
+   * @protected
+   */
+  _check(value, ctx) {
+    if (value === null || typeof value !== "object" || Array.isArray(value)) return _typeIssue(ctx, "object", value, this._typeMessage);
+    const tag = /** @type {Record<string, unknown>} */ (value)[this._key];
+    const option = this._byValue.get(tag);
+    if (option) return _runChild(option, value, ctx);
+    const expected = [...this._byValue.keys()].map((known) => JSON.stringify(known)).join(" | ");
+    ctx.path.push(this._key);
+    _issue(ctx, "invalid_union_discriminator", `Expected ${expected}, received ${JSON.stringify(tag) ?? String(tag)}`, { expected, received: _typeName(tag) });
+    ctx.path.pop();
+    return INVALID;
+  }
+
+  /**
+   * @param {_JSONContext} ctx
+   * @returns {JSONSchema}
+   * @override
+   * @protected
+   */
+  _json(ctx) {
+    return { oneOf: this._options.map((option) => _jsonOf(option, ctx)), discriminator: { propertyName: this._key } };
+  }
 }
 
 /**
@@ -1177,13 +1623,24 @@ class TupleSchema extends Schema {
     if (value.length !== this._items.length) {
       return _issue(ctx, "invalid_length", `Expected ${this._items.length} items, received ${value.length}`);
     }
-    return this._items.map((schema, i) => {
-      const saved = ctx.path;
-      ctx.path = [...saved, i];
-      const out = _runChild(schema, value[i], ctx);
-      ctx.path = saved;
-      return out;
-    });
+    const path = ctx.path;
+    const out = new Array(this._items.length);
+    for (let i = 0; i < out.length; i++) {
+      path.push(i);
+      out[i] = _runChild(this._items[i], value[i], ctx);
+      path.pop();
+    }
+    return out;
+  }
+
+  /**
+   * @param {_JSONContext} ctx
+   * @returns {JSONSchema}
+   * @override
+   * @protected
+   */
+  _json(ctx) {
+    return { type: "array", prefixItems: this._items.map((item) => _jsonOf(item, ctx)), items: false, minItems: this._items.length, maxItems: this._items.length };
   }
 }
 
@@ -1215,17 +1672,31 @@ class RecordSchema extends Schema {
    */
   _check(value, ctx) {
     if (value === null || typeof value !== "object" || Array.isArray(value)) return _typeIssue(ctx, "object", value, this._typeMessage);
+    const input = /** @type {Record<string, unknown>} */ (value);
+    const path = ctx.path;
     /** @type {Record<string, unknown>} */
     const out = {};
-    for (const [key, item] of Object.entries(value)) {
-      if (key === "__proto__" || key === "constructor" || key === "prototype") continue;
-      const saved = ctx.path;
-      ctx.path = [...saved, key];
+    for (const key of Object.keys(input)) {
+      if (UNSAFE_KEYS.has(key)) continue;
+      path.push(key);
       const k = this._keys ? _runChild(this._keys, key, ctx) : key;
-      const v = _runChild(this._values, item, ctx);
-      ctx.path = saved;
-      if (typeof k === "string") out[k] = v;
+      const v = _runChild(this._values, input[key], ctx);
+      path.pop();
+      if (typeof k === "string" && !UNSAFE_KEYS.has(k)) out[k] = v;
     }
+    return out;
+  }
+
+  /**
+   * @param {_JSONContext} ctx
+   * @returns {JSONSchema}
+   * @override
+   * @protected
+   */
+  _json(ctx) {
+    /** @type {JSONSchema} */
+    const out = { type: "object", additionalProperties: _jsonOf(this._values, ctx) };
+    if (this._keys) out.propertyNames = _jsonOf(this._keys, ctx);
     return out;
   }
 }
@@ -1242,6 +1713,8 @@ class LazySchema extends Schema {
     super();
     /** @protected */
     this._getter = getter;
+    /** @protected @type {Schema<T> | undefined} */
+    this._resolved = undefined;
   }
 
   /**
@@ -1253,8 +1726,27 @@ class LazySchema extends Schema {
    */
   _check(value, ctx) {
     const before = ctx.issues.length;
-    const out = _runChild(this._getter(), value, ctx);
+    const out = _runChild((this._resolved ??= this._getter()), value, ctx);
     return ctx.issues.length > before ? INVALID : out;
+  }
+
+  /**
+   * A schema that refers to itself can't be written inline: it goes under
+   * `$defs` and is pointed at.
+   * @param {_JSONContext} ctx
+   * @returns {JSONSchema}
+   * @override
+   * @protected
+   */
+  _json(ctx) {
+    const target = (this._resolved ??= this._getter());
+    let name = ctx.names.get(target);
+    if (!name) {
+      name = `schema${ctx.names.size + 1}`;
+      ctx.names.set(target, name);
+      ctx.defs[name] = _jsonOf(target, ctx);
+    }
+    return { $ref: `#/$defs/${name}` };
   }
 }
 
@@ -1401,6 +1893,27 @@ function object(shape) {
  */
 function union(options) {
   return new UnionSchema(options);
+}
+
+/**
+ * A union of objects told apart by one key, like the `type` of an event.
+ * Unlike `union()`, it goes straight to the right schema, and a wrong
+ * object gets the errors of the kind it claims to be.
+ *
+ * @example
+ * const Event = s.discriminatedUnion("type", [
+ *   s.object({ type: s.literal("click"), x: s.number(), y: s.number() }),
+ *   s.object({ type: s.literal("key"), key: s.string() }),
+ * ]);
+ * Event.parse({ type: "key", key: "Enter" });
+ *
+ * @template {ReadonlyArray<ObjectSchema<any>>} U
+ * @param {string} key The key every option has, with a different literal in each.
+ * @param {U} options
+ * @returns {DiscriminatedUnionSchema<Infer<U[number]>>}
+ */
+function discriminatedUnion(key, options) {
+  return new DiscriminatedUnionSchema(key, options);
 }
 
 /**
@@ -1574,6 +2087,7 @@ module.exports = {
   array,
   object,
   union,
+  discriminatedUnion,
   tuple,
   record,
   lazy,
