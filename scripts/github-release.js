@@ -4,7 +4,7 @@
 // section of the changelog as notes. It does nothing when the version has no
 // tag yet, or already has its release, so it can run on every push.
 //
-//   node scripts/github-release.js            creates the release (needs `gh` and GH_TOKEN)
+//   node scripts/github-release.js            creates the release, in the name of who is signed in to `gh`
 //   node scripts/github-release.js --notes    only prints the notes
 
 const fs = require("node:fs");
@@ -39,6 +39,10 @@ if (process.argv.includes("--notes")) {
  */
 const run = (command, args) => spawnSync(command, args, { cwd: ROOT, encoding: "utf8" });
 
+if (!process.env.GH_TOKEN && process.env.GITHUB_ACTIONS) {
+  console.log("[github-release] No RELEASE_TOKEN secret: the release is left to the maintainer.");
+  process.exit(0);
+}
 if (run("git", ["rev-parse", "--quiet", "--verify", `refs/tags/${tag}`]).status !== 0) {
   console.log(`[github-release] ${tag} is not tagged yet: nothing to release.`);
   process.exit(0);

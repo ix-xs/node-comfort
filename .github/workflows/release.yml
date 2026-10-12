@@ -2,13 +2,17 @@ name: Release
 
 # Publishes the GitHub release of a version once its tag exists: when the tag
 # is pushed, or at the next push to main if the tag came first.
+#
+# The release is published in the name of whoever owns the RELEASE_TOKEN secret
+# (a personal access token with write access to the contents of this
+# repository). Without that secret, nothing is published.
 on:
   push:
     tags: ["v*"]
     branches: [main]
 
 permissions:
-  contents: write
+  contents: read
 
 concurrency:
   group: release
@@ -29,5 +33,5 @@ jobs:
           node-version: 24
       - name: Create the release of the current version, if it is tagged and has none
         env:
-          GH_TOKEN: ${{ github.token }}
+          GH_TOKEN: ${{ secrets.RELEASE_TOKEN }}
         run: node scripts/github-release.js

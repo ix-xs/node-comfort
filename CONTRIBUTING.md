@@ -114,7 +114,8 @@ For maintainers.
    in a pull request. Merging it deploys the website.
 2. From `main`, run `npm publish`. It runs `npm run check` first.
 3. Tag the commit (`git tag v2.1.0`, then `git push origin v2.1.0`). The GitHub release is created from the
-   tag, with the section of the changelog as its notes.
+   tag, with the section of the changelog as its notes, in the name of the owner of the `RELEASE_TOKEN`
+   secret. Without that secret, run `node scripts/github-release.js` yourself, signed in to `gh`.
 
 ## Reporting a security issue
 
