@@ -2157,3 +2157,13 @@ describe("found while rereading the guides, second round", () => {
     }
   });
 });
+
+describe("found on the first run of the CI", () => {
+  it("a timeout settles even when what the command started keeps its output open", async () => {
+    // The grandchild inherits the pipes and lives for a few seconds on its own.
+    const script = "require('node:child_process').spawn(process.execPath, ['-e', 'setTimeout(() => {}, 8000)'], { stdio: 'inherit' }); setInterval(() => {}, 1000)";
+    const started = Date.now();
+    await assert.rejects(nc.sys.run(process.execPath, ["-e", script], { timeout: 400 }), { timedOut: true });
+    assert.ok(Date.now() - started < 6000, `settled after ${Date.now() - started}ms`);
+  });
+});

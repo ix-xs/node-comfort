@@ -50,7 +50,7 @@ index.js            entry point: lazy namespaces and flat helpers
 src/*.js            one module per namespace (JSDoc is the source of truth for the types)
 src/errors.js       error classes
 types/              generated declarations (npm run build, not committed)
-scripts/            build-types, build-reference, check-types
+scripts/            build-types, build-reference, check-types, report-test-failures (for CI)
 scripts/lib/        the API model read from the types
 test/               node --test suites
 docs/               the documentation website (Astro Starlight), a project of its own

@@ -17,6 +17,7 @@ jobs:
   test:
     name: Node ${{ matrix.node }} • ${{ matrix.os }}
     runs-on: ${{ matrix.os }}
+    timeout-minutes: 15
     strategy:
       fail-fast: false
       matrix:
@@ -30,7 +31,12 @@ jobs:
           cache: npm
       - run: npm ci
       - run: npm run build
-      - run: npm test
+      - name: Run the tests
+        shell: bash
+        run: npm test 2>&1 | tee test-output.txt
+      - name: Say which tests failed
+        if: failure()
+        run: node scripts/report-test-failures.js test-output.txt
 
   types:
     name: Editor experience • TypeScript ${{ matrix.typescript }}

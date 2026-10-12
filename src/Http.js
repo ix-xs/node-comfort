@@ -659,8 +659,8 @@ async function download(url, destination, options = {}) {
     if (options.signal?.aborted) throw new AbortError(`Download aborted: ${String(url)}`, { cause: error });
     /** @type {any} */
     const cause = error;
-    // What went wrong on the disk stays as it is; the rest is the connection.
-    if (typeof cause?.path === "string" || typeof cause?.syscall === "string") throw error;
+    // What went wrong on the disk names a file and stays as it is; the rest is the connection.
+    if (typeof cause?.path === "string") throw error;
     throw new HttpError(`Download interrupted (${cause?.cause?.code ?? cause?.code ?? cause?.message ?? String(error)}): ${res.url}`, { status: 0, url: res.url, method: "GET", code: "ERR_NETWORK", cause: error });
   }
   return { path: target, size };
