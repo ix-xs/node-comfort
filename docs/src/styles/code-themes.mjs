@@ -1,6 +1,6 @@
-// The two syntax themes of the site. Quiet on purpose: green for the words
-// of the language, a warm tone for strings, blue for numbers, and the text
-// colour for everything you named yourself.
+// The two syntax themes of the site. Restrained on purpose: green for the
+// language's own words, a warm tone for strings, a cooler one for numbers,
+// and the text colour for everything you named yourself.
 
 function theme(name, type, c) {
   return {
@@ -26,7 +26,7 @@ function theme(name, type, c) {
       focusBorder: c.accent,
     },
     tokenColors: [
-      { scope: ["comment", "punctuation.definition.comment"], settings: { foreground: c.comment, fontStyle: "italic" } },
+      { scope: ["comment", "punctuation.definition.comment"], settings: { foreground: c.faint, fontStyle: "italic" } },
       { scope: ["string", "string.template", "punctuation.definition.string"], settings: { foreground: c.string } },
       { scope: ["constant.numeric", "constant.language", "constant.character.escape"], settings: { foreground: c.number } },
       {
@@ -34,45 +34,41 @@ function theme(name, type, c) {
         settings: { foreground: c.keyword },
       },
       { scope: ["keyword.operator", "punctuation", "meta.brace", "meta.delimiter"], settings: { foreground: c.muted } },
-      { scope: ["entity.name.function", "support.function", "meta.function-call entity.name.function"], settings: { foreground: c.fn } },
+      { scope: ["entity.name.function", "support.function", "meta.function-call entity.name.function"], settings: { foreground: c.fg } },
       { scope: ["entity.name.type", "entity.name.class", "support.type", "support.class", "entity.other.inherited-class"], settings: { foreground: c.type } },
       { scope: ["variable", "variable.other", "variable.parameter", "meta.object-literal.key", "support.variable"], settings: { foreground: c.fg } },
       { scope: ["entity.name.tag", "support.type.property-name", "entity.other.attribute-name"], settings: { foreground: c.keyword } },
       { scope: ["markup.heading", "markup.bold"], settings: { foreground: c.fg, fontStyle: "bold" } },
-      { scope: ["markup.inserted"], settings: { foreground: c.keyword } },
-      { scope: ["markup.deleted"], settings: { foreground: c.string } },
+      { scope: ["markup.inserted"], settings: { foreground: c.string } },
+      { scope: ["markup.deleted"], settings: { foreground: c.number } },
     ],
   };
 }
 
 export const comfortDark = theme("comfort-dark", "dark", {
-  surface: "#161a18",
-  line: "#252c29",
-  fg: "#e9ede9",
-  muted: "#a0aaa4",
-  faint: "#7a857f",
-  comment: "#7f8b84",
-  accent: "#6fdc9f",
-  keyword: "#7fdca9",
-  string: "#e6c384",
-  number: "#8fb8f2",
-  fn: "#e9ede9",
-  type: "#b9c8bf",
-  selection: "#1f3a2c",
+  surface: "#191917",
+  line: "#2b2a26",
+  fg: "#edebe4",
+  muted: "#a29f95",
+  faint: "#8a877d",
+  accent: "#34d399",
+  keyword: "#5fd4a4",
+  string: "#dcb565",
+  number: "#d9906c",
+  type: "#c9c2ae",
+  selection: "#143527",
 });
 
 export const comfortLight = theme("comfort-light", "light", {
-  surface: "#ffffff",
-  line: "#dde2da",
-  fg: "#141917",
-  muted: "#55605a",
-  faint: "#6c7871",
-  comment: "#68756d",
-  accent: "#0c7a4a",
-  keyword: "#0c7a4a",
-  string: "#8f5a08",
-  number: "#2457b3",
-  fn: "#141917",
-  type: "#3f4a44",
-  selection: "#d6efe0",
+  surface: "#fffdf8",
+  line: "#e1ddd0",
+  fg: "#1b1a16",
+  muted: "#5d594e",
+  faint: "#7a7567",
+  accent: "#047857",
+  keyword: "#047857",
+  string: "#8a6100",
+  number: "#a14f29",
+  type: "#4f4a3c",
+  selection: "#d1fae5",
 });

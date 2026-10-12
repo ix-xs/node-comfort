@@ -1,93 +1,126 @@
-/* The showcase of the landing page: tabs, a line about the subject, the code
-   on one side and a terminal on the other. */
+/* ==========================================================================
+   The showcase of the landing page (components/showcase/Showcase.astro).
 
-.nc-show { display: grid; grid-template-columns: minmax(0, 1fr); border: 1px solid var(--nc-line); border-radius: 16px; background: var(--nc-surface); box-shadow: var(--nc-shadow); overflow: clip; }
+   The frame speaks the site's language: graphite, hairlines, green. Inside,
+   a file on one side and what it printed on the other.
 
-/* Subjects. They scroll sideways on a narrow screen instead of wrapping. */
-.nc-show-tabs { padding: 0.5rem; overflow-x: auto; scrollbar-width: none; border-bottom: 1px solid var(--nc-line); overscroll-behavior-x: contain; }
-.nc-show-tabs::-webkit-scrollbar { display: none; }
-.nc-show-tablist { position: relative; display: flex; gap: 0.25rem; width: max-content; min-width: 100%; }
-.nc-show-tab { position: relative; z-index: 1; flex: none; padding: 0.5rem 0.875rem; border: 0; border-radius: 999px; background: none; color: var(--nc-muted); font: inherit; font-size: 0.875rem; font-weight: 500; line-height: 1.3; white-space: nowrap; cursor: pointer; }
-.nc-show-tab[aria-selected="true"] { color: var(--nc-fg); }
-/* Before the script has measured anything, the selected tab draws its own ground. */
-.nc-show-tablist:not([data-ready]) .nc-show-tab[aria-selected="true"] { background: var(--nc-raised); }
-/* One ground for the whole row, cut down to the selected tab. Moving the cut
-   moves the ground, and its round ends never stretch. */
-.nc-show-marker { position: absolute; z-index: 0; inset: 0; background: var(--nc-raised); clip-path: inset(0 100% 0 0 round 999px); opacity: 0; pointer-events: none; }
-.nc-show-tablist[data-ready] .nc-show-marker { opacity: 1; }
-.nc-show-tablist[data-slide] .nc-show-marker { transition: clip-path 260ms var(--ease-in-out); }
+   This page is read once, not worked in all day: motion is allowed to explain.
+   It still only moves `transform` and `opacity`, and reduced motion drops it.
+   ========================================================================== */
 
+.nc-show {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  border: 1px solid var(--nc-line);
+  border-radius: var(--nc-radius);
+  background: var(--nc-surface);
+  overflow: clip;
+}
+
+/* ------------------------------- The rail -------------------------------- */
+.nc-show-rail {
+  position: relative;
+  display: flex;
+  padding-inline: 0.375rem;
+  border-bottom: 1px solid var(--nc-line);
+  overflow-x: auto;
+  overscroll-behavior-x: contain;
+  scrollbar-width: none;
+}
+.nc-show-rail::-webkit-scrollbar { display: none; }
+.nc-show-rail button {
+  flex: none;
+  display: flex;
+  align-items: baseline;
+  gap: 0.375rem;
+  padding: 0.9375rem 0.625rem;
+  border: 0;
+  background: none;
+  color: var(--nc-muted);
+  font-family: var(--sl-font-mono);
+  font-size: 0.75rem;
+  white-space: nowrap;
+  text-align: start;
+  cursor: pointer;
+}
+.nc-show-rail button span { font-size: 0.6875rem; color: var(--nc-faint); }
+.nc-show-rail button[aria-selected="true"] { color: var(--nc-fg); }
+.nc-show-rail button[aria-selected="true"] span { color: var(--nc-accent); }
+.nc-show-rail button:focus-visible { outline-offset: -2px; }
+/* The mark is 100px long and scaled to the selected tab. Until the script has
+   placed it, the selected tab draws its own. */
+.nc-show-mark { position: absolute; left: 0; bottom: 0; width: 100px; height: 2px; background: var(--nc-accent); transform-origin: left center; opacity: 0; pointer-events: none; }
+.nc-show-mark[data-placed] { opacity: 1; }
+.nc-show-mark[data-slide] { transition: transform 260ms var(--ease-in-out); }
+.nc-show-rail:not(:has(.nc-show-mark[data-placed])) button[aria-selected="true"] { box-shadow: inset 0 -2px 0 var(--nc-accent); }
+
+/* ------------------------------- A subject ------------------------------- */
 .nc-show-panel { display: grid; grid-template-columns: minmax(0, 1fr); }
-.nc-show-head { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 0.75rem 1.5rem; padding: 1rem 1.25rem; }
-.nc-show-head p { margin: 0; min-width: 0; flex: 1 1 18rem; font-size: 0.9375rem; line-height: 1.5; color: var(--nc-muted); text-wrap: pretty; }
+/* `display` above would otherwise win over the `hidden` attribute. */
+.nc-show-panel[hidden], .nc-show-run[hidden] { display: none; }
+.nc-show-head { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 0.75rem 1.5rem; padding: 0.875rem 1.25rem; }
+.nc-show-head p { flex: 1 1 18rem; min-width: 0; margin: 0; font-size: 0.9375rem; line-height: 1.5; color: var(--nc-muted); text-wrap: pretty; }
 .nc-show-variants { display: flex; flex-wrap: wrap; gap: 0.375rem; }
-.nc-show-chip { padding: 0.3125rem 0.6875rem; border: 1px solid var(--nc-line); border-radius: 999px; background: none; color: var(--nc-muted); font-family: var(--sl-font-mono); font-size: 0.75rem; line-height: 1.4; cursor: pointer; }
-.nc-show-chip[aria-pressed="true"] { border-color: color-mix(in srgb, var(--nc-accent) 60%, var(--nc-line)); background: var(--nc-tint); color: var(--nc-fg); }
+.nc-show-variants button { padding: 0.3125rem 0.625rem; border: 1px solid var(--nc-line); border-radius: var(--nc-radius); background: transparent; color: var(--nc-muted); font-family: var(--sl-font-mono); font-size: 0.75rem; line-height: 1.4; cursor: pointer; }
+.nc-show-variants button[aria-pressed="true"] { border-color: var(--nc-accent); color: var(--nc-fg); }
 
-/* Code and output, side by side when there is room. */
+/* The file and what it printed, side by side when there is room. */
 .nc-show-run { display: grid; grid-template-columns: minmax(0, 1fr); border-top: 1px solid var(--nc-line); }
-.nc-show-run[hidden] { display: none; }
 @media (min-width: 64rem) {
   .nc-show-run { grid-template-columns: minmax(0, 1.05fr) minmax(0, 1fr); }
-  .nc-show-code { border-inline-end: 1px solid var(--nc-line); }
+  .nc-term { border-inline-start: 1px solid var(--nc-line); }
 }
 @media (max-width: 63.99rem) {
   .nc-term { border-top: 1px solid var(--nc-line); }
 }
 
-/* The code is part of the frame: no border or corner of its own. */
+/* The file. Expressive Code draws a frame of its own: here the showcase is the frame. */
 .nc-show-code { min-width: 0; }
-.nc-show-code .expressive-code { margin: 0; height: 100%; }
-.nc-show-code .expressive-code .frame { height: 100%; border-radius: 0; }
-.nc-show-code .expressive-code .frame pre, .nc-show-code .expressive-code .frame .header, .nc-show-code .expressive-code figcaption { border: 0; border-radius: 0; }
-.nc-show-code .expressive-code .frame pre { height: 100%; background: transparent; }
-.nc-show-code .expressive-code figcaption.header { background: transparent; border-bottom: 1px solid var(--nc-line); }
-.nc-show-code .expressive-code .frame.has-title:not(.is-terminal) .title { border: 0; border-radius: 0; background: transparent; color: var(--nc-faint); padding: 0.65rem 1.25rem; }
-.nc-show-code .expressive-code .frame.has-title:not(.is-terminal) .title::after { display: none; }
-.nc-show-code .expressive-code .frame .header::before { display: none; }
+.nc-show-code .expressive-code { margin: 0; height: 100%; --ec-codeFontSize: 0.78rem; }
+.nc-show-code .expressive-code figure.frame { height: 100%; border-radius: 0; }
+.nc-show-code .expressive-code .frame :is(pre, .header) { border-inline: 0; border-top: 0; border-radius: 0; }
+.nc-show-code .expressive-code .frame pre { border-bottom: 0; background: transparent; }
+.nc-show-code .expressive-code .frame.has-title:not(.is-terminal) .title { border-radius: 0; }
 
-/* The terminal. */
-.nc-term { display: grid; grid-template-rows: auto minmax(0, 1fr); min-width: 0; background: color-mix(in srgb, var(--nc-bg) 55%, var(--nc-surface)); }
-.nc-term header { display: flex; align-items: center; gap: 0.75rem; min-height: 2.5625rem; padding: 0.3rem 0.5rem 0.3rem 1.25rem; border-bottom: 1px solid var(--nc-line); font-family: var(--sl-font-mono); font-size: 0.75rem; color: var(--nc-faint); }
+/* ------------------------------ The terminal ----------------------------- */
+.nc-term { display: grid; grid-template-rows: auto minmax(0, 1fr); min-width: 0; background: var(--nc-bg); }
+.nc-term header { display: flex; align-items: center; gap: 0.75rem; min-height: 2.4375rem; padding: 0.25rem 0.5rem 0.25rem 1.25rem; border-bottom: 1px solid var(--nc-line); font-family: var(--sl-font-mono); font-size: 0.6875rem; letter-spacing: 0.08em; text-transform: uppercase; color: var(--nc-faint); }
 .nc-term-title { flex: none; }
-.nc-term-time { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; text-align: end; color: var(--nc-faint); }
-.nc-term-run { display: inline-flex; align-items: center; gap: 0.4rem; flex: none; padding: 0.3rem 0.7rem; border: 1px solid var(--nc-line); border-radius: 999px; background: none; color: var(--nc-muted); font: inherit; cursor: pointer; }
+.nc-term-time { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; text-align: end; letter-spacing: 0.04em; text-transform: none; }
+.nc-term-run { display: inline-flex; align-items: center; gap: 0.4rem; flex: none; padding: 0.3125rem 0.625rem; border: 1px solid var(--nc-line); border-radius: var(--nc-radius); background: transparent; color: var(--nc-muted); font: inherit; letter-spacing: 0.04em; text-transform: none; cursor: pointer; }
 .nc-term-run svg { color: var(--nc-accent); }
-.nc-term pre { margin: 0; padding: 1.1rem 1.25rem; min-height: 9rem; max-height: 27rem; overflow: auto; scrollbar-width: thin; scrollbar-color: var(--nc-line) transparent; overscroll-behavior-x: contain; font-family: var(--sl-font-mono); font-size: 0.8125rem; line-height: 1.6; color: var(--nc-fg); background: none; border: 0; border-radius: 0; -webkit-text-size-adjust: 100%; }
+.nc-term pre { margin: 0; padding: 1.25rem; min-height: 9rem; max-height: 27rem; overflow: auto; overscroll-behavior-x: contain; scrollbar-width: thin; scrollbar-color: var(--nc-line) transparent; border: 0; border-radius: 0; background: none; color: var(--nc-fg); font-family: var(--sl-font-mono); font-size: 0.78rem; line-height: 1.32; -webkit-text-size-adjust: 100%; }
 .nc-term pre:focus-visible { outline-offset: -2px; }
-.nc-term code { font: inherit; background: none; padding: 0; }
+.nc-term code { padding: 0; background: none; font: inherit; }
 /* One line of output: boxes and tables keep their shape and scroll sideways. */
 .nc-line { display: block; white-space: pre; }
 .nc-term .b { font-weight: 700; }
 .nc-term .d { opacity: 0.6; }
 .nc-term .i { font-style: italic; }
 .nc-term .u { text-decoration: underline; }
-/* A white ground with black text, as a terminal draws a key: the black of a
-   terminal is not the grey used for dim text. */
-.nc-term [style*="background:var(--nc-ansi-white)"] { color: var(--nc-bg) !important; border-radius: 3px; }
+/* Text set on the terminal's white is dark, as a terminal draws a key. */
+.nc-term [style*="background:var(--nc-ansi-white)"] { color: var(--nc-bg) !important; }
 
+/* --------------------------- Pointer and motion -------------------------- */
 @media (hover: hover) and (pointer: fine) {
-  .nc-show-tab, .nc-show-chip, .nc-term-run { transition: color 150ms ease, border-color 150ms ease, background-color 150ms ease, transform 160ms var(--ease-out); }
-  .nc-show-tab:hover, .nc-show-chip:hover, .nc-term-run:hover { color: var(--nc-fg); }
-  .nc-show-chip:not([aria-pressed="true"]):hover, .nc-term-run:hover { border-color: var(--nc-faint); }
+  .nc-show-rail button { transition: color 150ms ease; }
+  /* The press feedback of .nc-press stays in the list: a later `transition` replaces it whole. */
+  .nc-show-variants button, .nc-term-run { transition: transform 160ms var(--ease-out), color 150ms ease, border-color 150ms ease; }
+  .nc-show-rail button:hover, .nc-show-variants button:hover, .nc-term-run:hover { color: var(--nc-fg); }
+  .nc-show-variants button:not([aria-pressed="true"]):hover, .nc-term-run:hover { border-color: var(--nc-faint); }
 }
-.nc-show-tab:active { transform: scale(0.97); }
-
+/* A finger needs more room than a pointer. */
 @media (pointer: coarse) {
-  .nc-show-tab { padding-block: 0.6875rem; }
-  .nc-show-chip { padding: 0.5625rem 0.875rem; }
-  .nc-term-run { padding: 0.5rem 0.875rem; }
+  .nc-show-variants button { padding: 0.5625rem 0.8125rem; }
+  .nc-term-run { padding: 0.5rem 0.75rem; }
 }
 @media (max-width: 49.99rem) {
-  .nc-show { border-radius: 12px; margin-inline: calc(-1 * var(--sl-content-pad-x, 1rem) + 0.25rem); }
   .nc-show-head { padding: 0.875rem 1rem; }
-  .nc-term pre { padding: 1rem; font-size: 0.75rem; max-height: 22rem; }
+  .nc-term pre { padding: 1rem; font-size: 0.72rem; max-height: 22rem; }
   .nc-term header { padding-inline-start: 1rem; }
 }
-
 @media (prefers-reduced-motion: reduce) {
-  .nc-show-tablist[data-slide] .nc-show-marker { transition: none; }
-  .nc-show-tab:active { transform: none; }
+  .nc-show-mark[data-slide] { transition: none; }
 }
 @media (prefers-contrast: more) {
   .nc-term .d { opacity: 0.85; }

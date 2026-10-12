@@ -20,8 +20,8 @@ export const SCENES = [
     id: "cli",
     label: "CLI",
     about: {
-      en: "Tables, trees and boxes that line up, with colors, emoji and CJK text.",
-      fr: "Des tableaux, des arbres et des cadres bien alignés, avec couleurs, emoji et texte CJK.",
+      en: "Tables, trees and boxes that line up, whatever is in the cells.",
+      fr: "Des tableaux, des arbres et des cadres bien alignés, quel que soit le contenu des cellules.",
     },
     variants: [
       { id: "table", label: "table" },

@@ -1,10 +1,12 @@
 ---
-// The site header: name, the three areas of the docs, search, language,
-// repository, theme. On a small screen only the name and the search stay;
-// the rest is in the navigation sheet Starlight opens from its menu button.
+// The site header: brand, the three top-level areas, search, language,
+// repository, theme.
+// On small screens only the brand and the search remain; the rest lives in the
+// navigation sheet, which Starlight opens from its own menu button.
 import Search from "virtual:starlight/components/Search";
 import LanguageSelect from "virtual:starlight/components/LanguageSelect";
 import ThemeSelect from "virtual:starlight/components/ThemeSelect";
+import SearchExtras from "./SearchExtras.astro";
 import { normalizeBase, switchLocale } from "../../plugins/base-links.mjs";
 import { href, useT } from "../i18n";
 import pkg from "../../../package.json";
@@ -18,7 +20,7 @@ const inRecipes = path.startsWith("/recipes/");
 const inReference = path.startsWith("/reference/");
 
 const areas = [
-  { label: t("nav.guide"), href: "/start/getting-started/", current: !inRecipes && !inReference && path !== "/" },
+  { label: t("nav.docs"), href: "/start/getting-started/", current: !inRecipes && !inReference && path !== "/" },
   { label: t("nav.recipes"), href: "/recipes/", current: inRecipes },
   { label: t("nav.reference"), href: "/reference/", current: inReference },
 ];
@@ -28,7 +30,7 @@ const version = pkg.version.split(".").slice(0, 2).join(".");
 
 <div class="nc-header">
   <a class="nc-brand" href={Astro.locals.starlightRoute.siteTitleHref} translate="no">
-    <span>node-comfort</span><small>v{version}</small>
+    <span>node<i>-</i>comfort</span><small>v{version}</small>
   </a>
   <nav class="nc-toplinks" aria-label={t("nav.sections")}>
     {areas.map((area) => (
@@ -45,9 +47,10 @@ const version = pkg.version.split(".").slice(0, 2).join(".");
     <ThemeSelect />
   </div>
 </div>
+<SearchExtras />
 
 <script>
-  // Copy buttons outside code blocks (the install line of the landing page).
+  // Copy buttons outside code blocks (the install line on the landing page).
   document.addEventListener("click", (event) => {
     const button = (event.target as Element | null)?.closest<HTMLElement>("[data-copy]");
     if (!button) return;
@@ -72,4 +75,34 @@ const version = pkg.version.split(".").slice(0, 2).join(".");
     );
     for (const element of reveals) watcher.observe(element);
   }
+
+  // A sliding marker under the selected tab. It slides for a pointer, and jumps
+  // for the keyboard: arrowing through tabs should never wait on an animation.
+  let lastPointer = 0;
+  function place(list: HTMLElement, animate: boolean): void {
+    const active = list.querySelector<HTMLElement>('[role="tab"][aria-selected="true"]');
+    if (!active || active.offsetWidth === 0) return;
+    let marker = list.querySelector<HTMLElement>(".nc-tab-indicator");
+    if (!marker) {
+      marker = document.createElement("li");
+      marker.className = "nc-tab-indicator";
+      marker.setAttribute("role", "presentation");
+      list.append(marker);
+      list.closest("starlight-tabs")?.setAttribute("data-nc-indicator", "");
+    }
+    if (!animate) list.removeAttribute("data-nc-ready");
+    marker.style.transform = `translateX(${active.offsetLeft}px) scaleX(${active.offsetWidth / 100})`;
+    if (!animate) requestAnimationFrame(() => requestAnimationFrame(() => list.setAttribute("data-nc-ready", "")));
+  }
+  const lists = [...document.querySelectorAll<HTMLElement>('starlight-tabs [role="tablist"]')];
+  for (const list of lists) {
+    place(list, false);
+    list.addEventListener("pointerdown", () => (lastPointer = performance.now()));
+    new MutationObserver(() => place(list, performance.now() - lastPointer < 600)).observe(list, {
+      subtree: true,
+      attributes: true,
+      attributeFilter: ["aria-selected"],
+    });
+  }
+  if (lists.length > 0) addEventListener("resize", () => lists.forEach((list) => place(list, false)));
 </script>

@@ -55,12 +55,12 @@ export default defineConfig({
         { tag: "link", attrs: { rel: "icon", type: "image/png", sizes: "32x32", href: withBase("/favicon-32.png", base) } },
         { tag: "link", attrs: { rel: "apple-touch-icon", href: withBase("/apple-touch-icon.png", base) } },
         // Kept in step with the theme by the theme toggle.
-        { tag: "meta", attrs: { name: "theme-color", content: "#101312" } },
+        { tag: "meta", attrs: { name: "theme-color", content: "#121211" } },
       ],
       customCss: [
-        "@fontsource-variable/fraunces/opsz.css",
-        "@fontsource-variable/fraunces/opsz-italic.css",
-        "@fontsource-variable/jetbrains-mono/wght.css",
+        "@fontsource-variable/bricolage-grotesque/opsz.css",
+        "@fontsource/fragment-mono/400.css",
+        "@fontsource/fragment-mono/400-italic.css",
         "./src/styles/comfort.css",
       ],
       components: {
@@ -73,13 +73,13 @@ export default defineConfig({
       expressiveCode: {
         themes: [comfortDark, comfortLight],
         styleOverrides: {
-          borderRadius: "10px",
+          borderRadius: "6px",
           borderWidth: "1px",
           borderColor: "var(--nc-line)",
           codeFontFamily: "var(--sl-font-mono)",
           codeFontSize: "0.84rem",
-          codeLineHeight: "1.7",
-          codePaddingBlock: "1.1rem",
+          codeLineHeight: "1.75",
+          codePaddingBlock: "1.25rem",
           codePaddingInline: "1.25rem",
           uiFontFamily: "var(--sl-font-mono)",
           uiFontSize: "0.75rem",

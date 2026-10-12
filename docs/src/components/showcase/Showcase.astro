@@ -1,7 +1,8 @@
 ---
-// The showcase of the landing page: a subject, a variation, the code, and what
-// it printed when `scripts/showcase.mjs` ran it. Everything is in the page from
-// the start; the script below only decides what is shown and replays the output.
+// The landing page's showcase: pick a subject, then a variation, read the
+// file, and see what it printed when `scripts/showcase.mjs` ran it against the
+// package. Everything is in the page from the start; the script below only
+// decides what is shown, and plays the output again.
 import { Code } from "@astrojs/starlight/components";
 import { useT } from "../../i18n";
 import { SCENES } from "../../showcase/scenes.mjs";
@@ -13,19 +14,18 @@ const runs = output as Record<string, Record<string, Run>>;
 
 const { locale } = Astro.locals.starlightRoute;
 const t = useT(locale);
-const language = (locale ?? "en") as "en" | "fr";
+const language = locale === "fr" ? "fr" : "en";
+const two = (n: number) => String(n).padStart(2, "0");
 ---
 
 <nc-showcase class="nc-show" aria-label={t("showcase.label")}>
-  <div class="nc-show-tabs">
-    <div class="nc-show-tablist" role="tablist" aria-label={t("showcase.scenes")}>
-      <span class="nc-show-marker" aria-hidden="true"></span>
-      {SCENES.map((scene, index) => (
-        <button class="nc-show-tab" type="button" role="tab" id={`nc-tab-${scene.id}`} aria-controls={`nc-panel-${scene.id}`} aria-selected={index === 0 ? "true" : "false"} tabindex={index === 0 ? 0 : -1}>
-          {scene.label}
-        </button>
-      ))}
-    </div>
+  <div class="nc-show-rail" role="tablist" aria-label={t("showcase.scenes")}>
+    {SCENES.map((scene, index) => (
+      <button type="button" role="tab" id={`nc-tab-${scene.id}`} aria-controls={`nc-panel-${scene.id}`} aria-selected={index === 0 ? "true" : "false"} tabindex={index === 0 ? 0 : -1}>
+        <span aria-hidden="true">{two(index + 1)}</span>{scene.label}
+      </button>
+    ))}
+    <span class="nc-show-mark" aria-hidden="true"></span>
   </div>
 
   {SCENES.map((scene, index) => (
@@ -34,7 +34,7 @@ const language = (locale ?? "en") as "en" | "fr";
         <p>{scene.about[language]}</p>
         <div class="nc-show-variants" role="group" aria-label={t("showcase.variants")}>
           {scene.variants.map((variant, at) => (
-            <button class="nc-show-chip nc-press" type="button" data-variant={variant.id} aria-pressed={at === 0 ? "true" : "false"}>{variant.label}</button>
+            <button class="nc-press" type="button" data-variant={variant.id} aria-pressed={at === 0 ? "true" : "false"}>{variant.label}</button>
           ))}
         </div>
       </div>
@@ -50,7 +50,7 @@ const language = (locale ?? "en") as "en" | "fr";
                 <span class="nc-term-title">{t("showcase.output")}</span>
                 <span class="nc-term-time" data-time={t("showcase.ran", { ms: run.ms })}></span>
                 <button class="nc-term-run nc-press" type="button" data-run>
-                  <svg width="11" height="11" viewBox="0 0 12 12" fill="currentColor" aria-hidden="true"><path d="M2.5 1.2v9.6a.5.5 0 0 0 .76.43l8-4.8a.5.5 0 0 0 0-.86l-8-4.8a.5.5 0 0 0-.76.43Z"></path></svg>
+                  <svg width="10" height="10" viewBox="0 0 12 12" fill="currentColor" aria-hidden="true"><path d="M2.5 1.2v9.6a.5.5 0 0 0 .76.43l8-4.8a.5.5 0 0 0 0-.86l-8-4.8a.5.5 0 0 0-.76.43Z"></path></svg>
                   <span>{t("showcase.again")}</span>
                 </button>
               </header>
@@ -67,10 +67,10 @@ const language = (locale ?? "en") as "en" | "fr";
   const reduced = matchMedia("(prefers-reduced-motion: reduce)");
 
   class Showcase extends HTMLElement {
+    private rail = this.querySelector<HTMLElement>(".nc-show-rail");
     private tabs = [...this.querySelectorAll<HTMLButtonElement>('[role="tab"]')];
-    private marker = this.querySelector<HTMLElement>(".nc-show-marker");
-    private list = this.querySelector<HTMLElement>('[role="tablist"]');
-    // Whether the last thing the reader did here was with a pointer: a marker
+    private mark = this.querySelector<HTMLElement>(".nc-show-mark");
+    // Whether the last thing the reader did here was with a pointer: the mark
     // slides for a pointer and jumps for the keyboard.
     private pointer = false;
 
@@ -80,16 +80,17 @@ const language = (locale ?? "en") as "en" | "fr";
         this.pointer = false;
         this.onKey(event);
       });
-      for (const tab of this.tabs) tab.addEventListener("click", () => this.select(tab));
       this.addEventListener("click", (event) => {
         const target = event.target as Element | null;
-        const chip = target?.closest<HTMLButtonElement>(".nc-show-chip");
-        if (chip) this.choose(chip);
+        const tab = target?.closest<HTMLButtonElement>('[role="tab"]');
+        if (tab) return this.select(tab);
+        const variant = target?.closest<HTMLButtonElement>(".nc-show-variants button");
+        if (variant) return this.choose(variant);
         const run = target?.closest<HTMLButtonElement>("[data-run]");
         if (run) this.play(run.closest<HTMLElement>(".nc-show-run"));
       });
       addEventListener("resize", () => this.place(false));
-      // Fonts change the width of the tabs once they arrive.
+      // The tabs change width once their font arrives.
       document.fonts?.ready.then(() => this.place(false));
       this.place(false);
       // The first output plays when the showcase comes into view, once.
@@ -130,28 +131,31 @@ const language = (locale ?? "en") as "en" | "fr";
         if (panel) panel.hidden = !selected;
       }
       this.place(this.pointer);
-      tab.scrollIntoView({ block: "nearest", inline: "nearest" });
+      // Bring the tab into view inside the rail only: the page itself stays where it is.
+      if (this.rail) {
+        const left = tab.offsetLeft - 24;
+        const right = tab.offsetLeft + tab.offsetWidth + 24 - this.rail.clientWidth;
+        if (this.rail.scrollLeft > left) this.rail.scrollLeft = Math.max(0, left);
+        else if (this.rail.scrollLeft < right) this.rail.scrollLeft = right;
+      }
       this.play(this.current());
     }
 
-    private choose(chip: HTMLButtonElement): void {
-      const panel = chip.closest<HTMLElement>(".nc-show-panel");
-      if (!panel || chip.getAttribute("aria-pressed") === "true") return;
-      for (const other of panel.querySelectorAll<HTMLButtonElement>(".nc-show-chip")) other.setAttribute("aria-pressed", String(other === chip));
-      for (const run of panel.querySelectorAll<HTMLElement>(".nc-show-run")) run.hidden = run.dataset.variant !== chip.dataset.variant;
+    private choose(button: HTMLButtonElement): void {
+      const panel = button.closest<HTMLElement>(".nc-show-panel");
+      if (!panel || button.getAttribute("aria-pressed") === "true") return;
+      for (const other of panel.querySelectorAll<HTMLButtonElement>(".nc-show-variants button")) other.setAttribute("aria-pressed", String(other === button));
+      for (const run of panel.querySelectorAll<HTMLElement>(".nc-show-run")) run.hidden = run.dataset.variant !== button.dataset.variant;
       this.play(this.current());
     }
 
-    /** Moves the marker under the selected tab. */
+    /** Moves the mark under the selected tab. It is 100px long and scaled to the tab. */
     private place(animate: boolean): void {
       const active = this.tabs.find((tab) => tab.getAttribute("aria-selected") === "true");
-      if (!active || !this.marker || !this.list || active.offsetWidth === 0) return;
-      this.list.toggleAttribute("data-slide", animate && !reduced.matches);
-      // The marker covers the whole row and is cut down to the tab: its round ends keep their shape.
-      const left = active.offsetLeft;
-      const right = this.list.offsetWidth - left - active.offsetWidth;
-      this.marker.style.clipPath = `inset(0 ${right}px 0 ${left}px round 999px)`;
-      this.list.setAttribute("data-ready", "");
+      if (!active || !this.mark || active.offsetWidth === 0) return;
+      this.mark.toggleAttribute("data-slide", animate && !reduced.matches);
+      this.mark.style.transform = `translateX(${active.offsetLeft}px) scaleX(${active.offsetWidth / 100})`;
+      this.mark.setAttribute("data-placed", "");
     }
 
     /** Prints the output again, a line at a time, as a program would. */
@@ -165,7 +169,7 @@ const language = (locale ?? "en") as "en" | "fr";
         if (time) time.textContent = time.dataset.time ?? "";
       };
       if (reduced.matches || lines.length === 0) return done();
-      // Short outputs take their time, long ones don't make you wait: the whole thing lands in half a second at most.
+      // Short outputs take their time, long ones don't make you wait: the last line starts within 420 ms.
       const gap = Math.min(45, 420 / lines.length);
       let last: Animation | undefined;
       lines.forEach((line, index) => {
