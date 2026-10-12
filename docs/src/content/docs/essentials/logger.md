@@ -167,7 +167,7 @@ log.error("Payment failed", { orderId: 42, token: "abc" });
 
 The entry holds `time` (a `Date`), `level`, `kind` (the method that was called, so `success()` gives the kind `"success"` and the level `"info"`), `scope`, `message` and `args`. `message` is the line as printed, without colors or timestamp. `args` are the values you passed, untouched: `redact` doesn't apply to them.
 
-An error thrown by the hook is ignored, so a broken hook can't take the program down. The hook isn't awaited: if it's async, catch its errors inside it.
+An error thrown by the hook is ignored, so a broken hook can't take the program down. The hook isn't awaited, and a promise it rejects is ignored too.
 
 ## Log files
 

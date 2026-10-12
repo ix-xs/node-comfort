@@ -125,7 +125,7 @@ time.endOf(date, "month");                       // last day, 23:59:59.999
 
 Adding months keeps the day in range: January 31 plus one month is the last day of February. A text amount that can't be read, like `"soon"`, throws a `TypeError`.
 
-Months, years, `startOf()` and `endOf()` follow the calendar of the default zone, or the one you pass:
+Whole days, weeks, months and years, like `startOf()` and `endOf()`, follow the calendar of the default zone, or the one you pass:
 
 ```js
 time.startOf("2024-01-15T03:00:00Z", "day", { timeZone: "America/New_York" });
@@ -135,7 +135,15 @@ time.add("2024-02-15T12:00:00-05:00", 1, "month", { timeZone: "America/New_York"
 // 2024-03-15T16:00:00.000Z, still noon in New York after the clock change
 ```
 
-Days and weeks are fixed lengths: 24 hours and 7 days.
+One day later is the same time tomorrow, even on the night the clocks change. Hours and smaller units are exact, so `"24h"` is not always `"1 day"`:
+
+```js
+const paris = { timeZone: "Europe/Paris" };
+time.add("2024-03-30T12:00:00+01:00", 1, "day", paris); // 2024-03-31T10:00:00.000Z, noon in Paris
+time.add("2024-03-30T12:00:00+01:00", "24h", paris);   // 2024-03-31T11:00:00.000Z, 1 pm in Paris
+```
+
+A unit that doesn't exist, like `"bananas"`, throws a `TypeError`.
 
 `range()` lists every date from a start to an end, both included:
 

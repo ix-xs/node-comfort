@@ -11,8 +11,8 @@ Markup: `<% red bold Error:%> disk is full`. Any style name works, plus
 
 Levels, from chatty to severe: `trace`, `debug`, `info`, `warn`, `error`,
 `fatal`. The default is `info`; `LOG_LEVEL` changes it. `DEBUG=1` shows
-debug messages, and `DEBUG=db,http:*` only those of the loggers with these
-scopes. Warnings and errors go to stderr.
+debug messages, and `DEBUG=db,http:*` only the debug and trace messages of
+the loggers with these scopes. Warnings and errors go to stderr.
 
 ```js
 const { logger } = require("@ix-xs/node-comfort");
@@ -41,7 +41,7 @@ Prints a message without a badge. Strings support markup, objects are
 pretty-printed, and several arguments are joined with spaces.
 
 ```js
-nc.log("<% green ✔ Saved %> in <% bold 12ms %>");
+nc.log("<% green ✔ Saved%> in <% bold 12ms%>");
 nc.log("user:", { id: 1, roles: ["admin"] });
 ```
 
@@ -157,7 +157,7 @@ Starts a named timer. `timeEnd()` prints the elapsed time.
 ```js
 nc.timeStart("import");
 await importProducts();
-nc.timeEnd("import"); // "import: 1.24s"
+nc.timeEnd("import"); // "import: 1s 240ms"
 ```
 
 ## timeEnd
@@ -368,7 +368,7 @@ Options for `createLogger()` and `configure()`.
 | `file?` | `string \| `[`LogFileOptions`](#logfileoptions) | Also write every message to a file. |
 | `fields?` | `Record``<string, unknown>` | Added to every JSON record, like a service name. |
 | `redact?` | `string[]` | Keys whose values are replaced by `"[redacted]"` wherever they appear in logged objects, like `["password", "authorization"]`. Case doesn't matter. |
-| `onLog?` | `((entry: `[`LogEntry`](#logentry)`) => void)` | Called for every message that passes the level, to send logs somewhere else. An error it throws is ignored: logging never breaks the program. |
+| `onLog?` | `((entry: `[`LogEntry`](#logentry)`) => void \| ``Promise``<void>)` | Called for every message that passes the level, to send logs somewhere else. It isn't awaited, and an error it throws (or a promise it rejects) is ignored: logging never breaks the program. |
 
 ### LogLevel
 

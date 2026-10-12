@@ -8,7 +8,8 @@ sidebar:
 
 The `.env` file in the working directory is loaded when the package is
 required; variables that are already set are never overwritten. Set
-`NODE_COMFORT_DOTENV=false` to turn that off.
+`NODE_COMFORT_DOTENV=false` to turn that off. What it loaded has the
+lowest priority: a file you load yourself afterwards wins over it.
 
 ```js
 const { env } = require("@ix-xs/node-comfort");
@@ -49,7 +50,8 @@ load(files?: string | string[], options?: EnvLoadOptions): Record<string, string
 
 Loads `.env` files into `process.env`. The first file to set a variable
 wins, and variables that are already set are kept, unless you pass
-`override`.
+`override`. The `.env` loaded by itself at startup doesn't count as
+already set: `.env.local` wins over it, as you'd expect.
 
 | Parameter | Type | Description |
 | --- | --- | --- |

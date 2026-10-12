@@ -152,7 +152,7 @@ db.queryOne("SELECT p.title, p.tags, u.active AS author_active FROM posts p JOIN
 
 On Node.js before 22.16, that only works for a query on a single table.
 
-A `CURRENT_TIMESTAMP` default writes UTC text like `"2026-10-12 10:37:04"`, without a time zone. To get the ISO format that inserted dates have, use `defaultExpression: "strftime('%Y-%m-%dT%H:%M:%fZ', 'now')"` instead.
+A `CURRENT_TIMESTAMP` default writes UTC text like `"2026-10-12 10:37:04"`, without a time zone. With `dates: true` it's read back as the right moment. To store the ISO format that inserted dates have, use `defaultExpression: "strftime('%Y-%m-%dT%H:%M:%fZ', 'now')"` instead.
 
 ## Errors
 
