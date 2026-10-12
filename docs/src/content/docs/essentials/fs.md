@@ -119,7 +119,7 @@ watcher.stop();
 
 `debounce` merges the bursts of events editors produce when they save. It takes milliseconds or text like `"100ms"`.
 
-`"error"` tells you that the watch itself failed, so you can start a new one. When the watched folder is deleted, you get it once, with the code `ENOENT`, and the watcher stops. Without a listener, such an error is dropped. `watch()` returns `undefined` when the path doesn't exist.
+`"error"` tells you that the watch itself failed, so you can start a new one. When the watched folder is deleted, the event fires once, with the code `ENOENT`, and the watcher stops. Without a listener, such an error is dropped. `watch()` returns `undefined` when the path doesn't exist.
 
 ## Odds and ends
 

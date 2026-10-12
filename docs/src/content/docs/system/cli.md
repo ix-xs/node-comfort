@@ -78,7 +78,7 @@ That gives `flags = { port: 8080, token: "abc", tag: ["api", "web"] }`. In a var
 
 ## Subcommands
 
-Give `commands` their names and what they do. The first argument must be one of them, and it comes back as `command`.
+Give `commands` the names of your commands and what they do. The first argument must be one of them, and it comes back as `command`.
 
 ```js
 const { command, flags, positionals, help } = cli.args({

@@ -43,6 +43,7 @@ The package now declares its entry points. Replace imports of internal files:
 const Logger = require("@ix-xs/node-comfort/src/Logger");
 // 2.0
 const { logger } = require("@ix-xs/node-comfort");
+// or, to load only the logger
 const logger = require("@ix-xs/node-comfort/logger");
 ```
 

@@ -57,7 +57,7 @@ Node.js 22.13 or newer. That's the first version where `node:sqlite` works witho
 
 - **Zero dependencies.** Built only on Node's own modules. No install scripts, nothing else to audit or keep up to date.
 - **Your editor already knows it.** Every function, parameter and option is typed and documented, with examples. Type `nc.` and look around. It works in plain JavaScript too.
-- **Fast to load.** Namespaces load the first time you use them. Requiring the package takes about 3 ms, and a script that only logs never loads the database or the HTTP client.
+- **Fast to load.** Namespaces load the first time you use them. Requiring the package takes about 4 ms, and a script that only logs never loads the database or the HTTP client.
 - **Safe by default.** Prototype-pollution-proof objects, scrypt passwords, AES-256-GCM, constant-time comparisons, parameterized SQL, atomic file writes.
 - **One way of doing things.** Durations are always `"5m"` or milliseconds, options always come last, and every error has a stable `code`.
 - **Tested everywhere.** Linux, macOS and Windows, Node.js 22 and 24, TypeScript 5.9, 6 and 7.

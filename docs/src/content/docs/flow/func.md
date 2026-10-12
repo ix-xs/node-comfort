@@ -137,7 +137,7 @@ const refreshToken = func.dedupe(async () => (await api.post("auth/refresh")).da
 const token = await refreshToken();
 ```
 
-Calls with the same arguments get the promise of the run in flight. Once it settles, the next call starts a new run: nothing is kept, unlike `memoize`. A second parameter builds the key yourself, as in `func.dedupe(fetchUser, (id, options) => id)`.
+Calls with the same arguments get the promise of the run in flight. Once it settles, the next call starts a new run: nothing is kept, unlike `memoize`. A second parameter lets you build the key yourself, as in `func.dedupe(fetchUser, (id, options) => id)`.
 
 ## Once, before, after
 

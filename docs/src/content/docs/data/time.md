@@ -74,7 +74,7 @@ time.parse("2024-01-15 09:00", "YYYY-MM-DD HH:mm", { timeZone: "Asia/Tokyo" });
 time.parse("31/02/2024", "DD/MM/YYYY");                         // undefined, no such day
 ```
 
-The text is read in the default zone, or the one you pass, unless it carries its own offset (the `Z` token). You get `undefined` when the text doesn't match the pattern or isn't a real date. A pattern with no date means today, and one with no time means midnight. The week, quarter and zone name tokens (`W`, `Q`, `d`, `z`) can't be read back: a pattern that has one throws a `TypeError`.
+The text is read in the default zone, or the one you pass, unless it carries its own offset (the `Z` token). You get `undefined` when the text doesn't match the pattern or isn't a real date. A pattern with no date means today, and one with no time means midnight. The week, quarter, weekday number and zone name tokens (`W`, `Q`, `d`, `z`) can't be read back: a pattern that has one throws a `TypeError`.
 
 For Unix timestamps in seconds, as found in JWTs and many APIs:
 

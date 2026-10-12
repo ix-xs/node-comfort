@@ -58,9 +58,9 @@ import Showcase from '../../components/showcase/Showcase.astro';
   <header data-reveal><span>03</span><h2>What you stop worrying about</h2></header>
   <ul class="nc-points">
     <li data-reveal><h3>The dependency tree</h3><p>Zero runtime dependencies. One package to review, one version to pin, one changelog to read. Nothing arrives in <code>node_modules</code> that you did not ask for.</p></li>
-    <li data-reveal><h3>Startup time</h3><p><code>require("@ix-xs/node-comfort")</code> takes about 3 ms. Each namespace loads the first time you use it, and can be imported on its own.</p></li>
+    <li data-reveal><h3>Startup time</h3><p><code>require("@ix-xs/node-comfort")</code> takes about 4 ms. Each namespace loads the first time you use it, and can be imported on its own.</p></li>
     <li data-reveal><h3>Guessing what a function takes</h3><p>Written in JavaScript with complete JSDoc, shipped with generated declarations: completions, documentation on hover and inferred types, in plain JS as in TypeScript.</p></li>
-    <li data-reveal><h3>The unsafe default</h3><p>Atomic writes, constant-time comparisons, bounded password hashing, object helpers that ignore <code>__proto__</code>, retries that never repeat a POST.</p></li>
+    <li data-reveal><h3>The unsafe default</h3><p>Atomic writes, constant-time comparisons, bounded password hashing, object helpers that ignore <code>__proto__</code>, retries that leave a POST alone unless you ask.</p></li>
     <li data-reveal><h3>What a failure looks like</h3><p>What can fail in normal life returns <code>undefined</code> or <code>false</code>. What fails because something is wrong throws an error with a <code>code</code> and the context you need.</p></li>
     <li data-reveal><h3>Whether it runs on your machine</h3><p>Four hundred tests on Windows, macOS and Linux, from Node 22.13 to the latest, and every example of this site is run before it is published.</p></li>
   </ul>
@@ -70,12 +70,12 @@ import Showcase from '../../components/showcase/Showcase.astro';
   <header data-reveal><span>04</span><h2>Fast where it is called a million times</h2></header>
   <p data-reveal>Operations per second on one core of a laptop, with Node 24. The slow parts of JavaScript (<code>Intl</code>, random bytes, stack traces) are set up once and reused.</p>
   <ul class="nc-numbers">
-    <li data-reveal><strong>2.7<small>M/s</small></strong><span>log lines formatted by <code>nc.info()</code></span></li>
+    <li data-reveal><strong>2.9<small>M/s</small></strong><span>log lines formatted by <code>nc.info()</code></span></li>
     <li data-reveal><strong>7.3<small>M/s</small></strong><span>sortable ids from <code>id.uuidv7()</code></span></li>
-    <li data-reveal><strong>1.7<small>M/s</small></strong><span>objects checked by a five-field schema</span></li>
+    <li data-reveal><strong>1.6<small>M/s</small></strong><span>objects checked by a five-field schema</span></li>
     <li data-reveal><strong>52<small>M/s</small></strong><span>events through <code>emitter.emit()</code></span></li>
-    <li data-reveal><strong>490<small>k/s</small></strong><span>rows read by key with <code>db.get()</code></span></li>
-    <li data-reveal><strong>3<small>ms</small></strong><span>to load the package, whatever you use later</span></li>
+    <li data-reveal><strong>460<small>k/s</small></strong><span>rows read by key with <code>db.get()</code></span></li>
+    <li data-reveal><strong>4<small>ms</small></strong><span>to load the package, whatever you use later</span></li>
   </ul>
 </section>
 

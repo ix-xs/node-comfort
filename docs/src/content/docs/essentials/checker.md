@@ -35,7 +35,7 @@ A few pairs are easy to mix up:
 | `isNumeric` | `42`, `"4.2e3"`, `" 12 "` | `"12px"`, `""` |
 | `isObject` | `{}`, `[]`, `new Date()` | `null` |
 | `isPlainObject` | `{}`, `Object.create(null)` | `[]`, `new Date()`, class instances |
-| `isEmpty` | `""`, `[]`, `{}`, empty Map/Set, `null` | `" "`, `0`, `new Date()`, `/x/`, `new Error()` |
+| `isEmpty` | `""`, `[]`, `{}`, empty Map/Set, `null`, `undefined` | `" "`, `0`, `new Date()`, `/x/`, `new Error()` |
 | `isBlank` | `null`, `""`, `"  \n"` | `" a "` |
 | `isDate` | any `Date` | strings |
 | `isValidDate` | a `Date` holding a real time | `new Date("nope")` |
@@ -47,7 +47,7 @@ A few pairs are easy to mix up:
 Common formats are covered:
 
 ```js
-nc.isEmail("jose@exemple.fr");                 // true, international addresses are fine
+nc.isEmail("josé@exemple.fr");                 // true, international addresses are fine
 nc.isURL("https://example.com/a?b=1");         // http and https by default
 nc.isURL("ftp://example.com", { protocols: ["ftp:"] });
 nc.isUUID(id, { version: 7 });
