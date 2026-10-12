@@ -1937,8 +1937,11 @@ describe("fs", () => {
     /** @type {string[]} */
     const seen = [];
     watcher.on("all", (event) => seen.push(event)).on("error", (error) => seen.push(`error:${error instanceof Error}`));
-    nc.writeFile(at("watched", "a.txt"), "x");
-    for (let i = 0; i < 40 && !seen.length; i++) await sleep(25);
+    // Some systems only start reporting a moment after the watch begins: write until it is seen.
+    for (let i = 0; i < 50 && !seen.length; i++) {
+      nc.writeFile(at("watched", "a.txt"), `x${i}`);
+      await sleep(100);
+    }
     watcher.stop();
     assert.ok(seen.length > 0, "the write was seen");
   });
