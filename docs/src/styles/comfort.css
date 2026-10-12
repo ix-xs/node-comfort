@@ -1,0 +1,587 @@
+/* ==========================================================================
+   Comfort: the look of the node-comfort documentation.
+   Deep green ink, a serif for titles, a mono that draws boxes properly,
+   soft surfaces instead of heavy borders.
+
+   Motion follows three rules. What is seen tens of times a day does not move
+   (changing page, hovering the navigation, opening search). What does move
+   uses the curves below and stays under 300 ms. Reduced motion keeps the
+   fades and drops the travel.
+   ========================================================================== */
+
+:root {
+  --ease-out: cubic-bezier(0.23, 1, 0.32, 1);
+  --ease-in-out: cubic-bezier(0.77, 0, 0.175, 1);
+
+  --nc-display: "Fraunces Variable", "Iowan Old Style", "Palatino Linotype", Georgia, serif;
+  --nc-radius: 10px;
+  --nc-radius-s: 6px;
+  /* Icon buttons: the box, the glyph, the space between two, and how far a
+     box at the edge of the page reaches past its glyph. */
+  --nc-icon-btn: 2.25rem;
+  --nc-icon: 1.125rem;
+  --nc-icon-gap: 0.25rem;
+  --nc-icon-bleed: calc((var(--nc-icon-btn) - var(--nc-icon)) / 2);
+
+  /* Starlight */
+  --sl-font: system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+  --sl-font-mono: "JetBrains Mono Variable", ui-monospace, "SF Mono", Menlo, Consolas, "Liberation Mono", monospace;
+  --sl-nav-height: 3.75rem;
+  --sl-sidebar-width: 17.5rem;
+  --sl-content-width: 46rem;
+  --sl-text-h1: clamp(2.375rem, 5.5vw, 3.375rem);
+  --sl-text-h2: 1.75rem;
+  --sl-text-h3: 1.1875rem;
+  --sl-text-h4: 1.0625rem;
+  --sl-line-height: 1.7;
+  --sl-line-height-headings: 1.15;
+}
+
+:root,
+:root[data-theme="dark"] {
+  --nc-bg: #101312;
+  --nc-surface: #161a18;
+  --nc-raised: #1b201e;
+  --nc-line: #252c29;
+  --nc-fg: #e9ede9;
+  --nc-muted: #a0aaa4;
+  --nc-faint: #74807a;
+  --nc-accent: #6fdc9f;
+  --nc-on-accent: #0b130f;
+  --nc-tint: color-mix(in srgb, var(--nc-accent) 9%, transparent);
+  --nc-caution: #e2b25c;
+  --nc-danger: #ec6f66;
+  --nc-scrim: rgb(0 0 0 / 0.55);
+  --nc-shadow: 0 1px 0 rgb(255 255 255 / 0.03) inset, 0 24px 60px -24px rgb(0 0 0 / 0.6);
+
+  /* What a terminal prints, for the showcase. */
+  --nc-ansi-black: #48524d;
+  --nc-ansi-red: #ec6f66;
+  --nc-ansi-green: #6fdc9f;
+  --nc-ansi-yellow: #e2c46c;
+  --nc-ansi-blue: #7aa7f0;
+  --nc-ansi-magenta: #c79bf0;
+  --nc-ansi-cyan: #6fd3dc;
+  --nc-ansi-white: #dfe5e0;
+  --nc-ansi-gray: #7f8b84;
+
+  --sl-color-accent-low: #12301f;
+  --sl-color-accent: var(--nc-accent);
+  --sl-color-accent-high: #b5efcf;
+  --sl-color-white: var(--nc-fg);
+  --sl-color-gray-1: #d7ddd8;
+  --sl-color-gray-2: var(--nc-muted);
+  --sl-color-gray-3: var(--nc-faint);
+  --sl-color-gray-4: #454f4a;
+  --sl-color-gray-5: var(--nc-line);
+  --sl-color-gray-6: var(--nc-surface);
+  --sl-color-black: var(--nc-bg);
+  --sl-color-bg: var(--nc-bg);
+  --sl-color-bg-nav: color-mix(in srgb, var(--nc-bg) 78%, transparent);
+  --sl-color-bg-sidebar: var(--nc-bg);
+  --sl-color-bg-inline-code: var(--nc-raised);
+  --sl-color-hairline: var(--nc-line);
+  --sl-color-hairline-light: var(--nc-line);
+  --sl-color-hairline-shade: var(--nc-line);
+  --sl-color-text: var(--nc-muted);
+  --sl-color-text-accent: var(--nc-accent);
+  --sl-color-text-invert: var(--nc-on-accent);
+  --sl-color-backdrop-overlay: var(--nc-scrim);
+}
+
+:root[data-theme="light"] {
+  --nc-bg: #f6f7f3;
+  --nc-surface: #ffffff;
+  --nc-raised: #eef0ea;
+  --nc-line: #dde2da;
+  --nc-fg: #141917;
+  --nc-muted: #55605a;
+  --nc-faint: #78847d;
+  --nc-accent: #0c7a4a;
+  --nc-on-accent: #ffffff;
+  --nc-caution: #8f5a08;
+  --nc-danger: #b3362f;
+  --nc-scrim: rgb(24 36 30 / 0.4);
+  --nc-shadow: 0 24px 60px -30px rgb(20 40 30 / 0.28);
+
+  --nc-ansi-black: #9aa59f;
+  --nc-ansi-red: #c0352d;
+  --nc-ansi-green: #0c7a4a;
+  --nc-ansi-yellow: #8a6500;
+  --nc-ansi-blue: #2457b3;
+  --nc-ansi-magenta: #8544b8;
+  --nc-ansi-cyan: #0d7480;
+  --nc-ansi-white: #2c3631;
+  --nc-ansi-gray: #78847d;
+
+  --sl-color-accent-low: #d6efe0;
+  --sl-color-accent-high: #07502f;
+  --sl-color-gray-1: #232a26;
+  --sl-color-gray-4: #b0bab3;
+  --sl-color-gray-7: var(--nc-bg);
+}
+
+/* ------------------------------ Foundations ------------------------------ */
+html {
+  -webkit-tap-highlight-color: transparent;
+  -webkit-text-size-adjust: 100%;
+  scrollbar-color: var(--nc-line) transparent;
+}
+body { -webkit-font-smoothing: antialiased; }
+::selection { background: color-mix(in srgb, var(--nc-accent) 30%, transparent); color: var(--nc-fg); }
+:focus-visible { outline: 2px solid var(--nc-accent); outline-offset: 2px; }
+button, a, summary, [role="tab"] { touch-action: manipulation; }
+button, summary, [role="tab"] { user-select: none; -webkit-user-select: none; }
+
+/* Easing the dark/light switch avoids a sudden jump in brightness. */
+html.theme-anim body, html.theme-anim body * {
+  transition: background-color 200ms ease, color 200ms ease, border-color 200ms ease !important;
+}
+
+/* Press feedback on what behaves like a button. */
+.nc-press, .sl-link-button, site-search button[data-open-modal], .sl-menu-button {
+  transition: transform 160ms var(--ease-out);
+}
+.nc-press:active, .sl-link-button:active, site-search button[data-open-modal]:active, .sl-menu-button:active, .expressive-code .copy button:active {
+  transform: scale(0.97);
+}
+
+/* --------------------------------- Header -------------------------------- */
+header.header {
+  /* One line for everything: the bar has no vertical padding of its own, so
+     its content is centred on the full height (the safe area aside). */
+  padding-block: env(safe-area-inset-top, 0px) 0;
+  height: calc(var(--sl-nav-height) + env(safe-area-inset-top, 0px));
+  border-bottom: 1px solid var(--nc-line);
+  -webkit-backdrop-filter: blur(18px) saturate(170%);
+  backdrop-filter: blur(18px) saturate(170%);
+}
+.nc-header { display: flex; align-items: center; gap: 1.25rem; height: 100%; min-width: 0; }
+.nc-brand { display: flex; align-items: baseline; gap: 0.5rem; flex-wrap: wrap; min-width: 0; max-height: 1.7em; overflow: hidden; font-family: var(--nc-display); font-weight: 600; font-size: 1.3125rem; letter-spacing: -0.02em; font-variation-settings: "opsz" 40; color: var(--nc-fg); text-decoration: none; white-space: nowrap; }
+.nc-brand span { flex: none; }
+.nc-brand small { font-family: var(--sl-font-mono); font-weight: 400; font-size: 0.6875rem; letter-spacing: 0.04em; color: var(--nc-faint); }
+.nc-toplinks { display: flex; gap: 1.5rem; margin-inline-start: 1rem; font-size: 0.875rem; }
+.nc-toplinks a { color: var(--nc-muted); text-decoration: none; }
+.nc-toplinks a[aria-current="true"] { color: var(--nc-fg); }
+.nc-header .nc-spacer { flex: 1; }
+/* The icon buttons share one box and one glyph size. The last one reaches
+   into the page margin, so its glyph, not its box, lines up with the content. */
+.nc-header .nc-actions { display: flex; align-items: center; gap: var(--nc-icon-gap); margin-inline-end: calc(-1 * var(--nc-icon-bleed)); }
+.nc-icon-btn { position: relative; display: grid; place-items: center; flex: none; width: var(--nc-icon-btn); height: var(--nc-icon-btn); padding: 0; border: 0; border-radius: var(--nc-radius-s); background: none; color: var(--nc-muted); cursor: pointer; }
+.nc-icon-btn svg { width: var(--nc-icon); height: var(--nc-icon); }
+/* The theme button shows where a press leads: the sun in the dark, the moon in the light. */
+.nc-icon-btn .nc-sun, .nc-icon-btn .nc-moon { position: absolute; transition: opacity 200ms ease, filter 200ms ease, transform 200ms var(--ease-out); }
+:root .nc-moon, :root[data-theme="light"] .nc-sun { opacity: 0; filter: blur(2px); transform: scale(0.9); }
+:root[data-theme="light"] .nc-moon { opacity: 1; filter: none; transform: none; }
+/* The language switch: two codes, the current one lit. */
+.nc-lang { display: flex; align-items: center; margin-inline-end: 0.25rem; font-family: var(--sl-font-mono); font-size: 0.6875rem; letter-spacing: 0.06em; }
+.nc-lang a { display: grid; place-items: center; min-width: 1.875rem; height: var(--nc-icon-btn); padding-inline: 0.25rem; border-radius: var(--nc-radius-s); color: var(--nc-faint); text-decoration: none; -webkit-touch-callout: none; }
+.nc-lang a[aria-current="true"] { color: var(--nc-fg); }
+/* Links that act as buttons do not offer the link menu on a long press. */
+a.nc-icon-btn, .mobile-preferences .social-icons a { -webkit-touch-callout: none; }
+
+.nc-header site-search button[data-open-modal] {
+  width: auto;
+  min-width: 15rem;
+  max-width: 100%;
+  height: 2.25rem;
+  border: 1px solid var(--nc-line);
+  border-radius: 999px;
+  padding-inline: 0.875rem;
+  background: color-mix(in srgb, var(--nc-surface) 70%, transparent);
+  color: var(--nc-muted);
+  font-size: 0.875rem;
+  box-shadow: none;
+}
+.nc-header site-search button[data-open-modal] kbd { background: transparent; border: 0; font-family: var(--sl-font-mono); font-size: 0.6875rem; color: var(--nc-faint); }
+site-search dialog { border: 1px solid var(--nc-line); border-radius: 14px; background: var(--nc-surface); box-shadow: 0 24px 64px rgb(0 0 0 / 0.4); }
+site-search dialog input { font-size: 1rem; }
+site-search .dialog-frame { scrollbar-width: thin; scrollbar-color: var(--nc-line) transparent; overscroll-behavior: contain; }
+/* Full screen on a phone: keep the field clear of the notch and the home indicator. */
+@media (max-width: 49.99rem) {
+  site-search .dialog-frame { padding-block: calc(1rem + env(safe-area-inset-top, 0px)) calc(1rem + env(safe-area-inset-bottom, 0px)); }
+}
+#starlight__search input:focus-visible, #starlight__search .pagefind-ui__result-link:focus-visible, #starlight__search .pagefind-ui__result-nested a:focus-visible { outline: none; }
+#starlight__search .pagefind-ui__message { height: auto; padding: 0; margin-block: 1.25rem 0.75rem; font-family: var(--sl-font-mono); font-weight: 400; font-size: 0.6875rem; letter-spacing: 0.08em; text-transform: uppercase; color: var(--nc-faint); }
+#starlight__search .pagefind-ui__result-title:not(:where(.pagefind-ui__result-nested *)):is(:hover, :focus-within),
+#starlight__search .pagefind-ui__result-nested:is(:hover, :focus-within) { outline: none; }
+#starlight__search .pagefind-ui__result-title:not(:where(.pagefind-ui__result-nested *)):focus-within,
+#starlight__search .pagefind-ui__result-nested:focus-within { background: var(--nc-tint); box-shadow: inset 2px 0 0 var(--nc-accent); }
+#starlight__search mark { background: none; color: var(--nc-accent); font-weight: 600; }
+
+@media (max-width: 49.99rem) {
+  :root { --nc-icon-btn: 2.75rem; --nc-icon-gap: 0rem; }
+  .nc-toplinks, .nc-header .nc-actions { display: none; }
+  .nc-header { gap: var(--nc-icon-gap); }
+  /* Search becomes one more icon button, in the same box as its neighbours. */
+  .nc-header site-search button[data-open-modal] { display: grid; place-items: center; flex: none; min-width: 0; width: var(--nc-icon-btn); height: var(--nc-icon-btn); padding: 0; border: 0; background: none; }
+  .nc-header site-search button[data-open-modal] > svg { width: var(--nc-icon); height: var(--nc-icon); }
+  /* With a navigation sheet, the menu button is the last of the row: keep its place free. */
+  [data-has-sidebar] header.header { padding-inline-end: calc(var(--sl-nav-pad-x) - var(--nc-icon-bleed) + var(--nc-icon-btn) + var(--nc-icon-gap)); }
+}
+
+/* -------------------------------- Sidebar -------------------------------- */
+.sidebar-pane { border-inline-end: 1px solid var(--nc-line); scrollbar-width: thin; scrollbar-color: var(--nc-line) transparent; }
+.sidebar-content { padding: 1.75rem 0.875rem 3rem 1.25rem; gap: 0; }
+.sidebar-content ul.top-level > li { margin-top: 0; }
+.sidebar-content ul.top-level > li + li { margin-top: 1.625rem; }
+.sidebar-content ul.top-level > li > details > summary { padding: 0.125rem 0.625rem; }
+/* The name of a group: small capitals in the mono, the quiet voice of the page. */
+.sidebar-content .large, .sidebar-content summary .large {
+  font-family: var(--sl-font-mono);
+  font-weight: 500;
+  font-size: 0.6875rem;
+  letter-spacing: 0.09em;
+  text-transform: uppercase;
+  color: var(--nc-faint);
+  overflow-wrap: anywhere;
+}
+.sidebar-content summary { border-radius: var(--nc-radius-s); }
+.sidebar-content summary .caret { width: 0.875rem; height: 0.875rem; opacity: 0.5; }
+.sidebar-content details > ul { margin: 0.5rem 0 0; padding: 0; border: 0; }
+.sidebar-content details > ul > li { margin: 0; padding: 0; border: 0; }
+.sidebar-content details > ul a {
+  display: block;
+  padding: 0.34rem 0.625rem;
+  border: 0;
+  border-radius: var(--nc-radius-s);
+  background: none;
+  color: var(--nc-muted);
+  font-size: 0.9rem;
+  font-weight: 400;
+  line-height: 1.35;
+  overflow-wrap: anywhere;
+}
+/* The page you are on: a soft green ground, not a rule. */
+.sidebar-content details > ul a[aria-current="page"] { background: var(--nc-tint); color: var(--nc-fg); font-weight: 600; }
+.mobile-preferences { border-top: 1px solid var(--nc-line); }
+
+/* ------------------------------ Page title ------------------------------- */
+.nc-eyebrow { margin: 0; font-family: var(--sl-font-mono); font-size: 0.75rem; letter-spacing: 0.08em; text-transform: uppercase; color: var(--nc-accent); overflow-wrap: anywhere; }
+.nc-title {
+  margin: 0.75rem 0 0;
+  font-family: var(--nc-display);
+  font-weight: 520;
+  font-size: var(--sl-text-h1);
+  line-height: 1.04;
+  letter-spacing: -0.028em;
+  font-optical-sizing: auto;
+  color: var(--nc-fg);
+  text-wrap: balance;
+  overflow-wrap: anywhere;
+}
+.nc-lead { margin: 1.375rem 0 0; max-width: 39rem; font-size: 1.1875rem; line-height: 1.55; color: var(--nc-muted); text-wrap: pretty; }
+.nc-lead code { font-size: 0.86em; padding: 0.1em 0.35em; border-radius: 5px; background: var(--nc-raised); color: var(--nc-fg); }
+.main-pane .content-panel { border: 0; }
+.main-pane .content-panel:first-of-type { padding-top: 3.75rem; padding-bottom: 0; }
+@media (max-width: 49.99rem) {
+  .main-pane .content-panel:first-of-type { padding-top: 2.25rem; }
+  .nc-title { font-size: clamp(2rem, 9.5vw, 2.5rem); }
+  .nc-lead { font-size: 1.0625rem; }
+}
+
+/* ------------------------------- Prose ----------------------------------- */
+.sl-markdown-content :is(h1, h2, h3, h4, h5, h6) { color: var(--nc-fg); overflow-wrap: anywhere; }
+.sl-markdown-content h2 { font-family: var(--nc-display); font-weight: 560; font-size: var(--sl-text-h2); line-height: 1.15; letter-spacing: -0.02em; font-optical-sizing: auto; }
+.sl-markdown-content h3 { font-weight: 650; font-size: var(--sl-text-h3); line-height: 1.3; letter-spacing: -0.012em; }
+.sl-markdown-content h4 { font-weight: 650; font-size: var(--sl-text-h4); letter-spacing: -0.005em; }
+.sl-markdown-content :is(h2, h3, h4) code { font-family: var(--sl-font-mono); font-size: 0.82em; font-weight: 500; letter-spacing: -0.01em; background: none; padding: 0; }
+/* A section starts under a hairline, with air above it. */
+[data-has-sidebar] .sl-markdown-content > .sl-heading-wrapper.level-h2 { margin-top: 4rem; padding-top: 1.75rem; border-top: 1px solid var(--nc-line); }
+[data-has-sidebar] .sl-markdown-content > .sl-heading-wrapper.level-h2:first-child { margin-top: 3.25rem; }
+.sl-markdown-content .sl-heading-wrapper.level-h2 { font-family: var(--nc-display); }
+.sl-markdown-content .sl-heading-wrapper.level-h3 { line-height: 1.3; margin-top: 2.25rem; }
+:root .sl-markdown-content a.sl-anchor-link { color: var(--nc-faint); text-decoration: none; }
+
+/* Prose only: what a component draws inside `.not-content` (the showcase)
+   has colours of its own. */
+.sl-markdown-content :is(p, li, dd):not(:where(.not-content *)) { color: var(--nc-muted); }
+.sl-markdown-content :is(strong, b, dt):not(:where(.not-content *)) { color: var(--nc-fg); font-weight: 600; }
+.sl-markdown-content a:not(.sl-link-button, .sl-link-card a, :where(.not-content *)) { color: var(--nc-fg); text-decoration: underline; text-decoration-color: var(--nc-accent); text-decoration-thickness: 1px; text-underline-offset: 0.2em; }
+.sl-markdown-content code:not(:where(.expressive-code *, .not-content *)) { padding: 0.12em 0.36em; border-radius: 5px; background: var(--nc-raised); font-size: 0.86em; color: var(--nc-fg); overflow-wrap: anywhere; }
+.sl-markdown-content a code:not(:where(.expressive-code *, .not-content *)) { color: inherit; }
+/* The margins blocks set for themselves are for when they open a container.
+   After another block, the gap is the one of running text. */
+.sl-markdown-content :not(a, strong, em, del, span, input, code, br) + :is(.expressive-code, .starlight-aside, .nc-table, hr):not(:where(.not-content *)) { margin-top: var(--sl-content-gap-y); }
+.sl-markdown-content hr { border: 0; border-top: 1px solid var(--nc-line); margin-block: 3rem; }
+.sl-markdown-content blockquote { border-inline-start: 2px solid var(--nc-line); color: var(--nc-muted); }
+.sl-markdown-content kbd { font-family: var(--sl-font-mono); font-size: 0.75em; padding: 0.1em 0.4em; border: 1px solid var(--nc-line); border-radius: 4px; color: var(--nc-fg); }
+
+/* -------------------------------- Tables --------------------------------- */
+/* A table keeps its shape and scrolls sideways on a phone; the shade at the edge says so. */
+.nc-table {
+  margin-top: 1.5rem;
+  overflow-x: auto;
+  scrollbar-width: thin;
+  scrollbar-color: var(--nc-line) transparent;
+  background:
+    linear-gradient(to right, var(--nc-bg) 40%, transparent) left / 2.5rem 100% no-repeat local,
+    linear-gradient(to left, var(--nc-bg) 40%, transparent) right / 2.5rem 100% no-repeat local,
+    linear-gradient(to right, rgb(0 0 0 / 0.2), transparent) left / 0.75rem 100% no-repeat scroll,
+    linear-gradient(to left, rgb(0 0 0 / 0.2), transparent) right / 0.75rem 100% no-repeat scroll;
+}
+.sl-markdown-content .nc-table table { display: table; width: 100%; min-width: 34rem; margin: 0; border-collapse: collapse; font-variant-numeric: tabular-nums; }
+.sl-markdown-content :is(th, td) { background: none; border: 0; }
+.sl-markdown-content th { padding: 0 1.25rem 0.6rem 0; font-family: var(--sl-font-mono); font-weight: 500; font-size: 0.6875rem; letter-spacing: 0.08em; text-transform: uppercase; text-align: start; white-space: nowrap; color: var(--nc-faint); border-bottom: 1px solid var(--nc-line); }
+.sl-markdown-content td { padding: 0.8rem 1.25rem 0.8rem 0; vertical-align: top; font-size: 0.9375rem; color: var(--nc-muted); border-bottom: 1px solid var(--nc-line); }
+.sl-markdown-content td:first-child { min-width: 8rem; color: var(--nc-fg); }
+.sl-markdown-content td:last-child { min-width: 14rem; padding-inline-end: 0; }
+.sl-markdown-content th:last-child { padding-inline-end: 0; }
+.sl-markdown-content tr:nth-child(2n):not(:where(.not-content *)) { background: none; }
+/* In a table, code wraps at spaces only: the table scrolls if it has to. */
+.sl-markdown-content .nc-table :is(td, th) code { overflow-wrap: normal; white-space: nowrap; }
+
+/* -------------------------------- Asides --------------------------------- */
+.starlight-aside {
+  --nc-aside: var(--nc-accent);
+  margin-top: 1.75rem;
+  padding: 0.9rem 1.1rem;
+  border: 0;
+  border-inline-start: 2px solid var(--nc-aside);
+  border-radius: 0 var(--nc-radius-s) var(--nc-radius-s) 0;
+  background: color-mix(in srgb, var(--nc-aside) 7%, transparent);
+  color: var(--nc-muted);
+}
+.starlight-aside--caution { --nc-aside: var(--nc-caution); }
+.starlight-aside--danger { --nc-aside: var(--nc-danger); }
+.starlight-aside__title { font-weight: 650; font-size: 0.9375rem; color: var(--nc-fg); gap: 0.5rem; }
+:root .starlight-aside__icon { display: none; }
+.starlight-aside__content { font-size: 0.9375rem; }
+:root .starlight-aside code { background: color-mix(in srgb, var(--nc-fg) 8%, transparent); color: var(--nc-fg); }
+
+/* --------------------------------- Tabs ---------------------------------- */
+:root starlight-tabs .tablist-wrapper { border-bottom: 1px solid var(--nc-line); scrollbar-width: none; }
+:root starlight-tabs [role="tablist"] { border: 0; }
+:root starlight-tabs .tab { margin-bottom: -1px; }
+:root starlight-tabs [role="tab"] { padding: 0.7rem 0.9rem; border: 0; box-shadow: none; line-height: var(--sl-line-height); text-decoration: none; font-family: var(--sl-font-mono); font-size: 0.75rem; font-weight: 400; color: var(--nc-faint); }
+:root starlight-tabs [role="tab"][aria-selected="true"] { color: var(--nc-fg); font-weight: 400; border: 0; box-shadow: inset 0 -2px 0 var(--nc-accent); }
+
+/* ------------------------------ Code blocks ------------------------------ */
+.expressive-code { margin-top: 1.75rem; }
+.expressive-code .frame { box-shadow: none; }
+.expressive-code .frame.is-terminal .header::before { display: none; }
+.expressive-code pre { scrollbar-width: thin; scrollbar-color: var(--nc-line) transparent; }
+/* Code is read character by character: no ligatures. */
+code, pre, kbd, .expressive-code .ec-line { font-variant-ligatures: none; font-feature-settings: "liga" 0, "calt" 0; }
+
+/* --------------------------- Cards, steps, misc -------------------------- */
+.card { border: 1px solid var(--nc-line); border-radius: var(--nc-radius); background: var(--nc-surface); }
+.card .title { font-weight: 650; color: var(--nc-fg); }
+.card .icon { border: 0; background: none; color: var(--nc-accent); padding: 0; }
+.sl-link-card { border: 1px solid var(--nc-line); border-radius: var(--nc-radius); box-shadow: none; background: var(--nc-surface); }
+.sl-link-card .title { font-weight: 650; font-size: 1.0625rem; color: var(--nc-fg); }
+.sl-link-card .description { color: var(--nc-muted); }
+.sl-link-card svg { color: var(--nc-accent); }
+.sl-steps > li::before { font-family: var(--sl-font-mono); font-size: 0.75rem; color: var(--nc-accent); background: none; box-shadow: inset 0 0 0 1px var(--nc-line); }
+.sl-badge { font-family: var(--sl-font-mono); border-radius: 4px; }
+:root .sl-link-button { padding: 0.68rem 1.15rem; border-radius: 999px; font-size: 0.9375rem; font-weight: 600; }
+:root .sl-link-button.primary { background: var(--nc-accent); border-color: var(--nc-accent); color: var(--nc-on-accent); }
+:root .sl-link-button.secondary, :root .sl-link-button.minimal { color: var(--nc-fg); }
+:root .sl-link-button.secondary { border-color: var(--nc-line); background: color-mix(in srgb, var(--nc-surface) 70%, transparent); }
+
+/* --------------------------- On this page (right) ------------------------ */
+.right-sidebar { border: 0; }
+.right-sidebar-panel { padding-top: 4.25rem; }
+.right-sidebar-panel h2 { font-family: var(--sl-font-mono); font-weight: 500; font-size: 0.6875rem; letter-spacing: 0.09em; text-transform: uppercase; color: var(--nc-faint); }
+.right-sidebar starlight-toc ul { padding: 0; }
+.right-sidebar starlight-toc a { padding: 0.22rem 0 0.22rem 0.875rem; --pad-inline: 0rem; border-radius: 0; border-inline-start: 1px solid var(--nc-line); color: var(--nc-muted); font-size: 0.8438rem; line-height: 1.4; overflow-wrap: anywhere; }
+.right-sidebar starlight-toc ul ul a { padding-inline-start: 1.75rem; font-size: 0.8125rem; }
+.right-sidebar starlight-toc a[aria-current="true"] { color: var(--nc-fg); border-inline-start-color: var(--nc-accent); }
+.right-sidebar starlight-toc a code { font-size: 0.92em; }
+
+/* ------------------------------ Page footer ------------------------------ */
+.pagination-links { gap: 1rem; margin-top: 2.5rem; }
+.pagination-links a { padding: 1.1rem 1.25rem; border: 1px solid var(--nc-line); border-radius: var(--nc-radius); box-shadow: none; background: var(--nc-surface); color: var(--nc-muted); font-size: 0.8125rem; overflow-wrap: anywhere; }
+.pagination-links a svg { color: var(--nc-faint); }
+.pagination-links .link-title { margin-top: 0.1rem; font-family: var(--nc-display); font-weight: 560; font-size: 1.1875rem; line-height: 1.2; letter-spacing: -0.015em; color: var(--nc-fg); }
+footer .meta { font-size: 0.8125rem; color: var(--nc-faint); }
+
+/* ------------------------------- Landing --------------------------------- */
+/* minmax(0, 1fr): a grid track otherwise grows to its widest line of code. */
+.nc-landing { display: grid; grid-template-columns: minmax(0, 1fr); gap: 6.5rem; padding-block: 0.5rem 6rem; }
+.nc-hero { display: grid; grid-template-columns: minmax(0, 1fr); justify-items: start; padding-block: clamp(1.5rem, 6vh, 4.5rem) clamp(0.5rem, 3vh, 2rem); }
+/* Each line settles in turn; the title also comes into focus. */
+.nc-hero > * { opacity: 0; transform: translateY(10px); animation: nc-rise 500ms var(--ease-out) forwards; }
+.nc-hero > :nth-child(2) { animation-name: nc-focus; animation-duration: 700ms; animation-delay: 60ms; }
+.nc-hero > :nth-child(3) { animation-delay: 160ms; }
+.nc-hero > :nth-child(4) { animation-delay: 230ms; }
+.nc-hero > :nth-child(5) { animation-delay: 300ms; }
+@keyframes nc-rise { to { opacity: 1; transform: none; } }
+@keyframes nc-focus { from { opacity: 0; transform: translateY(14px); filter: blur(10px); } to { opacity: 1; transform: none; filter: none; } }
+@keyframes nc-fade { to { opacity: 1; } }
+.nc-hero h1 { max-width: 15ch; margin: 1.25rem 0 0; font-family: var(--nc-display); font-weight: 480; font-size: clamp(2.875rem, 9vw, 6.25rem); line-height: 0.98; letter-spacing: -0.035em; font-optical-sizing: auto; color: var(--nc-fg); text-wrap: balance; overflow-wrap: anywhere; }
+.nc-hero h1 em { font-style: italic; font-weight: 420; color: var(--nc-accent); }
+.nc-hero .nc-lead { max-width: 41rem; margin-top: 1.75rem; font-size: clamp(1.0625rem, 1.6vw, 1.25rem); }
+.nc-hero-row { display: flex; flex-wrap: wrap; align-items: center; gap: 0.875rem 1rem; margin-top: 2.25rem; max-width: 100%; }
+.nc-hero-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 0.75rem; }
+.nc-facts { display: flex; flex-wrap: wrap; gap: 0.375rem 1.5rem; margin: 2.5rem 0 0; padding: 0; list-style: none; font-family: var(--sl-font-mono); font-size: 0.6875rem; letter-spacing: 0.06em; text-transform: uppercase; color: var(--nc-faint); }
+.nc-facts li + li::before { content: "/"; margin-inline-end: 1.5rem; color: var(--nc-line); }
+.nc-install { display: flex; align-items: center; gap: 0.5rem; min-width: 0; max-width: 100%; padding: 0.3rem 0.3rem 0.3rem 1.1rem; border: 1px solid var(--nc-line); border-radius: 999px; background: var(--nc-surface); font-family: var(--sl-font-mono); font-size: 0.8125rem; color: var(--nc-fg); }
+.nc-install code { flex: 1; min-width: 0; overflow-x: auto; white-space: nowrap; scrollbar-width: none; background: none; padding: 0; }
+.nc-install code::before { content: "$ "; color: var(--nc-faint); }
+.nc-copy { position: relative; flex-shrink: 0; width: 2.125rem; height: 2.125rem; border: 0; border-radius: 999px; background: none; color: var(--nc-faint); cursor: pointer; }
+.nc-copy span { position: absolute; inset: 0; display: grid; place-items: center; transition: opacity 200ms ease, filter 200ms ease; }
+.nc-copy .nc-copy-done { opacity: 0; filter: blur(2px); color: var(--nc-accent); }
+.nc-copy[data-copied] .nc-copy-idle { opacity: 0; filter: blur(2px); }
+.nc-copy[data-copied] .nc-copy-done { opacity: 1; filter: none; }
+
+/* Sections come into view once, as they are reached. Only when scripts run
+   (they are what brings them in) and when motion is welcome. */
+@media (scripting: enabled) and (prefers-reduced-motion: no-preference) {
+  [data-reveal] { transition: opacity 600ms var(--ease-out), transform 600ms var(--ease-out); }
+  [data-reveal]:not([data-revealed]) { opacity: 0; transform: translateY(16px); }
+  :is(.nc-points, .nc-paths) li:nth-child(2) { transition-delay: 60ms; }
+  :is(.nc-points, .nc-paths) li:nth-child(3) { transition-delay: 120ms; }
+  :is(.nc-points, .nc-paths) li:nth-child(4) { transition-delay: 180ms; }
+  :is(.nc-points, .nc-paths) li:nth-child(5) { transition-delay: 240ms; }
+  :is(.nc-points, .nc-paths) li:nth-child(6) { transition-delay: 300ms; }
+}
+
+.nc-section { display: grid; grid-template-columns: minmax(0, 1fr); gap: 2rem; }
+.nc-section > header { display: grid; gap: 0.75rem; max-width: 44rem; }
+.nc-section > header span { font-family: var(--sl-font-mono); font-size: 0.75rem; letter-spacing: 0.08em; text-transform: uppercase; color: var(--nc-accent); }
+.nc-section > header h2 { margin: 0; font-family: var(--nc-display); font-weight: 520; font-size: clamp(1.875rem, 4.2vw, 2.875rem); line-height: 1.06; letter-spacing: -0.028em; font-optical-sizing: auto; color: var(--nc-fg); text-wrap: balance; }
+.nc-section > header p { margin: 0; color: var(--nc-muted); font-size: 1.0625rem; line-height: 1.6; text-wrap: pretty; }
+.nc-section code { font-size: 0.875em; padding: 0.1em 0.35em; border-radius: 5px; background: var(--nc-raised); color: var(--nc-fg); }
+
+/* What is inside: one tile per namespace. */
+.nc-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(100%, 15.5rem), 1fr)); gap: 0.75rem; margin: 0; padding: 0; list-style: none; }
+.nc-grid a { display: grid; gap: 0.3rem; height: 100%; padding: 1rem 1.1rem; border: 1px solid var(--nc-line); border-radius: var(--nc-radius); background: var(--nc-surface); color: inherit; text-decoration: none; }
+.nc-grid strong { font-family: var(--sl-font-mono); font-weight: 500; font-size: 0.875rem; color: var(--nc-fg); }
+.nc-grid small { font-size: 0.875rem; line-height: 1.5; color: var(--nc-muted); }
+
+.nc-points { display: grid; gap: 0 3rem; margin: 0; padding: 0; list-style: none; }
+.nc-points li { padding: 1.35rem 0; border-top: 1px solid var(--nc-line); }
+.nc-points h3 { margin: 0; font-weight: 650; font-size: 1.125rem; letter-spacing: -0.012em; color: var(--nc-fg); }
+.nc-points p { margin: 0.4rem 0 0; color: var(--nc-muted); font-size: 0.9375rem; line-height: 1.6; }
+@media (min-width: 50rem) { .nc-points { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+
+/* Measured, not promised: a few numbers from the benchmark. */
+.nc-numbers { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 12rem), 1fr)); gap: 0; margin: 0; padding: 0; list-style: none; border-top: 1px solid var(--nc-line); }
+.nc-numbers li { padding: 1.5rem 1.5rem 1.5rem 0; border-bottom: 1px solid var(--nc-line); }
+.nc-numbers strong { display: block; font-family: var(--nc-display); font-weight: 480; font-size: clamp(2rem, 4vw, 2.75rem); line-height: 1; letter-spacing: -0.03em; font-variant-numeric: tabular-nums; color: var(--nc-fg); }
+.nc-numbers strong small { font-family: var(--sl-font-mono); font-size: 0.8125rem; letter-spacing: 0; color: var(--nc-accent); }
+.nc-numbers span { display: block; margin-top: 0.5rem; font-size: 0.875rem; line-height: 1.5; color: var(--nc-muted); }
+
+.nc-paths { display: grid; gap: 0.75rem; margin: 0; padding: 0; list-style: none; }
+.nc-paths a { display: grid; gap: 0.2rem; height: 100%; padding: 1.15rem 1.25rem; border: 1px solid var(--nc-line); border-radius: var(--nc-radius); background: var(--nc-surface); color: inherit; text-decoration: none; }
+.nc-paths strong { font-family: var(--nc-display); font-weight: 560; font-size: 1.25rem; letter-spacing: -0.015em; color: var(--nc-fg); }
+.nc-paths small { font-size: 0.9375rem; line-height: 1.5; color: var(--nc-muted); }
+@media (min-width: 50rem) { .nc-paths { grid-template-columns: repeat(3, minmax(0, 1fr)); } }
+
+/* ----------------------------- Small screens ----------------------------- */
+/* The navigation sheet: a short fade and settle from under the header, gone faster than it came. */
+@media (max-width: 49.99rem) {
+  /* The sheet is a popover: `display` and `overlay` wait for the fade on the way out. */
+  .sidebar-pane {
+    inset-block-start: calc(var(--sl-nav-height) + env(safe-area-inset-top, 0px));
+    opacity: 0;
+    transform: translateY(-0.5rem);
+    transition: opacity 150ms var(--ease-out), transform 150ms var(--ease-out), display 150ms allow-discrete, overlay 150ms allow-discrete;
+    border-inline-end: 0;
+    background: var(--nc-bg);
+    overscroll-behavior: contain;
+    padding-bottom: env(safe-area-inset-bottom, 0px);
+  }
+  .sidebar-pane:popover-open { opacity: 1; transform: none; transition-duration: 250ms; }
+  @starting-style {
+    .sidebar-pane:popover-open { opacity: 0; transform: translateY(-0.5rem); }
+  }
+  .sidebar-content { padding: 1.5rem 1rem 2rem; }
+  .sidebar-content details > ul a { padding-block: 0.6rem; font-size: 0.9375rem; }
+  .nc-landing { gap: 4.5rem; }
+  .nc-facts li + li::before { margin-inline-end: 1rem; }
+  .nc-facts { gap: 0.375rem 1rem; }
+}
+
+/* --------------------------- Pointer and motion -------------------------- */
+@media (hover: hover) and (pointer: fine) {
+  .nc-toplinks a, .sidebar-content details > ul a, .right-sidebar starlight-toc a, .nc-icon-btn, starlight-tabs [role="tab"], .nc-copy, .nc-lang a { transition: color 150ms ease, background-color 150ms ease; }
+  .nc-toplinks a:hover, .sidebar-content details > ul a:hover, .right-sidebar starlight-toc a:hover, .nc-icon-btn:hover, starlight-tabs [role="tab"]:hover, .nc-copy:hover, .nc-lang a:hover, site-search button[data-open-modal]:hover { color: var(--nc-fg); }
+  .nc-icon-btn:hover, .nc-copy:hover { background: color-mix(in srgb, var(--nc-fg) 7%, transparent); }
+  .sidebar-content details > ul a:not([aria-current="page"]):hover { background: color-mix(in srgb, var(--nc-fg) 5%, transparent); }
+  .sidebar-content summary:hover { background: none; }
+  #starlight__search .pagefind-ui__result-title:not(:where(.pagefind-ui__result-nested *)):hover, #starlight__search .pagefind-ui__result-nested:hover { background: var(--nc-tint); }
+  :is(.nc-grid, .nc-paths) a, .pagination-links a, .sl-link-card { transition: border-color 150ms ease, background-color 150ms ease; }
+  :is(.nc-grid, .nc-paths) a:hover, .pagination-links a:hover, .sl-link-card:hover { border-color: color-mix(in srgb, var(--nc-accent) 55%, var(--nc-line)); background: color-mix(in srgb, var(--nc-accent) 4%, var(--nc-surface)); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .nc-press, .sl-link-button, site-search button[data-open-modal], .sl-menu-button { transition: none; }
+  .nc-press:active, .sl-link-button:active, site-search button[data-open-modal]:active, .sl-menu-button:active, .expressive-code .copy button:active { transform: none; }
+  .nc-hero > * { transform: none; filter: none; animation: nc-fade 200ms ease forwards; animation-delay: 0ms; }
+  .nc-icon-btn .nc-sun, .nc-icon-btn .nc-moon { transition: opacity 200ms ease; transform: none !important; }
+  @media (max-width: 49.99rem) {
+    .sidebar-pane, .sidebar-pane:popover-open { transform: none; }
+    @starting-style {
+      .sidebar-pane:popover-open { transform: none; }
+    }
+  }
+}
+
+@media (prefers-reduced-transparency: reduce) {
+  header.header { background: var(--nc-bg); -webkit-backdrop-filter: none; backdrop-filter: none; }
+  .nc-header site-search button[data-open-modal], :root .sl-link-button.secondary { background: var(--nc-surface); }
+}
+@media (prefers-contrast: more) {
+  :root, :root[data-theme="dark"] { --nc-line: #56615b; --nc-muted: #cfd6d1; --nc-faint: #a0aaa4; }
+  :root[data-theme="light"] { --nc-line: #7e8a83; --nc-muted: #333c37; --nc-faint: #55605a; }
+  header.header { background: var(--nc-bg); -webkit-backdrop-filter: none; backdrop-filter: none; }
+}
+
+/* ------------------------- Small-screen menu button ---------------------- */
+/* Starlight fixes this button over the header, outside of it. It gets the box
+   of the other icon buttons and sits on their line. No `display` here: the
+   button is hidden on wide screens by Starlight, and a value would undo that. */
+.sl-menu-button {
+  /* The header's hairline is part of its height: centre on what is above it. */
+  top: calc(env(safe-area-inset-top, 0px) + (var(--sl-nav-height) - 1px - var(--nc-icon-btn)) / 2);
+  inset-inline-end: calc(var(--sl-nav-pad-x) - var(--nc-icon-bleed));
+  align-items: center;
+  justify-content: center;
+  width: var(--nc-icon-btn);
+  height: var(--nc-icon-btn);
+  padding: 0;
+  border: 0;
+  border-radius: var(--nc-radius-s);
+  background: transparent;
+  box-shadow: none;
+  color: var(--nc-muted);
+  font-size: var(--nc-icon);
+}
+.sl-menu-button:has(~ :popover-open) { background: var(--nc-surface); color: var(--nc-fg); box-shadow: none; }
+/* The foot of the navigation sheet: the icon buttons of the header, side by side. */
+.mobile-preferences { justify-content: flex-start; align-items: center; gap: var(--nc-icon-gap); margin-inline-start: calc(-1 * var(--nc-icon-bleed)); padding: 0.75rem 0; border-top: 1px solid var(--nc-line); }
+.mobile-preferences .social-icons { gap: var(--nc-icon-gap); margin: 0; padding: 0; }
+.mobile-preferences .social-icons a { align-items: center; justify-content: center; width: var(--nc-icon-btn); height: var(--nc-icon-btn); margin: 0; padding: 0; border-radius: var(--nc-radius-s); color: var(--nc-muted); font-size: var(--nc-icon); }
+mobile-starlight-toc summary { font-size: 0.875rem; }
+mobile-starlight-toc .toggle { border-color: var(--nc-line); border-radius: 999px; background: transparent; }
+
+/* ---------------------- Starlight's own motion, retuned ------------------ */
+/* Opening a navigation group happens all day: the caret does not animate. */
+.sidebar-content .caret { transition: none; }
+/* Jumping to a heading is navigation, often from the keyboard: no smooth scroll. */
+html { scroll-behavior: auto; }
+/* The copy button keeps its own fade and gains press feedback. */
+.expressive-code .copy button { transition: transform 160ms var(--ease-out), opacity 200ms ease, background 200ms ease, border-color 200ms ease; }
+@media (prefers-reduced-motion: reduce) {
+  .expressive-code .copy button { transition: opacity 200ms ease, background 200ms ease, border-color 200ms ease; }
+}
+
+/* The landing page has no navigation sheet: keep the language, the repository
+   link and the theme switch in its header on small screens. */
+@media (max-width: 49.99rem) {
+  :root:not([data-has-sidebar]) .nc-header .nc-actions { display: flex; }
+}
+/* Text set very large, or a page zoomed far in: the name of the site matters
+   more than the repository link, which stays in the menu of every other page. */
+@media (max-width: 20rem) {
+  .nc-header .nc-actions a.nc-icon-btn { display: none; }
+}
+
+/* ------------------------------- Reference ------------------------------- */
+/* A reference page is a list of functions: each one starts with its
+   signature, set like a line of code you could paste. */
+.sl-markdown-content .nc-signature { margin-top: 0.9rem; }
+.sl-markdown-content .nc-kind { display: inline-block; margin-inline-start: 0.5rem; padding: 0.05rem 0.4rem; border: 1px solid var(--nc-line); border-radius: 999px; font-family: var(--sl-font-mono); font-size: 0.625rem; font-weight: 500; letter-spacing: 0.06em; text-transform: uppercase; vertical-align: 0.25em; color: var(--nc-faint); }
+.sl-markdown-content .nc-kind[data-kind="deprecated"] { color: var(--nc-caution); border-color: color-mix(in srgb, var(--nc-caution) 45%, var(--nc-line)); }

@@ -134,6 +134,8 @@ function buildModel() {
   /** @type {Map<string, string>} source module name -> namespace key */
   const moduleKeys = new Map();
   for (const file of fs.readdirSync(path.join(ROOT, "src"))) {
+    // src/internal is shared plumbing, not a namespace
+    if (!file.endsWith(".js")) continue;
     const value = require(path.join(ROOT, "src", file));
     const key = Object.keys(nc).find((k) => nc[k] === value && k !== "nc" && k !== "nodeComfort");
     if (key) moduleKeys.set(path.basename(file, ".js"), key);
