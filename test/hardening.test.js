@@ -3,7 +3,7 @@
 // Regression tests for defects fixed in 2.1: one test per defect, named after
 // what used to go wrong.
 
-const { describe, it } = require("node:test");
+const { describe, it, before, after } = require("node:test");
 const assert = require("node:assert/strict");
 const nc = require("..");
 
@@ -1275,5 +1275,137 @@ describe("env", () => {
     assert.ok(text.includes("# url, optional\nSENTRY_DSN=\n"));
     assert.deepEqual(env.parse(text, { expand: false }), { PORT: "3000", DATABASE_URL: "", GREETING: "hello world # not a comment", QUOTE: "it's $5", TAGS: "a,b", SENTRY_DSN: "" });
     assert.throws(() => env.validate(spec, { env: {} }), /DATABASE_URL: is required but is not set \(Postgres connection string\)/);
+  });
+});
+
+describe("http", () => {
+  const { http } = nc;
+  const nodeHttp = require("node:http");
+  /** @type {import("node:http").Server} */
+  let server;
+  let base = "";
+  /** @type {Array<{ method: string, url: string, headers: import("node:http").IncomingHttpHeaders }>} */
+  let seen = [];
+
+  before(async () => {
+    server = nodeHttp.createServer((req, res) => {
+      const url = new URL(req.url ?? "/", "http://localhost");
+      seen.push({ method: req.method ?? "", url: req.url ?? "", headers: req.headers });
+      const json = (/** @type {number} */ status, /** @type {unknown} */ body) => {
+        res.writeHead(status, { "content-type": "application/json" });
+        res.end(JSON.stringify(body));
+      };
+      if (url.pathname.startsWith("/echo")) return json(200, { url: req.url, headers: req.headers });
+      if (url.pathname === "/cookies") {
+        res.writeHead(200, { "set-cookie": ["a=1; Path=/", "b=2; HttpOnly"], "content-type": "text/plain" });
+        return res.end("ok");
+      }
+      if (url.pathname === "/slow-body") {
+        res.writeHead(200, { "content-type": "text/plain" });
+        res.write("start ");
+        return void setTimeout(() => res.end("end"), 250);
+      }
+      if (url.pathname === "/busy") {
+        req.resume();
+        return json(503, { error: "busy" });
+      }
+      if (url.pathname === "/user") return json(200, url.searchParams.get("bad") ? { id: "nope" } : { id: 7, name: "Ada" });
+      if (url.pathname === "/cut") {
+        res.writeHead(200, { "content-length": "1000", "content-type": "application/octet-stream" });
+        res.write("partial");
+        return void setTimeout(() => res.destroy(), 30);
+      }
+      if (url.pathname === "/file") {
+        res.writeHead(200, { "content-length": "5" });
+        return res.end("hello");
+      }
+      json(404, { error: "not found" });
+    });
+    await new Promise((resolve) => server.listen(0, "127.0.0.1", () => resolve(undefined)));
+    base = `http://127.0.0.1:${/** @type {import("node:net").AddressInfo} */ (server.address()).port}`;
+  });
+  after(() => {
+    server.closeAllConnections();
+    server.close();
+  });
+
+  it("params fill the :name parts of the URL, and leave the port alone", async () => {
+    const { data } = await http.get(`${base}/echo/:id/files/:name`, { params: { id: 42, name: "a b/c" } });
+    assert.equal(data.url, "/echo/42/files/a%20b%2Fc");
+    await assert.rejects(http.get(`${base}/echo/:id`, { params: {} }), /Missing URL parameter "id"/);
+  });
+
+  it("a call adds to the client's query and headers instead of replacing them", async () => {
+    const api = http.create({ baseURL: base, query: { key: "k", page: 1 }, headers: { "X-Trace": "t", "X-Drop": "d" } });
+    const { data } = await api.get("echo", { query: { page: 2, since: new Date("2024-01-01T00:00:00Z"), tag: ["a", "b"] }, headers: new Headers({ "x-drop": "replaced", "X-More": "m" }) });
+    assert.equal(data.url, "/echo?key=k&page=2&since=2024-01-01T00%3A00%3A00.000Z&tag=a&tag=b");
+    assert.equal(data.headers["x-trace"], "t");
+    assert.equal(data.headers["x-drop"], "replaced");
+    assert.equal(data.headers["x-more"], "m");
+    const pairs = await http.get(`${base}/echo`, { headers: [["X-Pair", "p"]] });
+    assert.equal(pairs.data.headers["x-pair"], "p");
+  });
+
+  it("every Set-Cookie header is kept", async () => {
+    const { cookies } = await http.get(`${base}/cookies`);
+    assert.deepEqual(cookies, ["a=1; Path=/", "b=2; HttpOnly"]);
+  });
+
+  it("a stream is not cut off by the timeout once the headers are in", async () => {
+    const { data } = await http.get(`${base}/slow-body`, { responseType: "stream", timeout: 100 });
+    let text = "";
+    for await (const chunk of data) text += chunk;
+    assert.equal(text, "start end");
+    await assert.rejects(http.get(`${base}/slow-body`, { timeout: 100, retry: false }), { name: "TimeoutError", timeout: 100 });
+  });
+
+  it("an error status is read whole even when a stream was asked for", async () => {
+    const error = await http.get(`${base}/nope`, { responseType: "stream" }).catch((e) => e);
+    assert.equal(error.status, 404);
+    assert.deepEqual(error.data, { error: "not found" });
+  });
+
+  it("a request that sends a stream is never sent twice", async () => {
+    const { Readable } = require("node:stream");
+    seen = [];
+    await assert.rejects(http.put(`${base}/busy`, Readable.from(["a", "b"]), { retry: { attempts: 3, delay: 1 } }), { status: 503 });
+    assert.equal(seen.length, 1);
+    seen = [];
+    await assert.rejects(http.put(`${base}/busy`, { a: 1 }, { retry: { attempts: 3, delay: "1ms", jitter: true } }), { status: 503 });
+    assert.equal(seen.length, 3);
+  });
+
+  it("schema checks what the server sent", async () => {
+    const User = nc.schema.object({ id: nc.schema.number(), name: nc.schema.string() });
+    assert.deepEqual((await http.get(`${base}/user`, { schema: User })).data, { id: 7, name: "Ada" });
+    await assert.rejects(http.get(`${base}/user`, { schema: User, query: { bad: 1 } }), { name: "ValidationError" });
+  });
+
+  it("aborting while waiting to retry stops at once", async () => {
+    const controller = new AbortController();
+    setTimeout(() => controller.abort(), 30);
+    const startedAt = Date.now();
+    await assert.rejects(http.get(`${base}/busy`, { retry: { attempts: 3, delay: "5s" }, signal: controller.signal }), { name: "AbortError" });
+    assert.ok(Date.now() - startedAt < 2000);
+  });
+
+  it("download leaves nothing behind when the transfer breaks", async () => {
+    const fs = require("node:fs");
+    const path = require("node:path");
+    const dir = fs.mkdtempSync(path.join(require("node:os").tmpdir(), "nc-http-"));
+    try {
+      const target = path.join(dir, "out", "file.bin");
+      fs.mkdirSync(path.dirname(target));
+      fs.writeFileSync(target, "previous version");
+      await assert.rejects(http.download(`${base}/cut`, target, { retry: false }));
+      assert.equal(fs.readFileSync(target, "utf8"), "previous version", "the file that was there is untouched");
+      assert.deepEqual(fs.readdirSync(path.dirname(target)), ["file.bin"]);
+      const done = await http.download(`${base}/file`, target);
+      assert.equal(done.size, 5);
+      assert.equal(fs.readFileSync(target, "utf8"), "hello");
+      assert.deepEqual(fs.readdirSync(path.dirname(target)), ["file.bin"]);
+    } finally {
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
   });
 });
