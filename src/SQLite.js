@@ -24,6 +24,7 @@
 const nodePath = require("node:path");
 const fs = require("node:fs");
 const { SQLiteError } = require("./errors.js");
+const { toMs } = require("./internal/shared.js");
 
 /**
  * A column type. `JSON` and `BOOLEAN` columns give you back objects and
@@ -140,7 +141,7 @@ const { SQLiteError } = require("./errors.js");
  * @property {boolean} [dates] Return `DATE`, `DATETIME` and `TIMESTAMP` columns as `Date`s.
  * @property {boolean} [wal] Write-ahead logging: faster, and reads don't wait for writes. Defaults to `true`.
  * @property {boolean} [foreignKeys] Enforce foreign keys. Defaults to `true`.
- * @property {number} [busyTimeout] How long to wait for a lock held by another connection, in ms. Defaults to `5000`.
+ * @property {number | string} [busyTimeout] How long to wait for a lock held by another connection, in ms or like `"5s"`. Defaults to 5 seconds.
  * @property {"OFF" | "NORMAL" | "FULL" | "EXTRA"} [synchronous] How hard SQLite pushes each commit to the disk. With `wal`, `"NORMAL"` writes several times faster and can't corrupt the file; a power cut may undo the last commits. Defaults to SQLite's own setting, `"FULL"`.
  * @property {boolean} [readOnly]
  */
@@ -455,7 +456,7 @@ class SQLite {
     if (!memory && !options.readOnly) fs.mkdirSync(nodePath.dirname(target), { recursive: true });
     try {
       this.#db = new DatabaseSync(target, { readOnly: options.readOnly ?? false });
-      this.#db.exec(`PRAGMA busy_timeout = ${Math.max(0, Math.floor(Number(options.busyTimeout ?? 5000)) || 0)}`);
+      this.#db.exec(`PRAGMA busy_timeout = ${Math.max(0, Math.floor(toMs(options.busyTimeout ?? 5000, "busyTimeout")) || 0)}`);
       if (!memory && !options.readOnly && (options.wal ?? true)) this.#db.exec("PRAGMA journal_mode = WAL");
       if (options.synchronous !== undefined) {
         const level = String(options.synchronous).toUpperCase();
