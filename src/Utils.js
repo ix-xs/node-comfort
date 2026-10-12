@@ -22,8 +22,8 @@ const { sleep, toMs } = require("./internal/shared.js");
 /**
  * Options for `when()`.
  * @typedef {object} WhenOptions
- * @property {number} [interval] Milliseconds between two checks. Defaults to `50`.
- * @property {number | null} [timeout] Give up after this many milliseconds and emit `"timeout"`.
+ * @property {number | string} [interval] Time between two checks, in ms or like `"1s"`. Defaults to `50`.
+ * @property {number | string | null} [timeout] Give up after this long, in ms or like `"10s"`, and emit `"timeout"`.
  * @property {number | null} [max] Stop after this many triggers.
  */
 
@@ -78,7 +78,7 @@ function wait(duration, options = {}) {
  * await a condition, `nc.async.poll()` is simpler.
  *
  * @example
- * nc.when(() => queue.length > 0, { reason: "jobs waiting" }, { interval: 500, max: 1, timeout: 10_000 })
+ * nc.when(() => queue.length > 0, { reason: "jobs waiting" }, { interval: 500, max: 1, timeout: "10s" })
  *   .on("trigger", (payload) => nc.info(payload.reason))
  *   .on("timeout", () => nc.warn("Nothing happened in 10s"))
  *   .start();
@@ -89,8 +89,8 @@ function wait(duration, options = {}) {
  * @returns {WhenTask}
  */
 function when(predicate, payload = {}, options = {}) {
-  const interval = options.interval ?? 50;
-  const timeout = options.timeout ?? null;
+  const interval = options.interval === undefined ? 50 : toMs(options.interval, "interval");
+  const timeout = options.timeout === undefined || options.timeout === null ? null : toMs(options.timeout, "timeout");
   const max = options.max ?? null;
   /** @type {Record<"trigger" | "error" | "timeout", Set<Function>>} */
   const listeners = { trigger: new Set(), error: new Set(), timeout: new Set() };

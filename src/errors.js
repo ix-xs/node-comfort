@@ -1,9 +1,13 @@
 "use strict";
 
 /**
- * The errors node-comfort throws. They all extend `NodeComfortError` (itself
- * a regular `Error`) and carry a stable `code`, so you can branch on the
- * kind of failure without parsing messages.
+ * The errors node-comfort throws when something goes wrong at run time: a
+ * request fails, data is invalid, a command exits badly. They all extend
+ * `NodeComfortError` (itself a regular `Error`) and carry a stable `code`,
+ * so you can branch on the kind of failure without parsing messages.
+ *
+ * A mistake in your own code, like a wrong argument, still throws a plain
+ * `TypeError` or `RangeError`, as it does everywhere in JavaScript.
  *
  * @example
  * try {

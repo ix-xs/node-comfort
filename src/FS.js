@@ -23,7 +23,7 @@ const os = require("node:os");
 const nodePath = require("node:path");
 const util = require("node:util");
 const { fileURLToPath } = require("node:url");
-const { sleepSync } = require("./internal/shared.js");
+const { sleepSync, toMs } = require("./internal/shared.js");
 
 /**
  * Options for `copyFoldersIn()` and `moveFoldersIn()`.
@@ -129,7 +129,7 @@ const { sleepSync } = require("./internal/shared.js");
  * @property {string} [path] What to watch. Defaults to the working directory.
  * @property {boolean} [recursive] Watch nested folders too.
  * @property {(event: "rename" | "change", file: string) => boolean} [filter] Return `false` to ignore an event.
- * @property {number} [debounce] Merge events on the same file within this many ms. Editors often save in several steps.
+ * @property {number | string} [debounce] Merge events on the same file within this long, in ms or like `"100ms"`. Editors often save in several steps.
  */
 
 /**
@@ -1494,6 +1494,7 @@ function watch(options = {}) {
   const target = _existing(options.path, "any");
   if (!target) return undefined;
   let paused = false;
+  const debounce = options.debounce === undefined ? 0 : toMs(options.debounce, "debounce");
   /** @type {Record<string, Function[]>} */
   const listeners = { change: [], rename: [], all: [], error: [] };
   /** @type {Map<string, NodeJS.Timeout>} */
@@ -1516,13 +1517,13 @@ function watch(options = {}) {
   const watcher = fs.watch(_realPath(target), { recursive: options.recursive ?? false }, (event, fileName) => {
     const file = fileName && isDir ? nodePath.join(target, String(fileName)) : target;
     const kind = event === "rename" ? "rename" : "change";
-    if (!options.debounce) return dispatch(kind, file);
+    if (!(debounce > 0)) return dispatch(kind, file);
     const key = `${kind}:${file}`;
     clearTimeout(pending.get(key));
     pending.set(key, setTimeout(() => {
       pending.delete(key);
       dispatch(kind, file);
-    }, options.debounce));
+    }, debounce));
   });
   watcher.on("error", (error) => {
     for (const cb of listeners.error) cb(error);
