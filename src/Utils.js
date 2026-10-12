@@ -9,8 +9,8 @@
  * const settings = nc.JSONParse(text, {});
  */
 
-const { AbortError } = require("./errors.js");
 const { types } = require("node:util");
+const { sleep, toMs } = require("./internal/shared.js");
 
 /**
  * Options for `wait()`.
@@ -62,22 +62,14 @@ const { types } = require("node:util");
  * @throws {TypeError} If the duration can't be parsed.
  */
 function wait(duration, options = {}) {
-  const ms = typeof duration === "number" ? duration : require("./Time.js").parseDuration(duration);
-  if (ms === null || !Number.isFinite(ms)) return Promise.reject(new TypeError(`Invalid duration: ${String(duration)}`));
-  const { signal } = options;
-  return new Promise((resolve, reject) => {
-    if (signal?.aborted) return reject(new AbortError(undefined, { cause: signal.reason }));
-    const onAbort = () => {
-      clearTimeout(timer);
-      reject(new AbortError(undefined, { cause: signal?.reason }));
-    };
-    const timer = setTimeout(() => {
-      signal?.removeEventListener("abort", onAbort);
-      resolve();
-    }, Math.max(0, ms));
-    if (options.unref) timer.unref();
-    signal?.addEventListener("abort", onAbort, { once: true });
-  });
+  let ms;
+  try {
+    ms = toMs(duration);
+  } catch (error) {
+    return Promise.reject(error);
+  }
+  if (!Number.isFinite(ms)) return Promise.reject(new TypeError(`Invalid duration: ${String(duration)}`));
+  return sleep(ms, options.signal, options.unref ?? false);
 }
 
 /**
@@ -258,12 +250,13 @@ let _dontCrashDispose;
 
 /**
  * `JSON.stringify` that never throws. Circular references become
- * `"[Circular]"`, bigints become strings, Maps become objects and Sets become
- * arrays.
+ * `"[Circular]"`, bigints become strings, Maps become objects, Sets become
+ * arrays, and errors keep their name, message and stack.
  *
  * @example
  * nc.JSONString({ a: 1 });                          // '{\n    "a": 1\n}'
  * nc.JSONString({ id: 10n, tags: new Set(["x"]) }, 0); // '{"id":"10","tags":["x"]}'
+ * nc.JSONString({ error: new Error("boom") }, 0);   // '{"error":{"name":"Error","message":"boom","stack":"..."}}'
  *
  * @param {unknown} value
  * @param {number} [spaces=4] Indentation. Use `0` for a single line.
@@ -272,41 +265,69 @@ let _dontCrashDispose;
 function JSONString(value, spaces = 4) {
   /** @type {Array<[holder: object, original: object]>} ancestors of the value being serialized */
   const stack = [];
-  const text = JSON.stringify(
-    value,
-    /** @this {any} */ function(_, raw) {
-      if (typeof raw === "bigint") return raw.toString();
-      if (raw === null || typeof raw !== "object") return raw;
-      while (stack.length && stack[stack.length - 1][0] !== this) stack.pop();
-      if (stack.some(([, original]) => original === raw)) return "[Circular]";
-      const v = types.isMap(raw) ? Object.fromEntries(raw) : types.isSet(raw) ? [...raw] : raw;
-      stack.push([v, raw]);
-      return v;
-    },
-    spaces,
-  );
+  let text;
+  try {
+    text = JSON.stringify(
+      value,
+      /** @this {any} */ function(_, raw) {
+        if (typeof raw === "bigint") return raw.toString();
+        if (raw === null || typeof raw !== "object") return raw;
+        while (stack.length && stack[stack.length - 1][0] !== this) stack.pop();
+        for (let i = 0; i < stack.length; i++) if (stack[i][1] === raw) return "[Circular]";
+        const v = types.isMap(raw) ? Object.fromEntries(raw) : types.isSet(raw) ? [...raw] : types.isNativeError(raw) ? _plainError(raw) : raw;
+        stack.push([v, raw]);
+        return v;
+      },
+      spaces,
+    );
+  } catch (error) {
+    // A getter or a toJSON() threw: describe the value instead of failing.
+    try {
+      text = JSON.stringify(require("node:util").inspect(value, { depth: 4, breakLength: Infinity }));
+    } catch {
+      text = JSON.stringify(`[Unserializable: ${error instanceof Error ? error.message : String(error)}]`);
+    }
+  }
   return text ?? String(text);
 }
 
 /**
+ * The fields of an error that `JSON.stringify` would drop.
+ * @param {Error} error
+ * @returns {Record<string, unknown>}
+ */
+const _plainError = (error) => {
+  /** @type {Record<string, unknown>} */
+  const out = { name: error.name, message: error.message };
+  for (const key of Object.keys(error)) out[key] = /** @type {any} */ (error)[key];
+  if (error.cause !== undefined) out.cause = error.cause;
+  if (error.stack) out.stack = error.stack;
+  return out;
+};
+
+/**
  * `JSON.parse` with an optional fallback. With a fallback, invalid input
- * returns it instead of throwing.
+ * returns it instead of throwing. A leading byte order mark, which Windows
+ * editors like to add, is ignored.
  *
  * @example
  * nc.JSONParse('{"a":1}');    // { a: 1 }
  * nc.JSONParse("oops", null); // null
  * nc.JSONParse("oops");       // throws SyntaxError
+ * nc.JSONParse(text, {}, (key, value) => (key === "at" ? new Date(value) : value));
  *
  * @template [T=any]
  * @param {string} text
  * @param {T} [fallback] Returned when `text` isn't valid JSON.
+ * @param {(this: any, key: string, value: any) => any} [reviver] Passed to `JSON.parse`.
  * @returns {T}
  * @throws {SyntaxError} If `text` is invalid and there's no fallback.
  */
-function JSONParse(text, fallback) {
-  if (arguments.length < 2) return JSON.parse(text);
+function JSONParse(text, fallback, reviver) {
+  const clean = typeof text === "string" && text.charCodeAt(0) === 0xfeff ? text.slice(1) : text;
+  if (arguments.length < 2) return JSON.parse(clean);
   try {
-    return JSON.parse(text);
+    return JSON.parse(clean, reviver);
   } catch {
     return /** @type {T} */ (fallback);
   }

@@ -40,6 +40,40 @@ class NodeComfortError extends Error {
     /** Stable, machine-readable code. */
     this.code = options.code ?? "ERR_NODE_COMFORT";
   }
+
+  /**
+   * What `JSON.stringify()` writes for the error: its name, code, message
+   * and own fields, without the stack. Handy for API responses and logs.
+   *
+   * @example
+   * res.status(400).json({ error });
+   * // {"error":{"name":"ValidationError","code":"ERR_VALIDATION","message":"...","issues":[...]}}
+   *
+   * @returns {Record<string, unknown>}
+   */
+  toJSON() {
+    /** @type {Record<string, unknown>} */
+    const out = { name: this.name, code: this.code, message: this.message };
+    for (const key of Object.keys(this)) if (!(key in out)) out[key] = /** @type {any} */ (this)[key];
+    const cause = /** @type {any} */ (this.cause);
+    if (cause !== undefined) out.cause = cause instanceof Error ? { name: cause.name, message: cause.message, code: /** @type {any} */ (cause).code } : cause;
+    return out;
+  }
+
+  /**
+   * Makes `instanceof` work when two copies of the package are installed,
+   * which would otherwise give two unrelated `HttpError` classes.
+   *
+   * @override
+   * @param {unknown} value
+   * @returns {boolean}
+   */
+  static [Symbol.hasInstance](value) {
+    if (Function.prototype[Symbol.hasInstance].call(this, value)) return true;
+    const brand = Symbol.for(`@ix-xs/node-comfort/${this.name}`);
+    if (!Object.prototype.hasOwnProperty.call(this.prototype, brand)) return false;
+    return value !== null && typeof value === "object" && /** @type {any} */ (value)[brand] === true;
+  }
 }
 
 /**
@@ -54,7 +88,7 @@ class AssertionError extends NodeComfortError {
    * @param {NodeComfortErrorOptions} [options]
    */
   constructor(message = "Assertion failed", options = {}) {
-    super(message, { code: "ERR_ASSERTION", ...options });
+    super(message, { ...options, code: options.code ?? "ERR_ASSERTION" });
   }
 }
 
@@ -75,7 +109,7 @@ class TimeoutError extends NodeComfortError {
    * @param {NodeComfortErrorOptions & { timeout?: number }} [options] Can include the time limit in milliseconds.
    */
   constructor(message = "Operation timed out", options = {}) {
-    super(message, { code: "ETIMEDOUT", ...options });
+    super(message, { ...options, code: options.code ?? "ETIMEDOUT" });
     /** The time limit in milliseconds, when known. */
     this.timeout = options.timeout;
   }
@@ -91,7 +125,7 @@ class AbortError extends NodeComfortError {
    * @param {NodeComfortErrorOptions} [options] Usually `{ cause: signal.reason }`.
    */
   constructor(message = "The operation was aborted", options = {}) {
-    super(message, { code: "ABORT_ERR", ...options });
+    super(message, { ...options, code: options.code ?? "ABORT_ERR" });
   }
 }
 
@@ -123,7 +157,7 @@ class ValidationError extends NodeComfortError {
    * @param {NodeComfortErrorOptions & { message?: string }} [options]
    */
   constructor(issues, options = {}) {
-    super(options.message ?? ValidationError.format(issues), { code: "ERR_VALIDATION", ...options });
+    super(options.message ?? ValidationError.format(issues), { ...options, code: options.code ?? "ERR_VALIDATION" });
     /** Every problem found, in order. */
     this.issues = issues;
   }
@@ -179,7 +213,7 @@ class HttpError extends NodeComfortError {
    * @param {NodeComfortErrorOptions & { status?: number, statusText?: string, url?: string, method?: string, headers?: Record<string, string>, data?: unknown }} [options]
    */
   constructor(message, options = {}) {
-    super(message, { code: "ERR_HTTP", ...options });
+    super(message, { ...options, code: options.code ?? "ERR_HTTP" });
     /** HTTP status, like `404`. `0` when no response came back. */
     this.status = options.status ?? 0;
     /** HTTP status text, like `"Not Found"`. */
@@ -214,7 +248,7 @@ class JWTError extends NodeComfortError {
    * @param {NodeComfortErrorOptions & { expiredAt?: Date }} [options]
    */
   constructor(message, options = {}) {
-    super(message, { code: "ERR_JWT", ...options });
+    super(message, { ...options, code: options.code ?? "ERR_JWT" });
     /** When the token expired. Only set for `ERR_JWT_EXPIRED`. */
     this.expiredAt = options.expiredAt;
   }
@@ -237,7 +271,7 @@ class ProcessError extends NodeComfortError {
    * @param {NodeComfortErrorOptions & { command?: string, exitCode?: number | null, signal?: string | null, stdout?: string, stderr?: string, timedOut?: boolean }} [options]
    */
   constructor(message, options = {}) {
-    super(message, { code: options.timedOut ? "ETIMEDOUT" : "ERR_PROCESS", ...options });
+    super(message, { ...options, code: options.code ?? (options.timedOut ? "ETIMEDOUT" : "ERR_PROCESS") });
     /** The command that ran. */
     this.command = options.command ?? "";
     /** Exit code, or `null` if a signal killed the process. */
@@ -271,12 +305,17 @@ class SQLiteError extends NodeComfortError {
    * @param {NodeComfortErrorOptions & { sql?: string, sqliteCode?: string }} [options]
    */
   constructor(message, options = {}) {
-    super(message, { code: "ERR_SQLITE", ...options });
+    super(message, { ...options, code: options.code ?? "ERR_SQLITE" });
     /** The SQL that failed, when there is one. */
     this.sql = options.sql;
     /** SQLite's error code, like `"SQLITE_CONSTRAINT_UNIQUE"`, when known. */
     this.sqliteCode = options.sqliteCode;
   }
+}
+
+const _classes = [NodeComfortError, AssertionError, TimeoutError, AbortError, ValidationError, HttpError, JWTError, ProcessError, SQLiteError];
+for (const Class of _classes) {
+  Object.defineProperty(Class.prototype, Symbol.for(`@ix-xs/node-comfort/${Class.name}`), { value: true });
 }
 
 module.exports = {

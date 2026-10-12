@@ -49,6 +49,16 @@
  */
 
 /**
+ * Options for `toSentence()`.
+ * @typedef {object} ToSentenceOptions
+ * @property {string} [locale] Language of the joining word. Defaults to `"en"`.
+ * @property {"conjunction" | "disjunction" | "unit"} [type] `"conjunction"` joins with "and", `"disjunction"` with "or", `"unit"` with commas only. Defaults to `"conjunction"`.
+ * @property {"long" | "short" | "narrow"} [style] Defaults to `"long"`.
+ */
+
+const { intl, preciseSum } = require("./internal/shared.js");
+
+/**
  * @param {unknown} iteratee
  * @returns {(item: any, index: number) => any}
  */
@@ -245,12 +255,16 @@ function unique(array, iteratee) {
  */
 function groupBy(array, iteratee) {
   const fn = _fn(iteratee);
-  /** @type {Record<PropertyKey, T[]>} */
-  const out = {};
-  array.forEach((item, i) => {
-    (out[_key(fn(item, i))] ??= []).push(item);
-  });
-  return out;
+  // A Map, so keys like "constructor" or "__proto__" are plain data.
+  /** @type {Map<PropertyKey, T[]>} */
+  const groups = new Map();
+  for (let i = 0; i < array.length; i++) {
+    const key = _key(fn(array[i], i));
+    const group = groups.get(key);
+    if (group) group.push(array[i]);
+    else groups.set(key, [array[i]]);
+  }
+  return Object.fromEntries(groups);
 }
 
 /**
@@ -267,12 +281,10 @@ function groupBy(array, iteratee) {
  */
 function keyBy(array, iteratee) {
   const fn = _fn(iteratee);
-  /** @type {Record<PropertyKey, T>} */
-  const out = {};
-  array.forEach((item, i) => {
-    out[_key(fn(item, i))] = item;
-  });
-  return out;
+  /** @type {Map<PropertyKey, T>} */
+  const out = new Map();
+  for (let i = 0; i < array.length; i++) out.set(_key(fn(array[i], i)), array[i]);
+  return Object.fromEntries(out);
 }
 
 /**
@@ -311,13 +323,13 @@ function toMap(array, key, value) {
  */
 function countBy(array, iteratee) {
   const fn = _fn(iteratee);
-  /** @type {Record<PropertyKey, number>} */
-  const out = {};
-  array.forEach((item, i) => {
-    const key = _key(fn(item, i));
-    out[key] = (out[key] ?? 0) + 1;
-  });
-  return out;
+  /** @type {Map<PropertyKey, number>} */
+  const out = new Map();
+  for (let i = 0; i < array.length; i++) {
+    const key = _key(fn(array[i], i));
+    out.set(key, (out.get(key) ?? 0) + 1);
+  }
+  return Object.fromEntries(out);
 }
 
 /**
@@ -394,34 +406,46 @@ function pluck(array, key) {
 function sortBy(array, keys, order = "asc") {
   const options = typeof order === "string" ? { order } : order;
   const defaultDir = options.order === "desc" ? -1 : 1;
-  const collator = options.natural ? new Intl.Collator(options.locale, { numeric: true, sensitivity: "base" }) : null;
+  const collator = options.natural ? intl.collator(options.locale, { numeric: true, sensitivity: "base" }) : null;
   const isTuple = (/** @type {unknown} */ k) => Array.isArray(k) && k.length === 2 && (k[1] === "asc" || k[1] === "desc");
   const list = Array.isArray(keys) && !isTuple(keys) ? keys : [keys];
   const comparators = list.map((k) => {
     const [iteratee, dir] = isTuple(k) ? /** @type {[unknown, string]} */ (k) : [k, undefined];
     return { fn: _fn(iteratee), dir: dir === undefined ? defaultDir : dir === "desc" ? -1 : 1 };
   });
-  return array
-    .map((item, index) => ({ item, index }))
-    .sort((a, b) => {
-      for (const { fn, dir } of comparators) {
-        const va = fn(a.item, a.index);
-        const vb = fn(b.item, b.index);
-        const aNil = va === null || va === undefined;
-        const bNil = vb === null || vb === undefined;
-        if (aNil || bNil) {
-          if (aNil && bNil) continue;
-          return aNil ? 1 : -1;
-        }
-        let result = 0;
-        if (collator && typeof va === "string" && typeof vb === "string") result = collator.compare(va, vb);
-        else if (va < vb) result = -1;
-        else if (va > vb) result = 1;
-        if (result) return result * dir;
+  const size = array.length;
+  const width = comparators.length;
+  // Each sort value is computed once, not on every comparison.
+  /** @type {any[]} */
+  const values = new Array(size * width);
+  /** @type {number[]} */
+  const indexes = new Array(size);
+  for (let i = 0; i < size; i++) {
+    indexes[i] = i;
+    for (let k = 0; k < width; k++) values[i * width + k] = comparators[k].fn(array[i], i);
+  }
+  indexes.sort((a, b) => {
+    for (let k = 0; k < width; k++) {
+      const va = values[a * width + k];
+      const vb = values[b * width + k];
+      const aNil = va === null || va === undefined;
+      const bNil = vb === null || vb === undefined;
+      if (aNil || bNil) {
+        if (aNil && bNil) continue;
+        return aNil ? 1 : -1;
       }
-      return a.index - b.index;
-    })
-    .map((entry) => entry.item);
+      let result = 0;
+      if (collator && typeof va === "string" && typeof vb === "string") result = collator.compare(va, vb);
+      else if (va < vb) result = -1;
+      else if (va > vb) result = 1;
+      if (result) return result * comparators[k].dir;
+    }
+    return a - b;
+  });
+  /** @type {T[]} */
+  const out = new Array(size);
+  for (let i = 0; i < size; i++) out[i] = array[indexes[i]];
+  return out;
 }
 
 /**
@@ -435,7 +459,9 @@ function shuffle(array) {
   const out = [...array];
   for (let i = out.length - 1; i > 0; i--) {
     const j = Math.floor(Math.random() * (i + 1));
-    [out[i], out[j]] = [out[j], out[i]];
+    const item = out[i];
+    out[i] = out[j];
+    out[j] = item;
   }
   return out;
 }
@@ -463,7 +489,17 @@ function sample(array) {
  * @returns {T[]}
  */
 function sampleSize(array, n) {
-  return shuffle(array).slice(0, Math.max(0, n));
+  const out = [...array];
+  const count = Math.min(out.length, Math.max(0, Math.floor(n)));
+  // A partial shuffle: only the items that are returned get moved.
+  for (let i = 0; i < count; i++) {
+    const j = i + Math.floor(Math.random() * (out.length - i));
+    const item = out[i];
+    out[i] = out[j];
+    out[j] = item;
+  }
+  out.length = count;
+  return out;
 }
 
 /**
@@ -631,7 +667,8 @@ function compact(array) {
  * @returns {T[]}
  */
 function toggle(array, item) {
-  return array.includes(item) ? array.filter((x) => x !== item) : [...array, item];
+  // `includes` finds NaN, so the removal has to as well.
+  return array.includes(item) ? array.filter((x) => x !== item && (x === x || item === item)) : [...array, item];
 }
 
 /**
@@ -702,8 +739,7 @@ function flatten(array, depth) {
  * @returns {Array<Array<T | undefined>>}
  */
 function zip(...arrays) {
-  const size = Math.max(0, ...arrays.map((a) => a.length));
-  return Array.from({ length: size }, (_, i) => arrays.map((a) => a[i]));
+  return _zip(arrays);
 }
 
 /**
@@ -717,8 +753,27 @@ function zip(...arrays) {
  * @returns {Array<Array<T | undefined>>}
  */
 function unzip(tuples) {
-  return zip(...tuples);
+  return _zip(tuples);
 }
+
+/**
+ * @template T
+ * @param {ReadonlyArray<ReadonlyArray<T>>} arrays
+ * @returns {Array<Array<T | undefined>>}
+ */
+const _zip = (arrays) => {
+  let size = 0;
+  for (const array of arrays) if (array.length > size) size = array.length;
+  /** @type {Array<Array<T | undefined>>} */
+  const out = new Array(size);
+  for (let i = 0; i < size; i++) {
+    /** @type {Array<T | undefined>} */
+    const row = new Array(arrays.length);
+    for (let k = 0; k < arrays.length; k++) row[k] = arrays[k][i];
+    out[i] = row;
+  }
+  return out;
+};
 
 /**
  * Takes items from each array in turn, then appends the rest.
@@ -733,7 +788,8 @@ function unzip(tuples) {
 function interleave(...arrays) {
   /** @type {T[]} */
   const out = [];
-  const size = Math.max(0, ...arrays.map((a) => a.length));
+  let size = 0;
+  for (const array of arrays) if (array.length > size) size = array.length;
   for (let i = 0; i < size; i++) for (const a of arrays) if (i < a.length) out.push(a[i]);
   return out;
 }
@@ -786,7 +842,10 @@ function times(n, value) {
  */
 function sumBy(array, iteratee) {
   const fn = _fn(iteratee);
-  return array.reduce((acc, item, i) => acc + (Number(fn(item, i)) || 0), 0);
+  /** @type {number[]} */
+  const values = new Array(array.length);
+  for (let i = 0; i < array.length; i++) values[i] = Number(fn(array[i], i)) || 0;
+  return preciseSum(values);
 }
 
 /**
@@ -821,13 +880,14 @@ function maxBy(array, iteratee) {
   let best;
   /** @type {any} */
   let bestValue;
-  array.forEach((item, i) => {
-    const v = fn(item, i);
-    if (v !== null && v !== undefined && (bestValue === undefined || v > bestValue)) {
+  for (let i = 0; i < array.length; i++) {
+    const v = fn(array[i], i);
+    if (v === null || v === undefined || v !== v) continue;
+    if (bestValue === undefined || v > bestValue) {
       bestValue = v;
-      best = item;
+      best = array[i];
     }
-  });
+  }
   return best;
 }
 
@@ -848,14 +908,113 @@ function minBy(array, iteratee) {
   let best;
   /** @type {any} */
   let bestValue;
-  array.forEach((item, i) => {
-    const v = fn(item, i);
-    if (v !== null && v !== undefined && (bestValue === undefined || v < bestValue)) {
+  for (let i = 0; i < array.length; i++) {
+    const v = fn(array[i], i);
+    if (v === null || v === undefined || v !== v) continue;
+    if (bestValue === undefined || v < bestValue) {
       bestValue = v;
-      best = item;
+      best = array[i];
     }
-  });
+  }
   return best;
+}
+
+/**
+ * The items that appear more than once, each listed once.
+ *
+ * @example
+ * arr.duplicates([1, 2, 2, 3, 3, 3]); // [2, 3]
+ * arr.duplicates(users, "email");      // users whose email is taken by an earlier one
+ *
+ * @template T
+ * @param {readonly T[]} array
+ * @param {Iteratee<T>} [iteratee] What makes two items "the same". Defaults to the item itself.
+ * @returns {T[]} For each repeated value, its second occurrence.
+ */
+function duplicates(array, iteratee) {
+  const fn = _fn(iteratee);
+  /** @type {Map<unknown, number>} */
+  const seen = new Map();
+  /** @type {T[]} */
+  const out = [];
+  for (let i = 0; i < array.length; i++) {
+    const key = fn(array[i], i);
+    const count = (seen.get(key) ?? 0) + 1;
+    seen.set(key, count);
+    if (count === 2) out.push(array[i]);
+  }
+  return out;
+}
+
+/**
+ * Items found in exactly one of the arrays, without duplicates.
+ *
+ * @example
+ * arr.xor([1, 2, 3], [2, 3, 4]); // [1, 4]
+ *
+ * @template T
+ * @param {...ReadonlyArray<T>} arrays
+ * @returns {T[]}
+ */
+function xor(...arrays) {
+  /** @type {Map<T, number>} */
+  const counts = new Map();
+  for (const array of arrays) for (const item of new Set(array)) counts.set(item, (counts.get(item) ?? 0) + 1);
+  /** @type {T[]} */
+  const out = [];
+  for (const [item, count] of counts) if (count === 1) out.push(item);
+  return out;
+}
+
+/**
+ * The items from the start, up to the first one that fails the test.
+ *
+ * @example
+ * arr.takeWhile([1, 2, 5, 1], (n) => n < 3); // [1, 2]
+ *
+ * @template T
+ * @param {readonly T[]} array
+ * @param {(item: T, index: number) => unknown} predicate
+ * @returns {T[]}
+ */
+function takeWhile(array, predicate) {
+  let end = 0;
+  while (end < array.length && predicate(array[end], end)) end++;
+  return array.slice(0, end);
+}
+
+/**
+ * Skips items from the start while they pass the test, and returns the rest.
+ *
+ * @example
+ * arr.dropWhile([1, 2, 5, 1], (n) => n < 3); // [5, 1]
+ *
+ * @template T
+ * @param {readonly T[]} array
+ * @param {(item: T, index: number) => unknown} predicate
+ * @returns {T[]}
+ */
+function dropWhile(array, predicate) {
+  let start = 0;
+  while (start < array.length && predicate(array[start], start)) start++;
+  return array.slice(start);
+}
+
+/**
+ * Joins items the way a sentence would, in any language.
+ *
+ * @example
+ * arr.toSentence(["Ada", "Bob", "Cy"]);                    // "Ada, Bob, and Cy"
+ * arr.toSentence(["Ada", "Bob"], { locale: "fr" });        // "Ada et Bob"
+ * arr.toSentence(["red", "blue"], { type: "disjunction" }); // "red or blue"
+ *
+ * @param {Iterable<unknown>} items
+ * @param {ToSentenceOptions} [options]
+ * @returns {string}
+ */
+function toSentence(items, options = {}) {
+  const list = Array.from(items, (item) => String(item));
+  return intl.list(options.locale ?? "en", { type: options.type ?? "conjunction", style: options.style ?? "long" }).format(list);
 }
 
 module.exports = {
@@ -898,4 +1057,9 @@ module.exports = {
   averageBy,
   maxBy,
   minBy,
+  duplicates,
+  xor,
+  takeWhile,
+  dropWhile,
+  toSentence,
 };
