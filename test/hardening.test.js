@@ -988,3 +988,150 @@ describe("color", () => {
     assert.ok(cut.endsWith(`${ESC}[22m${ESC}[39m`));
   });
 });
+
+describe("cli", () => {
+  const { cli } = nc;
+  const { PassThrough } = require("node:stream");
+  const ESC = String.fromCharCode(27);
+  const KEY = { up: `${ESC}[A`, down: `${ESC}[B`, home: `${ESC}[1~`, end: `${ESC}[4~`, pageUp: `${ESC}[5~`, enter: "\r", space: " ", ctrlC: String.fromCharCode(3), backspace: String.fromCharCode(127) };
+
+  /** A terminal that isn't one: what the prompts write, and a way to press keys. */
+  const terminal = (columns = 60) => {
+    /** @type {any} */
+    const input = new PassThrough();
+    input.isTTY = true;
+    input.setRawMode = () => input;
+    /** @type {any} */
+    const output = new PassThrough();
+    output.isTTY = true;
+    output.columns = columns;
+    let written = "";
+    output.on("data", (/** @type {Buffer} */ chunk) => (written += chunk));
+    return {
+      input,
+      output,
+      text: () => nc.color.strip(written),
+      /** @param {string[]} keys */
+      async press(...keys) {
+        for (const key of keys) {
+          input.write(key);
+          await sleep(5);
+        }
+      },
+    };
+  };
+
+  it("table: cells can span several lines, and big tables don't overflow the stack", () => {
+    assert.equal(
+      cli.table([{ name: "Ada", note: "one\ntwo" }, { name: "Bob", note: "x" }], { colors: false, border: "ascii" }),
+      ["+------+------+", "| name | note |", "+------+------+", "| Ada  | one  |", "|      | two  |", "| Bob  | x    |", "+------+------+"].join("\n"),
+    );
+    assert.equal(cli.table([{ a: 1, b: "x|y\nz" }], { border: "markdown" }), "|   a | b         |\n| --: | --------- |\n|   1 | x\\|y<br>z |");
+    assert.equal(cli.table([]), "");
+    assert.equal(cli.table(Array.from({ length: 150_000 }, (_, i) => ({ i })), { colors: false }).split("\n").length, 150_004);
+  });
+
+  it("tree draws nested data", () => {
+    assert.equal(
+      cli.tree({ src: { "index.js": null, lib: ["a.js", "b.js"] }, "package.json": "1.2 kB" }),
+      ["├── src", "│   ├── index.js", "│   └── lib", "│       ├── a.js", "│       └── b.js", "└── package.json: 1.2 kB"].join("\n"),
+    );
+    assert.equal(cli.tree({ a: { b: null }, c: null }, { ascii: true }), "+-- a\n|   +-- b\n+-- c");
+    /** @type {Record<string, unknown>} */
+    const loop = {};
+    loop.self = loop;
+    assert.ok(cli.tree(loop).includes("(circular)"));
+  });
+
+  it("args: environment variables, number choices, commands", () => {
+    const schema = /** @type {const} */ ({
+      port: { type: "number", default: 3000, env: "PORT" },
+      verbose: { type: "boolean", env: "VERBOSE" },
+      tag: { type: "string", multiple: true, env: "TAGS" },
+      level: { type: "number", choices: [1, 2, 3] },
+    });
+    assert.deepEqual(cli.args(schema, { argv: [], env: { PORT: "9000", VERBOSE: "yes", TAGS: "a, b" } }).flags, { port: 9000, verbose: true, tag: ["a", "b"], level: undefined });
+    assert.equal(cli.args(schema, { argv: ["--port", "1"], env: { PORT: "9000" } }).flags.port, 1, "the command line wins");
+    assert.equal(cli.args(schema, { argv: ["--level", "2"], env: {} }).flags.level, 2);
+    assert.throws(() => cli.args(schema, { argv: ["--level", "9"], env: {} }), /must be one of: 1, 2, 3/);
+    assert.throws(() => cli.args(schema, { argv: [], env: { PORT: "abc" } }), /Environment variable PORT expects a number/);
+    assert.throws(() => cli.args(schema, { argv: ["--port"], env: {} }), /Option --port needs a value/);
+    assert.deepEqual(cli.args(schema, { argv: ["--", "--verbose", "-h"], env: {} }).positionals, ["--verbose", "-h"]);
+
+    const commands = { build: "Build the project", serve: "Start the server" };
+    const parsed = cli.args(schema, { argv: ["build", "--verbose", "src"], env: {}, commands });
+    assert.equal(parsed.command, "build");
+    assert.deepEqual(parsed.positionals, ["src"]);
+    assert.throws(() => cli.args(schema, { argv: ["biuld"], env: {}, commands }), /Unknown command "biuld"\. Did you mean build\?/);
+    assert.match(parsed.help(), /Commands:\n {2}build {2}Build the project/);
+    assert.match(parsed.help(), /\[env: PORT\]/);
+  });
+
+  it("select: arrows skip disabled choices, and the list folds into the answer", async () => {
+    const t = terminal();
+    const pending = cli.select("Pick", ["a", { label: "b", value: "B", disabled: true }, "c"], { input: t.input, output: t.output });
+    await t.press(KEY.down, KEY.enter);
+    assert.equal(await pending, "c");
+    assert.equal(t.text().trim().split("\n").at(-1), "✔ Pick c");
+  });
+
+  it("select: Home, End and Page keys, and nothing wider than the terminal", async () => {
+    const items = Array.from({ length: 30 }, (_, i) => `item ${i} with a label that is far too long for this terminal`);
+    const t = terminal(24);
+    const pending = cli.select("Pick", items, { input: t.input, output: t.output, pageSize: 5 });
+    await t.press(KEY.end, KEY.pageUp, KEY.up, KEY.home, KEY.up, KEY.enter);
+    assert.equal(await pending, items[29]);
+    const widest = Math.max(...t.text().split(/[\r\n]+/).map((line) => nc.color.width(line)));
+    assert.ok(widest <= 23, `a line was ${widest} columns wide`);
+  });
+
+  it("multiselect: space, a for all, and the minimum", async () => {
+    const t = terminal();
+    const pending = cli.multiselect("Pick", ["a", { label: "b", value: "b", disabled: true }, "c"], { input: t.input, output: t.output, min: 1 });
+    await t.press(KEY.enter, "a", KEY.enter);
+    assert.deepEqual(await pending, ["a", "c"]);
+    assert.ok(t.text().includes("Select at least 1"));
+  });
+
+  it("Ctrl+C in a prompt rejects with an AbortError", async () => {
+    const t = terminal();
+    const picking = assert.rejects(cli.select("Pick", ["a", "b"], { input: t.input, output: t.output }), { name: "AbortError" });
+    await t.press(KEY.ctrlC);
+    await picking;
+    const typing = assert.rejects(cli.password("Token?", { input: t.input, output: t.output }), { name: "AbortError" });
+    await t.press("x", KEY.ctrlC);
+    await typing;
+    await assert.rejects(cli.select("Pick", [{ label: "a", value: 1, disabled: true }]), RangeError);
+  });
+
+  it("password ignores arrow keys and handles backspace", async () => {
+    const t = terminal();
+    const pending = cli.password("Token?", { input: t.input, output: t.output });
+    await t.press("s", "3", KEY.up, "x", KEY.backspace, "c", KEY.enter);
+    assert.equal(await pending, "s3c");
+    assert.ok(!t.text().includes("s3c"));
+  });
+
+  it("spin reports how the work ended", async () => {
+    const quiet = () => {
+      const stream = /** @type {any} */ (new PassThrough());
+      let written = "";
+      stream.on("data", (/** @type {Buffer} */ chunk) => (written += chunk));
+      return { stream, lines: () => nc.color.strip(written).trim().split("\n") };
+    };
+    const ok = quiet();
+    assert.equal(await cli.spin("Loading", async () => 42, { stream: ok.stream, success: (n) => `Got ${n}` }), 42);
+    assert.deepEqual(ok.lines(), ["- Loading", "✔ Got 42"]);
+    const bad = quiet();
+    await assert.rejects(cli.spin("Loading", Promise.reject(new Error("boom")), { stream: bad.stream, fail: (error) => `Nope: ${/** @type {Error} */ (error).message}` }), { message: "boom" });
+    assert.deepEqual(bad.lines(), ["- Loading", "✖ Nope: boom"]);
+  });
+
+  it("progress shows a label as it is, whatever it contains", () => {
+    const stream = /** @type {any} */ (new PassThrough());
+    let written = "";
+    stream.on("data", (/** @type {Buffer} */ chunk) => (written += chunk));
+    cli.progress({ total: 2, stream, format: "{percent}% {label} {label}", label: "$& $1" }).update(2).stop();
+    assert.equal(nc.color.strip(written), "100% $& $1 $& $1\n");
+  });
+});
