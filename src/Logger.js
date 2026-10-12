@@ -10,8 +10,9 @@
  * `#ff8800`, `bg#1e1e2e`, `rgb(255, 128, 0)` and `bgRgb(...)`.
  *
  * Levels, from chatty to severe: `trace`, `debug`, `info`, `warn`, `error`,
- * `fatal`. The default is `info`, or `debug` when `DEBUG` is set; `LOG_LEVEL`
- * overrides it. Warnings and errors go to stderr.
+ * `fatal`. The default is `info`; `LOG_LEVEL` changes it. `DEBUG=1` shows
+ * debug messages, and `DEBUG=db,http:*` only those of the loggers with these
+ * scopes. Warnings and errors go to stderr.
  *
  * @example
  * nc.info("Server listening on port 3000");
@@ -24,7 +25,7 @@ const fs = require("node:fs");
 const path = require("node:path");
 const util = require("node:util");
 const color = require("./Color.js");
-const time = require("./Time.js");
+const { timeConfig } = require("./internal/shared.js");
 
 /**
  * Log levels, from the most verbose to the most severe. `silent` hides everything.
@@ -46,6 +47,17 @@ const time = require("./Time.js");
  */
 
 /**
+ * A message as `onLog` receives it.
+ * @typedef {object} LogEntry
+ * @property {Date} time
+ * @property {LogLevel} level
+ * @property {"log" | "trace" | "debug" | "info" | "success" | "warn" | "error" | "fatal"} kind The method that was called.
+ * @property {string | undefined} scope
+ * @property {string} message The line as written, without colors or timestamp.
+ * @property {unknown[]} args What was passed to the method, untouched.
+ */
+
+/**
  * Options for `createLogger()` and `configure()`.
  * @typedef {object} LoggerOptions
  * @property {LogLevel} [level] Hide messages below this level. Defaults to `LOG_LEVEL`, else `"info"`.
@@ -58,6 +70,8 @@ const time = require("./Time.js");
  * @property {LogStream} [stderr] Where `warn`, `error` and `fatal` go. Defaults to `process.stderr`.
  * @property {string | LogFileOptions} [file] Also write every message to a file.
  * @property {Record<string, unknown>} [fields] Added to every JSON record, like a service name.
+ * @property {string[]} [redact] Keys whose values are replaced by `"[redacted]"` wherever they appear in logged objects, like `["password", "authorization"]`. Case doesn't matter.
+ * @property {(entry: LogEntry) => void} [onLog] Called for every message that passes the level, to send logs somewhere else. An error it throws is ignored: logging never breaks the program.
  */
 
 /**
@@ -109,11 +123,42 @@ const STYLE_NAMES = new Set([
   "bgBlackBright", "bgRedBright", "bgGreenBright", "bgYellowBright", "bgBlueBright", "bgMagentaBright", "bgCyanBright", "bgWhiteBright",
 ]);
 
+const REDACTED = "[redacted]";
+const TRIM_LINES = /^(\s*\r?\n)+|(\r?\n\s*)+$/g;
+const RGB = /(bg)?rgb\(\s*(\d{1,3})\s*,\s*(\d{1,3})\s*,\s*(\d{1,3})\s*\)/gi;
+const TOKEN = /^(\S+)(\s+|$)/;
+
 /** @returns {LogLevel} */
 const _defaultLevel = () => {
   const fromEnv = String(process.env.LOG_LEVEL ?? "").toLowerCase();
-  if (fromEnv in LEVELS) return /** @type {LogLevel} */ (fromEnv);
-  return process.env.DEBUG || process.env.NODE_DEBUG ? "debug" : "info";
+  if (Object.hasOwn(LEVELS, fromEnv)) return /** @type {LogLevel} */ (fromEnv);
+  return _debugAll(process.env.DEBUG) || process.env.NODE_DEBUG ? "debug" : "info";
+};
+
+/**
+ * Does `DEBUG` ask for everything? `DEBUG=1`, `DEBUG=true` and `DEBUG=*` do.
+ * @param {string | undefined} value
+ */
+const _debugAll = (value) => value !== undefined && /^(?:1|true|yes|on|\*)$/i.test(value.trim());
+
+/**
+ * Does `DEBUG` name this scope? It's a list of scopes, where `*` stands for
+ * anything and a leading `-` excludes: `DEBUG=db,http:*,-http:static`.
+ * @param {string | undefined} value
+ * @param {string | undefined} scope
+ */
+const _debugScope = (value, scope) => {
+  if (!value || !scope || _debugAll(value)) return false;
+  let wanted = false;
+  for (const part of value.split(/[\s,]+/)) {
+    if (!part) continue;
+    const exclude = part[0] === "-";
+    const pattern = new RegExp(`^${(exclude ? part.slice(1) : part).split("*").map(_escape).join(".*")}$`);
+    if (!pattern.test(scope)) continue;
+    if (exclude) return false;
+    wanted = true;
+  }
+  return wanted;
 };
 
 /** @param {string} value */
@@ -152,20 +197,19 @@ const _isStyleToken = (token) =>
 /**
  * Renders `<% styles text %>` markup.
  * @param {string} input
- * @param {{ open: string, close: string }} delimiter
+ * @param {{ open: string, close: string, regex: RegExp }} delimiter
  * @param {import("./Color").ColorModule} palette
  * @returns {string}
  */
 const _markup = (input, delimiter, palette) => {
   if (!input.includes(delimiter.open)) return input;
-  const regex = new RegExp(`${_escape(delimiter.open)}([\\s\\S]*?)${_escape(delimiter.close)}`, "g");
-  return input.replace(regex, (_, content) => {
-    const normalized = String(content).replace(/(bg)?rgb\(\s*(\d{1,3})\s*,\s*(\d{1,3})\s*,\s*(\d{1,3})\s*\)/gi, (m0, bg, r, g, b) => `${bg ?? ""}rgb(${r},${g},${b})`);
+  return input.replace(delimiter.regex, (_, content) => {
+    const normalized = String(content).replace(RGB, (m0, bg, r, g, b) => `${bg ?? ""}rgb(${r},${g},${b})`);
     /** @type {string[]} */
     const tokens = [];
     let rest = normalized.replace(/^\s+/, "");
     for (;;) {
-      const match = /^(\S+)(\s+|$)/.exec(rest);
+      const match = TOKEN.exec(rest);
       if (!match || !_isStyleToken(match[1])) break;
       tokens.push(match[1]);
       rest = rest.slice(match[0].length);
@@ -175,11 +219,41 @@ const _markup = (input, delimiter, palette) => {
 };
 
 /**
+ * A copy of a value with the secret keys masked, for values `JSON.stringify`
+ * can't handle on its own: class instances, circular references.
+ * @param {unknown} value
+ * @param {Set<string>} secrets Lower-cased key names.
+ * @param {Map<object, unknown>} seen
+ * @returns {unknown}
+ */
+const _redact = (value, secrets, seen) => {
+  if (value === null || typeof value !== "object" || value instanceof Date || value instanceof RegExp || value instanceof Error || ArrayBuffer.isView(value)) return value;
+  const known = seen.get(value);
+  if (known !== undefined) return known;
+  if (Array.isArray(value)) {
+    /** @type {unknown[]} */
+    const list = [];
+    seen.set(value, list);
+    for (const item of value) list.push(_redact(item, secrets, seen));
+    return list;
+  }
+  if (value instanceof Map || value instanceof Set) return value;
+  /** @type {Record<string, unknown>} */
+  const copy = Object.create(Object.getPrototypeOf(value));
+  seen.set(value, copy);
+  for (const key of Object.keys(value)) {
+    copy[key] = secrets.has(key.toLowerCase()) ? REDACTED : _redact(/** @type {Record<string, unknown>} */ (value)[key], secrets, seen);
+  }
+  return copy;
+};
+
+/**
  * @param {unknown} value
  * @param {boolean} colors
+ * @param {Set<string> | undefined} secrets
  * @returns {string}
  */
-const _stringify = (value, colors) => {
+const _stringify = (value, colors, secrets) => {
   if (typeof value === "string") return value;
   if (value instanceof Error) {
     let text = value.stack ?? `${value.name}: ${value.message}`;
@@ -195,13 +269,13 @@ const _stringify = (value, colors) => {
     const proto = Object.getPrototypeOf(value);
     if (Array.isArray(value) || proto === Object.prototype || proto === null) {
       try {
-        const json = JSON.stringify(value, (_, v) => (typeof v === "bigint" ? `${v}n` : v), 2);
+        const json = JSON.stringify(value, (key, v) => (secrets?.has(key.toLowerCase()) ? REDACTED : typeof v === "bigint" ? `${v}n` : v), 2);
         if (json !== undefined) return json;
       } catch {
         // circular or exotic: fall back to util.inspect
       }
     }
-    return util.inspect(value, { depth: 6, colors, breakLength: 100 });
+    return util.inspect(secrets ? _redact(value, secrets, new Map()) : value, { depth: 6, colors, breakLength: 100 });
   }
   return typeof value === "symbol" || typeof value === "function" ? util.inspect(value, { colors }) : String(value);
 };
@@ -211,11 +285,13 @@ const _stringify = (value, colors) => {
  * @param {unknown[]} args
  * @param {string | undefined} scope
  * @param {Record<string, unknown>} fields
+ * @param {Set<string> | undefined} secrets
+ * @param {Date} now
  * @returns {string}
  */
-const _json = (level, args, scope, fields) => {
+const _json = (level, args, scope, fields, secrets, now) => {
   /** @type {Record<string, unknown>} */
-  const record = { time: new Date().toISOString(), level, ...fields };
+  const record = { time: now.toISOString(), level, ...fields };
   if (scope) record.scope = scope;
   const messages = [];
   for (const arg of args) {
@@ -224,48 +300,92 @@ const _json = (level, args, scope, fields) => {
     } else if (arg !== null && typeof arg === "object" && !Array.isArray(arg)) {
       Object.assign(record, arg);
     } else {
-      messages.push(typeof arg === "string" ? color.strip(arg) : _stringify(arg, false));
+      messages.push(typeof arg === "string" ? color.strip(arg) : _stringify(arg, false, secrets));
     }
   }
   record.msg = messages.join(" ");
   try {
-    return JSON.stringify(record, (_, v) => (typeof v === "bigint" ? v.toString() : v));
+    return JSON.stringify(record, (key, v) => (secrets?.has(key.toLowerCase()) ? REDACTED : typeof v === "bigint" ? v.toString() : v));
   } catch {
     return JSON.stringify({ time: record.time, level, msg: `${record.msg} [unserializable fields]` });
   }
 };
 
 /**
- * Appends a line, rotating the file when it gets too big.
+ * A log file: where it is, how big it may get, how big it is now.
+ * @typedef {{ target: string, limit: number | undefined, keep: number, size: number, ready: boolean }} _LogFile
+ */
+
+/**
  * @param {LogFileOptions} file
+ * @returns {_LogFile}
+ */
+const _openFile = (file) => ({
+  target: path.resolve(file.path),
+  limit: file.maxSize === undefined ? undefined : typeof file.maxSize === "number" ? file.maxSize : require("./Num.js").parseBytes(file.maxSize),
+  keep: Math.max(1, file.maxFiles ?? 5),
+  size: 0,
+  ready: false,
+});
+
+/** @param {string} target */
+const _sizeOf = (target) => {
+  try {
+    return fs.statSync(target).size;
+  } catch {
+    return 0;
+  }
+};
+
+/**
+ * Appends a line, rotating the file when it gets too big. The folder is
+ * made once and the size is counted here, so a line costs one write.
+ * @param {_LogFile} file
  * @param {string} line
  */
 const _writeFile = (file, line) => {
+  const text = `${line}\n`;
   try {
-    const target = path.resolve(file.path);
-    fs.mkdirSync(path.dirname(target), { recursive: true });
-    if (file.maxSize !== undefined) {
-      const limit = typeof file.maxSize === "number" ? file.maxSize : require("./Num.js").parseBytes(file.maxSize);
-      let size = 0;
-      try {
-        size = fs.statSync(target).size;
-      } catch {
-        size = 0;
-      }
-      if (size > 0 && size + Buffer.byteLength(line) > limit) {
-        const keep = Math.max(1, file.maxFiles ?? 5);
-        for (let i = keep - 1; i >= 1; i--) {
-          if (fs.existsSync(`${target}.${i}`)) fs.renameSync(`${target}.${i}`, `${target}.${i + 1}`);
+    if (!file.ready) {
+      fs.mkdirSync(path.dirname(file.target), { recursive: true });
+      file.size = _sizeOf(file.target);
+      file.ready = true;
+    }
+    const bytes = Buffer.byteLength(text);
+    if (file.limit !== undefined && file.size > 0 && file.size + bytes - 1 > file.limit) {
+      // Another process may have rotated or removed the file: look before moving anything.
+      file.size = _sizeOf(file.target);
+      if (file.size > 0 && file.size + bytes - 1 > file.limit) {
+        for (let i = file.keep - 1; i >= 1; i--) {
+          if (fs.existsSync(`${file.target}.${i}`)) fs.renameSync(`${file.target}.${i}`, `${file.target}.${i + 1}`);
         }
-        if (fs.existsSync(`${target}.${keep + 1}`)) fs.rmSync(`${target}.${keep + 1}`);
-        fs.renameSync(target, `${target}.1`);
+        if (fs.existsSync(`${file.target}.${file.keep + 1}`)) fs.rmSync(`${file.target}.${file.keep + 1}`);
+        fs.renameSync(file.target, `${file.target}.1`);
+        file.size = 0;
       }
     }
-    fs.appendFileSync(target, `${line}\n`);
+    try {
+      fs.appendFileSync(file.target, text);
+    } catch {
+      // The folder was removed since: make it again, once.
+      fs.mkdirSync(path.dirname(file.target), { recursive: true });
+      fs.appendFileSync(file.target, text);
+      file.size = 0;
+    }
+    file.size += bytes;
   } catch {
     // Logging must never crash the application.
   }
 };
+
+/** @param {number} n */
+const _two = (n) => (n < 10 ? `0${n}` : String(n));
+
+/**
+ * What a message looks like on one output: its colors, and the parts that
+ * are the same on every line, styled once.
+ * @typedef {{ palette: import("./Color").ColorModule, colors: boolean, labels: Record<string, string>, scope: string, stamp: string, stampAt: number, stampWidth: number }} _Face
+ */
 
 /**
  * @param {LoggerOptions} options
@@ -283,24 +403,114 @@ const _create = (options) => {
     stderr: options.stderr,
     file: typeof options.file === "string" ? { path: options.file } : options.file,
     fields: options.fields ?? {},
+    redact: options.redact,
+    onLog: options.onLog,
   };
   /** @type {string[]} */
   const groups = [];
   /** @type {Map<string, bigint>} */
   const timers = new Map();
 
+  // Everything below is worked out from the settings, and again when they change.
+  let threshold = 0;
+  let debugScope = false;
+  /** @type {{ open: string, close: string, regex: RegExp }} */
+  let delimiter;
+  /** @type {Set<string> | undefined} */
+  let secrets;
+  /** @type {_LogFile | undefined} */
+  let file;
+  /** @type {{ stdout?: _Face, stderr?: _Face, file?: _Face }} */
+  let faces = {};
+
+  const refresh = () => {
+    threshold = LEVELS[settings.level];
+    // DEBUG=db,http:* turns debug on for those scopes only, whatever the level.
+    debugScope = _debugScope(process.env.DEBUG, settings.scope);
+    const { open, close } = settings.delimiter;
+    delimiter = { open, close, regex: new RegExp(`${_escape(open)}([\\s\\S]*?)${_escape(close)}`, "g") };
+    secrets = settings.redact?.length ? new Set(settings.redact.map((key) => String(key).toLowerCase())) : undefined;
+    file = settings.file ? _openFile(settings.file) : undefined;
+    faces = {};
+  };
+
   /** @param {"stdout" | "stderr"} which */
   const streamOf = (which) => (which === "stderr" ? settings.stderr ?? process.stderr : settings.stdout ?? process.stdout);
 
-  /** @param {"stdout" | "stderr"} which */
+  /** @param {"stdout" | "stderr" | "file"} which */
   const paletteOf = (which) => {
+    if (which === "file" || settings.colors === false) return color.create(0);
     if (settings.colors === true) return color.create(color.level > 0 ? color.level : 3);
-    if (settings.colors === false) return color.create(0);
     const stream = streamOf(which);
     return stream === process.stdout || stream === process.stderr ? color.create(color.detect(/** @type {any} */ (stream))) : color.create(0);
   };
 
-  const plain = color.create(0);
+  /**
+   * @param {"stdout" | "stderr" | "file"} which
+   * @returns {_Face}
+   */
+  const faceOf = (which) => {
+    let face = faces[which];
+    if (face) return face;
+    const palette = paletteOf(which);
+    face = { palette, colors: palette.level > 0, labels: {}, scope: settings.scope ? palette.magenta(`[${settings.scope}]`) : "", stamp: "", stampAt: -1, stampWidth: 0 };
+    for (const kind of Object.keys(BADGES)) face.labels[kind] = BADGES[kind].label ? _style(palette, BADGES[kind].style.split(" "), BADGES[kind].label) : "";
+    faces[which] = face;
+    return face;
+  };
+
+  /**
+   * The timestamp, written again only when the second changes.
+   * @param {_Face} face
+   * @param {Date} now
+   */
+  const stampOf = (face, now) => {
+    const second = Math.floor(now.getTime() / 1000);
+    if (second === face.stampAt) return;
+    face.stampAt = second;
+    // A pattern, or a time zone set with time.setTimezone(), needs the real formatter.
+    const text = typeof settings.timestamp === "string" || timeConfig.timeZone !== undefined
+      ? require("./Time.js").format(now, typeof settings.timestamp === "string" ? settings.timestamp : "HH:mm:ss")
+      : `${_two(now.getHours())}:${_two(now.getMinutes())}:${_two(now.getSeconds())}`;
+    face.stamp = `${face.palette.gray(`[${text}]`)} `;
+    face.stampWidth = color.width(text) + 3;
+  };
+
+  /**
+   * @param {_Face} face
+   * @param {keyof typeof BADGES} kind
+   * @param {unknown[]} args
+   * @param {Date} now
+   * @param {boolean} stamped
+   * @returns {string}
+   */
+  const render = (face, kind, args, now, stamped) => {
+    const { palette } = face;
+    let body = "";
+    for (let i = 0; i < args.length; i++) {
+      const text = _markup(_stringify(args[i], face.colors, secrets), delimiter, palette);
+      body += (i ? " " : "") + (face.colors && (kind === "debug" || kind === "trace") ? palette.gray(text) : text);
+    }
+    let prefix = "";
+    let padWidth = 0;
+    if (stamped) {
+      stampOf(face, now);
+      prefix = face.stamp;
+      padWidth = face.stampWidth;
+    }
+    if (groups.length) {
+      prefix += "  ".repeat(groups.length);
+      padWidth += groups.length * 2;
+    }
+    if (face.scope) prefix += `${face.scope} `;
+    if (face.labels[kind]) prefix += `${face.labels[kind]} `;
+    if (body.indexOf("\n") === -1) return (prefix + body).trimEnd();
+    const lines = body.replace(TRIM_LINES, "").split(/\r?\n/);
+    const pad = " ".repeat(padWidth);
+    let out = (prefix + lines[0]).trimEnd();
+    for (let i = 1; i < lines.length; i++) out += `\n${pad}${lines[i]}`;
+    return out;
+  };
 
   /**
    * @param {keyof typeof BADGES} kind
@@ -308,34 +518,30 @@ const _create = (options) => {
    */
   const emit = (kind, args) => {
     const badge = BADGES[kind];
-    if (LEVELS[badge.level] < LEVELS[settings.level] || settings.level === "silent") return;
+    if (LEVELS[badge.level] < threshold && !(debugScope && threshold !== Infinity && (kind === "debug" || kind === "trace"))) return;
+    const now = new Date();
+    const stream = streamOf(badge.stream);
     if (settings.format === "json") {
-      const line = _json(kind === "log" ? "info" : kind, args, settings.scope, settings.fields);
-      streamOf(badge.stream).write(`${line}\n`);
-      if (settings.file) _writeFile(settings.file, line);
-      return;
+      const line = _json(kind === "log" ? "info" : kind, args, settings.scope, settings.fields, secrets, now);
+      stream.write(`${line}\n`);
+      if (file) _writeFile(file, line);
+    } else {
+      const face = faceOf(badge.stream);
+      const line = render(face, kind, args, now, Boolean(settings.timestamp));
+      stream.write(`${line}\n`);
+      // The file gets the same line without colors: the one just made, when it has none.
+      if (file) _writeFile(file, face.colors ? render(faceOf("file"), kind, args, now, Boolean(settings.timestamp)) : line);
     }
-    const render = (/** @type {import("./Color").ColorModule} */ palette) => {
-      const colors = palette.level > 0;
-      const stamp = settings.timestamp
-        ? _style(palette, ["gray"], `[${time.format(new Date(), typeof settings.timestamp === "string" ? settings.timestamp : "HH:mm:ss")}]`)
-        : "";
-      const scope = settings.scope ? _style(palette, ["magenta"], `[${settings.scope}]`) : "";
-      const label = badge.label ? _style(palette, badge.style.split(" "), badge.label) : "";
-      const body = args
-        .map((arg) => _markup(_stringify(arg, colors), settings.delimiter, palette))
-        .map((text) => (kind === "debug" || kind === "trace" ? _style(palette, ["gray"], text) : text))
-        .join(" ");
-      const indent = "  ".repeat(groups.length);
-      const tags = [scope, label].filter(Boolean).join(" ");
-      const prefix = `${stamp ? `${stamp} ` : ""}${indent}${tags ? `${tags} ` : ""}`;
-      const lines = body.replace(/^(\s*\r?\n)+|(\r?\n\s*)+$/g, "").split(/\r?\n/);
-      const pad = " ".repeat(color.width(stamp ? `${stamp} ` : "") + indent.length);
-      return lines.map((line, i) => (i === 0 ? `${prefix}${line}`.trimEnd() : pad + line)).join("\n");
-    };
-    streamOf(badge.stream).write(`${render(paletteOf(badge.stream))}\n`);
-    if (settings.file) _writeFile(settings.file, render(plain));
+    if (settings.onLog) {
+      try {
+        settings.onLog({ time: now, level: badge.level, kind: /** @type {LogEntry["kind"]} */ (kind), scope: settings.scope, message: render(faceOf("file"), kind, args, now, false), args });
+      } catch {
+        // A broken hook must not take the program down with it.
+      }
+    }
   };
+
+  refresh();
 
   /** @type {Logger} */
   const logger = {
@@ -365,10 +571,10 @@ const _create = (options) => {
       if (start === undefined) return logger.warn(`Timer "${label}" does not exist`);
       timers.delete(label);
       const ms = Number(process.hrtime.bigint() - start) / 1e6;
-      return logger.log(`${label}: ${ms < 1000 ? `${Math.round(ms * 100) / 100}ms` : time.formatDuration(ms, { units: 2 })}`);
+      return logger.log(`${label}: ${ms < 1000 ? `${Math.round(ms * 100) / 100}ms` : require("./Time.js").formatDuration(ms, { units: 2 })}`);
     },
-    table: (rows, tableOptions) => logger.log(require("./Cli.js").table(rows, { ...tableOptions, colors: paletteOf("stdout").level > 0 })),
-    box: (text, boxOptions) => logger.log(require("./Cli.js").box(text, { ...boxOptions, colors: paletteOf("stdout").level > 0 })),
+    table: (rows, tableOptions) => logger.log(require("./Cli.js").table(rows, { ...tableOptions, colors: faceOf("stdout").colors })),
+    box: (text, boxOptions) => logger.log(require("./Cli.js").box(text, { ...boxOptions, colors: faceOf("stdout").colors })),
     divider: (title) => {
       const columns = /** @type {any} */ (streamOf("stdout")).columns ?? 80;
       const width = Math.max(10, Math.min(columns, 100) - (settings.timestamp ? 11 : 0) - groups.length * 2);
@@ -383,12 +589,13 @@ const _create = (options) => {
         scope: settings.scope ? `${settings.scope}:${scope}` : scope,
       }),
     setLevel: (level) => {
-      if (!(level in LEVELS)) throw new RangeError(`Unknown log level "${level}"`);
+      if (!Object.hasOwn(LEVELS, level)) throw new RangeError(`Unknown log level "${level}"`);
       settings.level = level;
+      threshold = LEVELS[level];
       return logger;
     },
     getLevel: () => settings.level,
-    isLevelEnabled: (level) => settings.level !== "silent" && LEVELS[level] >= LEVELS[settings.level],
+    isLevelEnabled: (level) => threshold !== Infinity && (LEVELS[level] >= threshold || (debugScope && (level === "debug" || level === "trace"))),
     configure: (next) => {
       if (next.level !== undefined) logger.setLevel(next.level);
       if (next.scope !== undefined) settings.scope = next.scope;
@@ -400,6 +607,9 @@ const _create = (options) => {
       if (next.stderr !== undefined) settings.stderr = next.stderr;
       if (next.file !== undefined) settings.file = typeof next.file === "string" ? { path: next.file } : next.file;
       if (next.fields !== undefined) settings.fields = next.fields;
+      if (next.redact !== undefined) settings.redact = next.redact;
+      if (next.onLog !== undefined) settings.onLog = next.onLog;
+      refresh();
       return logger;
     },
   };

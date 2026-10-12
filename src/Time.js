@@ -139,8 +139,7 @@ const shared = require("./internal/shared.js");
 
 const { MS, intl, unitOf: _unit, setLongTimeout: _longTimeout } = shared;
 
-/** Global defaults. English by default so output never depends on the machine. */
-const _config = { locale: "en", timeZone: /** @type {string | undefined} */ (undefined) };
+const _config = shared.timeConfig;
 
 /**
  * @param {DateInput | undefined} value
