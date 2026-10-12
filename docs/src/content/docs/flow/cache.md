@@ -22,7 +22,7 @@ const user = await users.getOrSet(id, () => db.users.find(id));
 
 If a hundred requests ask for the same missing key at the same moment, the loader runs once and they all get its result. If the loader fails, nothing is cached and the error reaches every caller.
 
-If you `delete()` the key or `clear()` the cache while a load is running, the callers still get the loaded value, but it is not stored.
+If you `delete()` the key, `clear()` the cache or `set()` the key yourself while a load is running, the callers still get the loaded value, but it is not stored.
 
 ## Serving a stale value
 

@@ -840,3 +840,5 @@ Options for `writeJSON()`.
 | `spaces?` | `number` | Defaults to `2`. |
 | `atomic?` | `boolean` | Defaults to `true`. |
 | `replacer?` | `((key: string, value: unknown) => unknown)` | Passed to `JSON.stringify`. |
+| `mode?` | `number` | Permissions, like `0o600` for secrets. A file that already exists keeps the ones it has. |
+| `fsync?` | `boolean` | Wait until the data is on the disk before returning. |

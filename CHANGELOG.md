@@ -16,8 +16,8 @@ did change are listed under "Changed".
 - **logger**: `redact` hides the keys you name in everything that is logged, `onLog` receives each entry
   (`LogEntry`) to forward it to another service, and `DEBUG=db,http:*` chooses which scopes print their
   debug lines.
-- **fs**: `fs.findUp()` (also `nc.findUp()`) walks up the folders to find a file, `writeFile(..., { fsync })`
-  waits for the disk, and watchers emit `"error"`.
+- **fs**: `fs.findUp()` (also `nc.findUp()`) walks up the folders to find a file, `writeFile()` and
+  `writeJSON()` take `fsync` to wait for the disk, and watchers emit `"error"`.
 - **checker**: `isHostname`, `isMACAddress`, `isIBAN`, `isE164`, `isObjectId`, `isULID`, `isDataURL`,
   `isMimeType`, `isTimeZone`, `isLocale`, `isCron` and `isASCII`.
 - **env**: `env.example()` writes a `.env.example` from your specification, and `load({ cascade })` reads
@@ -25,7 +25,8 @@ did change are listed under "Changed".
 - **schema**: `pipe()`, `discriminatedUnion()`, `toJSONSchema()`, object `required()`, `merge()` and
   `keyof()`, number `gt()`, `lt()` and `safe()`, string `date()`, `slug()`, `hex()`, `base64()`, `ulid()`,
   `semver()` and `hostname()`. `safeParse()` gives the list of `issues` without building an error.
-- **http**: `params` fills a path such as `"users/:id"`, `schema` validates and types the response,
+- **http**: `params` fills a path such as `"users/:id"`, `schema` validates the response and gives
+  `data` its type,
   `cookies` lists every `Set-Cookie`, headers can be a `Headers` object or pairs, and retries take `jitter`
   and text delays (`"2s"`).
 - **SQLite**: filters and sorts on JSON paths (`"settings.theme"`), `paginate()`, `increment()`,
@@ -86,7 +87,9 @@ Behaviours that differ from 2.0. Each one fixes something that was wrong or unsa
 - **logger**: `DEBUG=name` only turns on the debug lines of the scopes it names (it used to turn on all
   of them). `DEBUG=*`, `DEBUG=1` and `LOG_LEVEL=debug` show everything.
 - **time**: `startOf()`, `endOf()`, `add()` and `diff()` follow `setTimezone()` instead of the system zone.
-  `add(date, "soon")` throws a `TypeError` (unreadable text used to add nothing).
+  Adding whole days or weeks keeps the time of day when the clocks change in between (it added 24 hours
+  per day); `"24h"` stays exact. `add(date, "soon")` throws a `TypeError` (unreadable text used to add
+  nothing), and so does a unit that does not exist (it was read as milliseconds).
 - **crypto**: `decrypt()` always fails with a `NodeComfortError` whose code is `ERR_DECRYPT` (malformed
   input used to throw a `TypeError`), and refuses shortened authentication tags. `hash()` and `hmac()`
   throw a `TypeError` for `null`, `undefined`, plain objects and empty secrets. `safeEqual()` returns
@@ -102,9 +105,11 @@ Behaviours that differ from 2.0. Each one fixes something that was wrong or unsa
 - **schema**: `pick()`, `omit()`, `partial()` and `extend()` keep `strict()`. Names inherited from
   `Object.prototype` (`toString`, `constructor`) are never read from the input.
 - **SQLite**: a column whose default is `CURRENT_TIMESTAMP` gets the time of the insert (it used to store
-  that text). Columns of joins and renamed columns are converted like the others, with Node 22.16 or later.
+  that text), and with `dates: true` the dates SQLite writes itself are read as UTC. Columns of joins and renamed columns are converted like the others, with Node 22.16 or later.
 - **env**: in `load()`, the first file that defines a variable wins, whatever `override` says. `override`
-  only decides whether files may replace what was already in the environment.
+  only decides whether files may replace what was already in the environment. A file you load yourself
+  wins over the `.env` loaded at startup, so `.env.local` and `cascade` work without turning anything off.
+  A reference such as `${HOST}` takes the value `HOST` really ends up with.
 - **sys**: `run()` rejects on a timeout it cannot read (it used to mean no timeout), and on Windows a
   timeout or an abort stops the whole process tree.
 - **fs**: an atomic write keeps the permissions of the file it replaces.
@@ -112,7 +117,8 @@ Behaviours that differ from 2.0. Each one fixes something that was wrong or unsa
   `f(undefined)` with `f(null)`, and accepts `bigint` arguments.
 - **num**: `min()` and `max()` return `NaN` when one value is `NaN`, like `Math.min()`. `sum([0.1, 0.2, 0.3])`
   is `0.6`.
-- **obj**: `unset()` on an array index removes the item instead of leaving a hole. `clone()` keeps class
+- **obj**: `isEmpty()` looks inside a `Map` and a `Set`, and is `false` for a `Date`, a `RegExp` and an
+  `Error`. `unset()` on an array index removes the item instead of leaving a hole. `clone()` keeps class
   instances and copies buffers. `merge()` never shares a nested object with its inputs.
 - **checker**: `isEmpty()` is `false` for a `Date`, a `RegExp` and an `Error`.
 - **utils**: `JSONString()` never throws, and writes an error with its name, message and stack.
@@ -128,7 +134,12 @@ Behaviours that differ from 2.0. Each one fixes something that was wrong or unsa
 - `num.formatBytes()` and `num.abbreviate()` change unit when rounding reaches the next one (`"1 MB"`,
   not `"1024 KB"`).
 - `isYesterday()` and `isTomorrow()` are right on the days the clocks change.
-- `cache.getOrSet()` respects a `delete()` or a `clear()` made while the value was loading.
+- `cache.getOrSet()` respects a `delete()`, a `clear()` or a `set()` made while the value was loading.
+- A shutdown handler that never finishes can no longer let the process end with a success code.
+- An async `onLog` hook that fails no longer stops the process.
+- Deleting a watched folder on Windows sent events without end. The watcher now reports it once and stops.
+- `http.download()` reports a connection cut in the middle as an `HttpError` with the code `ERR_NETWORK`.
+- `str.truncate()` never returns more than the length asked for, even when the omission is longer.
 - `emitter.off()` removes a listener added with `once()`.
 - `http` keeps every `Set-Cookie` header and reads the status of an error response in all cases.
 - Tables no longer fail on very large inputs, and progress bars print labels that contain `$`.

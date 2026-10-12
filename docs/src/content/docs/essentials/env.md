@@ -109,7 +109,9 @@ nc.env.load([".env.local", ".env"]);
 
 `load()` works in two steps. It reads the files, and the first file to define a variable wins: here `.env.local` goes before `.env`. Then it puts the result in `process.env`, keeping the variables that are already there unless you pass `override: true`. `override` never changes the order between the files.
 
-The `.env` loaded at startup counts as already there: a later `load()` adds the variables `.env` doesn't define and leaves the others alone. `override: true` lifts that, but it also lets the files replace the real environment. So when several files define the same variables, turn the automatic loading off and let one `load()` read them all.
+The `.env` loaded at startup is the exception: what it set has the lowest priority, so a file you load yourself wins over it. `nc.env.load(".env.local")` does what you expect, with nothing to turn off. The real environment still wins over every file.
+
+A reference such as `${HOST}` takes the value `HOST` ends up with. If the environment or `.env.local` sets `HOST`, a `URL=http://${HOST}` in `.env` follows it.
 
 `load()` returns everything it read from the files. Missing files are skipped, unless you pass `required: true`.
 
@@ -124,11 +126,7 @@ nc.env.load(".env", { cascade: true });
 
 The mode is `NODE_ENV`, or `"development"` when it isn't set. Pass a string to name it yourself: `{ cascade: "staging" }`. In `test` mode `.env.local` is left out, so tests run the same for everyone.
 
-Remember that the `.env` loaded at startup has already set its variables, so the more specific files can't replace them. Turn the automatic loading off where you use a cascade:
-
-```bash
-NODE_COMFORT_DOTENV=false node app.js
-```
+The `.env` loaded at startup doesn't get in the way: the more specific files replace what it set.
 
 ## What a .env file can contain
 

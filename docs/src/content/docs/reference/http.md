@@ -288,13 +288,13 @@ Retry settings.
 
 | Property | Type | Description |
 | --- | --- | --- |
-| `attempts?` | `number` | Total attempts, the first included. Defaults to `3` for methods that are safe to repeat, `1` for the others. |
+| `attempts?` | `number` | Total attempts, the first included. Defaults to `3` for methods that are safe to repeat, `1` for the others. A number you give applies to every method, POST included. |
 | `delay?` | `string \| number` | Wait before the first retry, in ms or like `"1s"`. Defaults to `300`. |
 | `backoff?` | `number` | Multiplies the wait after each attempt. Defaults to `2`. |
 | `maxDelay?` | `string \| number` | Longest wait, `Retry-After` included. Defaults to 30 seconds. |
 | `jitter?` | `boolean` | Shorten each wait by a random amount, up to half of it, so many clients don't all come back at the same instant. |
 | `statuses?` | `number[]` | Statuses worth retrying. Defaults to 408, 413, 429, 500, 502, 503 and 504. |
-| `methods?` | [`HttpMethod`](#httpmethod)`[]` | Methods allowed to retry. POST and PATCH aren't, by default, so nothing gets created twice. |
+| `methods?` | [`HttpMethod`](#httpmethod)`[]` | Methods retried when you give no number of attempts. POST and PATCH aren't, by default, so nothing gets created twice. |
 
 ### QueryParams
 
