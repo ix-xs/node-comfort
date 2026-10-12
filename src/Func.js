@@ -10,14 +10,16 @@
  * const [error, user] = await func.to(getUser(id));
  */
 
+const { types } = require("node:util");
 const { TimeoutError, AbortError } = require("./errors.js");
+const { toMs, sleep: _sleep, setLongTimeout, argsKey } = require("./internal/shared.js");
 
 /**
  * Options for `debounce()`.
  * @typedef {object} DebounceOptions
  * @property {boolean} [leading] Call right away at the start of a burst.
  * @property {boolean} [trailing] Call once the burst is over. Defaults to `true`.
- * @property {number} [maxWait] Never postpone a call longer than this, in ms, even if calls keep coming.
+ * @property {number | string} [maxWait] Never postpone a call longer than this, even if calls keep coming. In ms, or like `"2s"`.
  */
 
 /**
@@ -43,8 +45,8 @@ const { TimeoutError, AbortError } = require("./errors.js");
 /**
  * Options for `memoize()`.
  * @typedef {object} MemoizeOptions
- * @property {(...args: any[]) => unknown} [resolver] Builds the cache key from the arguments. Defaults to the arguments as JSON.
- * @property {number} [ttl] How long a result stays cached, in ms.
+ * @property {(...args: any[]) => unknown} [resolver] Builds the cache key from the arguments. By default, primitives are compared by value, plain objects and arrays by content, anything else by identity.
+ * @property {number | string} [ttl] How long a result stays cached, in ms or like `"5m"`.
  * @property {number} [max] Maximum number of results; the least recently used goes first.
  * @property {boolean} [cacheRejections] Keep rejected promises. By default they're dropped so the next call tries again.
  */
@@ -59,9 +61,9 @@ const { TimeoutError, AbortError } = require("./errors.js");
  * Options for `retry()`.
  * @typedef {object} RetryOptions
  * @property {number} [attempts] Total attempts, the first one included. Defaults to `3`.
- * @property {number | ((attempt: number, error: unknown) => number)} [delay] Wait before the next attempt, in ms, or a function that computes it.
+ * @property {number | string | ((attempt: number, error: unknown) => number)} [delay] Wait before the next attempt, in ms or like `"1s"`, or a function that computes it.
  * @property {number} [backoff] Multiplies the delay after each failure: `2` gives 200, 400, 800... Defaults to `1`.
- * @property {number} [maxDelay] Cap for the computed delay, in ms.
+ * @property {number | string} [maxDelay] Cap for the computed delay.
  * @property {number} [jitter] Randomizes the delay, from `0` (none) to `1` (anywhere between 0 and 2x). Stops many clients from retrying in sync.
  * @property {(error: unknown, attempt: number) => boolean | Promise<boolean>} [shouldRetry] Return `false` to give up early, for example on a 4xx error.
  * @property {(error: unknown, attempt: number, delay: number) => void} [onRetry] Called before each wait, for logs or metrics.
@@ -69,23 +71,18 @@ const { TimeoutError, AbortError } = require("./errors.js");
  */
 
 /**
- * @param {number} ms
- * @param {AbortSignal} [signal]
- * @returns {Promise<void>}
+ * Options for `batch()`.
+ * @typedef {object} BatchOptions
+ * @property {number | string} [wait] How long to collect calls before running. By default, calls made in the same tick go together.
+ * @property {number} [max] Run as soon as this many calls are waiting.
  */
-const _sleep = (ms, signal) =>
-  new Promise((resolve, reject) => {
-    if (signal?.aborted) return reject(new AbortError(undefined, { cause: signal.reason }));
-    const timer = setTimeout(() => {
-      signal?.removeEventListener("abort", onAbort);
-      resolve();
-    }, ms);
-    const onAbort = () => {
-      clearTimeout(timer);
-      reject(new AbortError(undefined, { cause: signal?.reason }));
-    };
-    signal?.addEventListener("abort", onAbort, { once: true });
-  });
+
+/**
+ * A batched function. `flush()` runs the waiting calls now.
+ * @template I
+ * @template R
+ * @typedef {((item: I) => Promise<R>) & { flush(): void }} BatchedFunction
+ */
 
 /**
  * Waits for a pause of `wait` ms between calls, then runs once with the
@@ -99,18 +96,20 @@ const _sleep = (ms, signal) =>
  *
  * @template {(...args: any[]) => any} F
  * @param {F} fn
- * @param {number} wait Pause needed, in ms.
+ * @param {number | string} wait Pause needed, in ms or like `"300ms"`.
  * @param {DebounceOptions} [options]
  * @returns {DebouncedFunction<F>}
  */
 function debounce(fn, wait, options = {}) {
+  const delay = toMs(wait, "wait");
   const leading = options.leading ?? false;
   const trailing = options.trailing ?? true;
-  const maxWait = options.maxWait;
+  const maxWait = options.maxWait === undefined ? undefined : toMs(options.maxWait, "maxWait");
   /** @type {NodeJS.Timeout | undefined} */
   let timer;
-  /** @type {NodeJS.Timeout | undefined} */
-  let maxTimer;
+  let active = false;
+  let lastCall = 0;
+  let burstStart = 0;
   /** @type {any[] | undefined} */
   let lastArgs;
   /** @type {unknown} */
@@ -123,43 +122,48 @@ function debounce(fn, wait, options = {}) {
     lastThis = undefined;
     if (args) fn.apply(self, args);
   };
-  const clearTimers = () => {
-    clearTimeout(timer);
-    clearTimeout(maxTimer);
-    timer = undefined;
-    maxTimer = undefined;
+  // One timer per burst: it checks how long ago the last call was instead of
+  // being reset on every call, which keeps busy call sites cheap.
+  const check = () => {
+    const now = Date.now();
+    const quiet = now - lastCall;
+    const overdue = maxWait !== undefined && now - burstStart >= maxWait;
+    if (quiet >= delay || quiet < 0 || overdue) {
+      timer = undefined;
+      active = false;
+      if (trailing || overdue) invoke();
+      else lastArgs = lastThis = undefined;
+      return;
+    }
+    const untilMax = maxWait === undefined ? Infinity : maxWait - (now - burstStart);
+    timer = setTimeout(check, Math.min(delay - quiet, untilMax));
   };
 
   /** @type {any} */
   const debounced = /** @this {any} */ function(/** @type {any[]} */ ...args) {
-    const isFirst = timer === undefined;
     lastArgs = args;
     lastThis = this;
+    lastCall = Date.now();
+    if (active) return;
+    active = true;
+    burstStart = lastCall;
+    timer = setTimeout(check, maxWait === undefined ? delay : Math.min(delay, maxWait));
+    if (leading) invoke();
+  };
+  const stop = () => {
     clearTimeout(timer);
-    timer = setTimeout(() => {
-      clearTimers();
-      if (trailing) invoke();
-      else lastArgs = undefined;
-    }, wait);
-    if (maxWait !== undefined && maxTimer === undefined) {
-      maxTimer = setTimeout(() => {
-        clearTimers();
-        invoke();
-      }, maxWait);
-    }
-    if (leading && isFirst) {
-      invoke();
-    }
+    timer = undefined;
+    active = false;
   };
   debounced.cancel = () => {
-    clearTimers();
-    lastArgs = undefined;
+    stop();
+    lastArgs = lastThis = undefined;
   };
   debounced.flush = () => {
-    clearTimers();
+    stop();
     invoke();
   };
-  debounced.pending = () => timer !== undefined && lastArgs !== undefined;
+  debounced.pending = () => active && lastArgs !== undefined;
   return debounced;
 }
 
@@ -172,11 +176,12 @@ function debounce(fn, wait, options = {}) {
  *
  * @template {(...args: any[]) => any} F
  * @param {F} fn
- * @param {number} wait Minimum gap between calls, in ms.
+ * @param {number | string} interval Minimum gap between calls, in ms or like `"1s"`.
  * @param {ThrottleOptions} [options]
  * @returns {ThrottledFunction<F>}
  */
-function throttle(fn, wait, options = {}) {
+function throttle(fn, interval, options = {}) {
+  const wait = toMs(interval, "wait");
   const leading = options.leading ?? true;
   const trailing = options.trailing ?? true;
   let last = 0;
@@ -260,27 +265,37 @@ function once(fn) {
  */
 function memoize(fn, options = {}) {
   const opts = typeof options === "function" ? { resolver: options } : options;
+  const ttl = opts.ttl === undefined ? 0 : toMs(opts.ttl, "ttl");
+  const max = opts.max;
+  const resolver = opts.resolver;
   /** @type {Map<unknown, { value: any, expires: number }>} */
   const cache = new Map();
-  /** @type {(args: any[]) => unknown} */
-  const keyOf = (args) => {
-    if (opts.resolver) return opts.resolver(...args);
-    if (args.length === 1 && (args[0] === null || typeof args[0] !== "object")) return args[0];
-    return JSON.stringify(args);
-  };
+  let sweepAt = 256;
 
   /** @type {any} */
   const memoized = /** @this {any} */ function(/** @type {any[]} */ ...args) {
-    const key = keyOf(args);
+    const key = resolver ? resolver(...args) : argsKey(args);
     const hit = cache.get(key);
-    if (hit && (hit.expires === 0 || hit.expires > Date.now())) {
+    if (hit !== undefined) {
+      if (hit.expires === 0 || hit.expires > Date.now()) {
+        if (max !== undefined) {
+          cache.delete(key);
+          cache.set(key, hit);
+        }
+        return hit.value;
+      }
       cache.delete(key);
-      cache.set(key, hit);
-      return hit.value;
     }
     const value = fn.apply(this, args);
-    cache.set(key, { value, expires: opts.ttl ? Date.now() + opts.ttl : 0 });
-    if (opts.max !== undefined && cache.size > opts.max) cache.delete(cache.keys().next().value);
+    cache.set(key, { value, expires: ttl ? Date.now() + ttl : 0 });
+    if (max !== undefined) {
+      if (cache.size > max) cache.delete(cache.keys().next().value);
+    } else if (ttl && cache.size >= sweepAt) {
+      // Without a size limit, expired results would pile up: drop them now and then.
+      const now = Date.now();
+      for (const [k, entry] of cache) if (entry.expires <= now) cache.delete(k);
+      sweepAt = Math.max(256, cache.size * 2);
+    }
     if (!opts.cacheRejections && value && typeof value.then === "function") {
       value.then(undefined, () => {
         if (cache.get(key)?.value === value) cache.delete(key);
@@ -290,7 +305,7 @@ function memoize(fn, options = {}) {
   };
   memoized.cache = cache;
   memoized.clear = () => cache.clear();
-  memoized.delete = (/** @type {any[]} */ ...args) => cache.delete(keyOf(args));
+  memoized.delete = (/** @type {any[]} */ ...args) => cache.delete(resolver ? resolver(...args) : argsKey(args));
   return memoized;
 }
 
@@ -315,7 +330,8 @@ function memoize(fn, options = {}) {
 async function retry(fn, options = {}) {
   const attempts = Math.max(1, options.attempts ?? 3);
   const backoff = options.backoff ?? 1;
-  const maxDelay = options.maxDelay ?? Infinity;
+  const maxDelay = options.maxDelay === undefined ? Infinity : toMs(options.maxDelay, "maxDelay");
+  const delay = typeof options.delay === "function" || options.delay === undefined ? 0 : toMs(options.delay, "delay");
   const jitter = Math.min(1, Math.max(0, options.jitter ?? 0));
   /** @type {unknown} */
   let lastError;
@@ -326,8 +342,10 @@ async function retry(fn, options = {}) {
     } catch (error) {
       lastError = error;
       if (attempt >= attempts) break;
+      // A cancelled operation was stopped on purpose: trying again would undo that.
+      if (error instanceof Error && error.name === "AbortError") break;
       if (options.shouldRetry && !(await options.shouldRetry(error, attempt))) break;
-      const base = typeof options.delay === "function" ? options.delay(attempt, error) : (options.delay ?? 0) * backoff ** (attempt - 1);
+      const base = typeof options.delay === "function" ? options.delay(attempt, error) : delay * backoff ** (attempt - 1);
       const wait = Math.max(0, Math.round(Math.min(base, maxDelay) * (1 + jitter * (Math.random() * 2 - 1))));
       options.onRetry?.(error, attempt, wait);
       if (wait > 0) await _sleep(wait, options.signal);
@@ -337,27 +355,36 @@ async function retry(fn, options = {}) {
 }
 
 /**
- * Rejects with a `TimeoutError` if the promise takes longer than `ms`.
+ * Rejects with a `TimeoutError` if the promise takes longer than `ms`. Pass
+ * a function to get an `AbortSignal` that fires when time is up, so the work
+ * actually stops instead of running on in the background.
  *
  * @example
  * const res = await func.timeout(fetch(url), 5000);
  * const rows = await func.timeout(() => slowQuery(), 2000, "Database too slow");
  *
  * @template T
- * @param {PromiseLike<T> | (() => PromiseLike<T> | T)} promise A promise, or a function that returns one.
- * @param {number} ms
+ * @param {PromiseLike<T> | ((signal: AbortSignal) => PromiseLike<T> | T)} promise A promise, or a function that returns one. The function gets a signal that aborts on timeout.
+ * @param {number | string} ms The limit, in ms or like `"5s"`. `Infinity` means no limit.
  * @param {string} [message]
  * @returns {Promise<Awaited<T>>}
  * @throws {TimeoutError}
  */
 function timeout(promise, ms, message) {
-  /** @type {NodeJS.Timeout | undefined} */
-  let timer;
+  const limit = toMs(ms, "timeout");
+  const controller = typeof promise === "function" ? new AbortController() : undefined;
+  const target = Promise.resolve().then(() => (typeof promise === "function" ? promise(/** @type {AbortController} */ (controller).signal) : promise));
+  if (limit === Infinity) return /** @type {Promise<Awaited<T>>} */ (target);
+  /** @type {() => void} */
+  let cancel = () => {};
   const expired = new Promise((_, reject) => {
-    timer = setTimeout(() => reject(new TimeoutError(message ?? `Operation timed out after ${ms}ms`, { timeout: ms })), ms);
+    cancel = setLongTimeout(() => {
+      const error = new TimeoutError(message ?? `Operation timed out after ${limit}ms`, { timeout: limit });
+      controller?.abort(error);
+      reject(error);
+    }, limit);
   });
-  const target = Promise.resolve().then(() => (typeof promise === "function" ? promise() : promise));
-  return /** @type {Promise<Awaited<T>>} */ (Promise.race([target, expired]).finally(() => clearTimeout(timer)));
+  return /** @type {Promise<Awaited<T>>} */ (Promise.race([target, expired]).finally(() => cancel()));
 }
 
 /**
@@ -368,12 +395,12 @@ function timeout(promise, ms, message) {
  *
  * @template {(...args: any[]) => any} F
  * @param {F} fn
- * @param {number} ms
+ * @param {number | string} ms In ms, or like `"2s"`.
  * @param {Parameters<F>} args
  * @returns {Promise<Awaited<ReturnType<F>>>}
  */
 async function delay(fn, ms, ...args) {
-  await _sleep(ms);
+  await _sleep(toMs(ms, "delay"));
   return fn(...args);
 }
 
@@ -559,6 +586,126 @@ function compose(...fns) {
 }
 
 /**
+ * Like `pipe()`, for functions that may be async: each one is awaited
+ * before the next runs.
+ *
+ * @example
+ * const publish = func.pipeAsync(loadDraft, renderMarkdown, uploadToCDN);
+ * const url = await publish(postId);
+ *
+ * @param {...((...args: any[]) => any)} fns
+ * @returns {(...args: any[]) => Promise<any>}
+ */
+function pipeAsync(...fns) {
+  return async (...args) => {
+    if (!fns.length) return args[0];
+    let result = await fns[0](...args);
+    for (let i = 1; i < fns.length; i++) result = await fns[i](result);
+    return result;
+  };
+}
+
+/**
+ * Turns many single calls into few grouped ones. Calls made close together
+ * are collected, `fn` runs once with all their items, and each caller gets
+ * its own result. The classic cure for "N+1 queries".
+ *
+ * @example
+ * const loadUser = func.batch(async (ids) => {
+ *   const users = await db.getAll("users", { id: ids });
+ *   return ids.map((id) => users.find((user) => user.id === id));
+ * });
+ * // One query, however many places ask at once:
+ * const [ada, bob] = await Promise.all([loadUser(1), loadUser(2)]);
+ *
+ * @template I
+ * @template R
+ * @param {(items: I[]) => ReadonlyArray<R | Error> | Map<I, R | Error> | PromiseLike<ReadonlyArray<R | Error> | Map<I, R | Error>>} fn Gets every waiting item and returns one result per item, in the same order, or a `Map` keyed by item. An `Error` as a result rejects that call only.
+ * @param {BatchOptions} [options]
+ * @returns {BatchedFunction<I, R>}
+ */
+function batch(fn, options = {}) {
+  const wait = options.wait === undefined ? 0 : toMs(options.wait, "wait");
+  const max = Math.max(1, options.max ?? Infinity);
+  /** @type {Array<{ item: I, resolve: (value: R) => void, reject: (reason: unknown) => void }>} */
+  let waiting = [];
+  /** @type {NodeJS.Timeout | undefined} */
+  let timer;
+  let scheduled = false;
+
+  const flush = () => {
+    scheduled = false;
+    clearTimeout(timer);
+    const current = waiting;
+    waiting = [];
+    if (!current.length) return;
+    Promise.resolve()
+      .then(() => fn(current.map((entry) => entry.item)))
+      .then((results) => {
+        const byItem = types.isMap(results);
+        if (!byItem && (!Array.isArray(results) || results.length !== current.length)) {
+          throw new TypeError(`batch(): expected ${current.length} results, one per item, got ${Array.isArray(results) ? results.length : typeof results}`);
+        }
+        current.forEach((entry, i) => {
+          const result = byItem ? /** @type {Map<I, R | Error>} */ (results).get(entry.item) : /** @type {ReadonlyArray<R | Error>} */ (results)[i];
+          if (types.isNativeError(result)) entry.reject(result);
+          else entry.resolve(/** @type {R} */ (result));
+        });
+      })
+      .catch((error) => {
+        for (const entry of current) entry.reject(error);
+      });
+  };
+
+  /** @type {any} */
+  const batched = (/** @type {I} */ item) =>
+    new Promise((resolve, reject) => {
+      waiting.push({ item, resolve, reject });
+      if (waiting.length >= max) return flush();
+      if (scheduled) return;
+      scheduled = true;
+      if (wait > 0) timer = setTimeout(flush, wait);
+      // After the promise jobs of this tick, so calls made from resolved promises join the batch too.
+      else void Promise.resolve().then(() => process.nextTick(flush));
+    });
+  batched.flush = flush;
+  return batched;
+}
+
+/**
+ * Makes concurrent calls with the same arguments share one run. Once it
+ * settles, the next call starts a new one: nothing is cached.
+ *
+ * @example
+ * const refreshToken = func.dedupe(async () => (await api.post("auth/refresh")).data);
+ * // Ten requests hit a 401 at once: one refresh, ten answers.
+ *
+ * @template {(...args: any[]) => any} F
+ * @param {F} fn
+ * @param {(...args: Parameters<F>) => unknown} [keyOf] Builds the key that identifies a call. Defaults to its arguments.
+ * @returns {(...args: Parameters<F>) => Promise<Awaited<ReturnType<F>>>}
+ */
+function dedupe(fn, keyOf) {
+  /** @type {Map<unknown, Promise<any>>} */
+  const running = new Map();
+  return /** @this {any} */ function(...args) {
+    const key = keyOf ? keyOf(...args) : argsKey(args);
+    const current = running.get(key);
+    if (current) return current;
+    /** @type {Promise<any>} */
+    let started;
+    try {
+      started = Promise.resolve(fn.apply(this, args));
+    } catch (error) {
+      started = Promise.reject(error);
+    }
+    const promise = started.finally(() => running.delete(key));
+    running.set(key, promise);
+    return promise;
+  };
+}
+
+/**
  * Lets you pass a function's arguments a few at a time.
  *
  * @example
@@ -680,7 +827,10 @@ module.exports = {
   to,
   attempt,
   promisify,
+  batch,
+  dedupe,
   pipe,
+  pipeAsync,
   compose,
   curry,
   partial,

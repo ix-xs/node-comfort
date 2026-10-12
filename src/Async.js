@@ -14,6 +14,7 @@
  */
 
 const { AbortError, TimeoutError } = require("./errors.js");
+const { toMs } = require("./internal/shared.js");
 const { retry, timeout } = require("./Func.js");
 
 /**
@@ -22,6 +23,12 @@ const { retry, timeout } = require("./Func.js");
  * @property {number} [concurrency] How many run at the same time. No limit by default.
  * @property {boolean} [stopOnError] Stop at the first error. With `false`, everything runs and you get an `AggregateError` of all failures. Defaults to `true`.
  * @property {AbortSignal} [signal] Stops starting new work and rejects with an `AbortError`.
+ */
+
+/**
+ * A rate limiter from `rateLimit()`. Call it with a function to run it as
+ * soon as the rate allows.
+ * @typedef {(<T>(fn: () => T | PromiseLike<T>) => Promise<Awaited<T>>) & { readonly pendingCount: number }} RateLimiter
  */
 
 /**
@@ -95,13 +102,104 @@ const { retry, timeout } = require("./Func.js");
  */
 
 /** @param {number | string | undefined} value */
-const _ms = (value) => {
-  if (value === undefined) return undefined;
-  if (typeof value === "number") return value;
-  const ms = require("./Time.js").parseDuration(value);
-  if (ms === null) throw new TypeError(`Invalid duration: ${value}`);
-  return ms;
-};
+const _ms = (value) => (value === undefined ? undefined : toMs(value));
+
+/**
+ * A first-in first-out list where taking the first item costs nothing,
+ * unlike `Array.prototype.shift` on a long array.
+ * @template T
+ */
+class _Fifo {
+  /** @type {T[]} */
+  #items = [];
+  #head = 0;
+
+  /** @param {T} item */
+  push(item) {
+    this.#items.push(item);
+  }
+
+  /** @returns {T | undefined} */
+  shift() {
+    if (this.#head >= this.#items.length) return undefined;
+    const item = this.#items[this.#head];
+    this.#items[this.#head++] = /** @type {any} */ (undefined);
+    if (this.#head > 1024 && this.#head * 2 > this.#items.length) {
+      this.#items = this.#items.slice(this.#head);
+      this.#head = 0;
+    }
+    return item;
+  }
+
+  clear() {
+    this.#items = [];
+    this.#head = 0;
+  }
+
+  get size() {
+    return this.#items.length - this.#head;
+  }
+}
+
+/**
+ * A binary heap: the entry with the highest priority comes out first, and
+ * entries with the same priority come out in the order they went in.
+ * @template {{ priority: number, order: number }} T
+ */
+class _Heap {
+  /** @type {T[]} */
+  #items = [];
+
+  /**
+   * @param {T} a
+   * @param {T} b
+   */
+  #before(a, b) {
+    return a.priority > b.priority || (a.priority === b.priority && a.order < b.order);
+  }
+
+  /** @param {T} item */
+  push(item) {
+    const items = this.#items;
+    let i = items.length;
+    items.push(item);
+    while (i > 0) {
+      const parent = (i - 1) >> 1;
+      if (!this.#before(item, items[parent])) break;
+      items[i] = items[parent];
+      i = parent;
+    }
+    items[i] = item;
+  }
+
+  /** @returns {T | undefined} */
+  pop() {
+    const items = this.#items;
+    const top = items[0];
+    const last = items.pop();
+    if (items.length && last !== undefined) {
+      let i = 0;
+      const half = items.length >> 1;
+      while (i < half) {
+        let child = i * 2 + 1;
+        if (child + 1 < items.length && this.#before(items[child + 1], items[child])) child++;
+        if (!this.#before(items[child], last)) break;
+        items[i] = items[child];
+        i = child;
+      }
+      items[i] = last;
+    }
+    return top;
+  }
+
+  clear() {
+    this.#items = [];
+  }
+
+  get size() {
+    return this.#items.length;
+  }
+}
 
 /**
  * Waits for a while. Same as `nc.wait()`.
@@ -119,10 +217,12 @@ function sleep(duration, options = {}) {
 
 /**
  * Maps items through an async function, with at most `concurrency` calls
- * at once. Results stay in order.
+ * at once. Results stay in order. Items are taken from the source as slots
+ * free up, so a stream is never read faster than it's processed.
  *
  * @example
  * const users = await async.map(ids, (id) => api.getUser(id), { concurrency: 10 });
+ * await async.forEach(readline.createInterface({ input }), importLine, { concurrency: 20 });
  *
  * @template T
  * @template R
@@ -132,67 +232,108 @@ function sleep(duration, options = {}) {
  * @returns {Promise<Array<Awaited<R>>>}
  * @throws The first error, an `AggregateError` with `stopOnError: false`, or an `AbortError`.
  */
-async function map(items, fn, options = {}) {
-  /** @type {T[]} */
-  const list = [];
-  if (Symbol.asyncIterator in Object(items)) for await (const item of /** @type {AsyncIterable<T>} */ (items)) list.push(item);
-  else for (const item of /** @type {Iterable<T>} */ (items)) list.push(item);
+function map(items, fn, options = {}) {
   const concurrency = Math.max(1, options.concurrency ?? Infinity);
   const stopOnError = options.stopOnError ?? true;
+  const signal = options.signal;
   /** @type {Array<Awaited<R>>} */
-  const results = new Array(list.length);
+  const results = [];
   /** @type {unknown[]} */
   const errors = [];
-  let next = 0;
-  let failed = false;
 
-  await new Promise((resolve, reject) => {
-    if (!list.length) return resolve(undefined);
+  return new Promise((resolve, reject) => {
+    const source = /** @type {any} */ (items);
+    const isAsync = source !== null && source !== undefined && typeof source[Symbol.asyncIterator] === "function";
+    /** @type {Iterator<T> | AsyncIterator<T>} */
+    let iterator;
+    try {
+      iterator = isAsync ? source[Symbol.asyncIterator]() : source[Symbol.iterator]();
+    } catch (error) {
+      return reject(error);
+    }
+    let started = 0;
     let active = 0;
-    let done = 0;
-    const onAbort = () => {
-      failed = true;
-      reject(new AbortError(undefined, { cause: options.signal?.reason }));
+    let exhausted = false;
+    let pulling = false;
+    let settled = false;
+
+    /** @param {unknown} [error] */
+    const end = (error) => {
+      if (settled) return;
+      settled = true;
+      signal?.removeEventListener("abort", onAbort);
+      // Stopped early: let the source release what it holds (an open file, a cursor).
+      if (!exhausted) void Promise.resolve().then(() => iterator.return?.()).catch(() => {});
+      if (error !== undefined) return reject(error);
+      results.length = started;
+      const failures = errors.filter((e) => e !== undefined);
+      if (failures.length) reject(new AggregateError(failures, `${failures.length} of ${started} tasks failed`));
+      else resolve(results);
     };
-    if (options.signal?.aborted) return onAbort();
-    options.signal?.addEventListener("abort", onAbort, { once: true });
-    const launch = () => {
-      while (active < concurrency && next < list.length && !failed) {
-        const index = next++;
-        active++;
-        Promise.resolve()
-          .then(() => fn(list[index], index))
-          .then(
-            (value) => {
-              results[index] = /** @type {Awaited<R>} */ (value);
-            },
-            (error) => {
-              if (stopOnError) {
-                failed = true;
-                options.signal?.removeEventListener("abort", onAbort);
-                reject(error);
-              } else {
-                errors[index] = error;
-              }
-            },
-          )
-          .finally(() => {
-            active--;
-            done++;
-            if (failed) return;
-            if (done === list.length) {
-              options.signal?.removeEventListener("abort", onAbort);
-              if (errors.length) reject(new AggregateError(errors.filter((e) => e !== undefined), `${errors.filter((e) => e !== undefined).length} of ${list.length} tasks failed`));
-              else resolve(undefined);
-            } else {
-              launch();
-            }
-          });
+    const onAbort = () => end(new AbortError(undefined, { cause: signal?.reason }));
+
+    /**
+     * @param {T} item
+     * @param {number} index
+     */
+    const run = (item, index) => {
+      active++;
+      /** @type {Promise<any>} */
+      let work;
+      try {
+        work = Promise.resolve(fn(item, index));
+      } catch (error) {
+        work = Promise.reject(error);
       }
+      work.then(
+        (value) => {
+          results[index] = value;
+        },
+        (error) => {
+          if (stopOnError) end(error ?? new Error("Task failed"));
+          else errors[index] = error ?? new Error("Task failed");
+        },
+      ).then(() => {
+        active--;
+        pump();
+      });
     };
-    launch();
+
+    const pump = () => {
+      if (settled || pulling) return;
+      while (!exhausted && active < concurrency) {
+        /** @type {any} */
+        let step;
+        try {
+          step = iterator.next();
+        } catch (error) {
+          return end(error ?? new Error("Iterator failed"));
+        }
+        if (isAsync) {
+          pulling = true;
+          /** @type {Promise<IteratorResult<T>>} */ (step).then(
+            (result) => {
+              pulling = false;
+              if (settled) return;
+              if (result.done) exhausted = true;
+              else run(result.value, started++);
+              pump();
+            },
+            (error) => end(error ?? new Error("Iterator failed")),
+          );
+          return;
+        }
+        if (step.done) exhausted = true;
+        else run(step.value, started++);
+        if (settled) return;
+      }
+      if (exhausted && active === 0) end();
+    };
+
+    if (signal?.aborted) return onAbort();
+    signal?.addEventListener("abort", onAbort, { once: true });
+    pump();
   });
-  return results;
 }
 
 /**
@@ -227,9 +368,10 @@ async function forEach(items, fn, options = {}) {
 async function filter(items, predicate, options = {}) {
   /** @type {T[]} */
   const list = [];
-  if (Symbol.asyncIterator in Object(items)) for await (const item of /** @type {AsyncIterable<T>} */ (items)) list.push(item);
-  else for (const item of /** @type {Iterable<T>} */ (items)) list.push(item);
-  const keep = await map(list, predicate, options);
+  const keep = await map(items, (item, index) => {
+    list[index] = item;
+    return predicate(item, index);
+  }, options);
   return list.filter((_, i) => keep[i]);
 }
 
@@ -251,6 +393,23 @@ async function series(tasks) {
 }
 
 /**
+ * Runs async functions at the same time, or a few at once with
+ * `concurrency`, and returns their results in order.
+ *
+ * @example
+ * const [users, posts] = await async.parallel([() => loadUsers(), () => loadPosts()]);
+ * await async.parallel(jobs, { concurrency: 4 });
+ *
+ * @template T
+ * @param {Iterable<() => T | PromiseLike<T>>} tasks
+ * @param {MapOptions} [options]
+ * @returns {Promise<Array<Awaited<T>>>}
+ */
+function parallel(tasks, options = {}) {
+  return map(tasks, (task) => task(), options);
+}
+
+/**
  * A limiter: wrap calls with it, and at most `concurrency` run at once
  * while the rest wait their turn. Like `p-limit`.
  *
@@ -264,17 +423,19 @@ async function series(tasks) {
 function limit(concurrency) {
   let max = Math.max(1, concurrency);
   let active = 0;
-  /** @type {Array<() => void>} */
-  const waiting = [];
+  /** @type {_Fifo<() => void>} */
+  const waiting = new _Fifo();
   /** @type {Array<() => void>} */
   let idleWaiters = [];
   const next = () => {
-    if (active < max && waiting.length) {
+    while (active < max && waiting.size) {
       active++;
       /** @type {() => void} */ (waiting.shift())();
-    } else if (active === 0 && !waiting.length) {
-      for (const resolve of idleWaiters) resolve();
+    }
+    if (active === 0 && !waiting.size && idleWaiters.length) {
+      const resolvers = idleWaiters;
       idleWaiters = [];
+      for (const resolve of resolvers) resolve();
     }
   };
   /** @type {any} */
@@ -293,17 +454,62 @@ function limit(concurrency) {
     });
   Object.defineProperties(limiter, {
     activeCount: { get: () => active },
-    pendingCount: { get: () => waiting.length },
+    pendingCount: { get: () => waiting.size },
     concurrency: {
       get: () => max,
       set: (/** @type {number} */ value) => {
         max = Math.max(1, value);
-        while (active < max && waiting.length) next();
+        next();
       },
     },
-    clearQueue: { value: () => void waiting.splice(0) },
-    onIdle: { value: () => (active === 0 && !waiting.length ? Promise.resolve() : new Promise((resolve) => idleWaiters.push(() => resolve(undefined)))) },
+    clearQueue: { value: () => waiting.clear() },
+    onIdle: { value: () => (active === 0 && !waiting.size ? Promise.resolve() : new Promise((resolve) => idleWaiters.push(() => resolve(undefined)))) },
   });
+  return limiter;
+}
+
+/**
+ * A rate limiter: at most `max` calls start within any `interval`. Made
+ * for APIs that allow, say, 10 requests per second.
+ *
+ * @example
+ * const throttled = async.rateLimit(10, "1s");
+ * const pages = await Promise.all(ids.map((id) => throttled(() => api.get(`items/${id}`))));
+ *
+ * @param {number} max How many calls may start per interval.
+ * @param {number | string} interval The window, in ms or like `"1s"`.
+ * @returns {RateLimiter}
+ */
+function rateLimit(max, interval) {
+  const perWindow = Math.max(1, Math.floor(max));
+  const windowMs = toMs(interval, "interval");
+  /** @type {number[]} */
+  const starts = [];
+  /** @type {_Fifo<() => void>} */
+  const waiting = new _Fifo();
+  /** @type {NodeJS.Timeout | undefined} */
+  let timer;
+
+  const pump = () => {
+    timer = undefined;
+    while (waiting.size) {
+      const now = Date.now();
+      while (starts.length && now - starts[0] >= windowMs) starts.shift();
+      if (starts.length >= perWindow) {
+        timer = setTimeout(pump, Math.max(1, starts[0] + windowMs - now));
+        return;
+      }
+      starts.push(now);
+      /** @type {() => void} */ (waiting.shift())();
+    }
+  };
+  /** @type {any} */
+  const limiter = (/** @type {() => unknown} */ fn) =>
+    new Promise((resolve, reject) => {
+      waiting.push(() => void Promise.resolve().then(fn).then(resolve, reject));
+      if (timer === undefined) pump();
+    });
+  Object.defineProperty(limiter, "pendingCount", { get: () => waiting.size });
   return limiter;
 }
 
@@ -326,15 +532,15 @@ function queue(options = {}) {
   let running = 0;
   let order = 0;
   const taskTimeout = _ms(options.timeout);
-  /** @type {Array<{ run: () => void, priority: number, order: number }>} */
-  const waiting = [];
+  /** @type {_Heap<{ run: () => void, priority: number, order: number }>} */
+  const waiting = new _Heap();
   /** @type {Array<() => void>} */
   let idle = [];
   /** @type {Array<() => void>} */
   let empty = [];
 
   const check = () => {
-    if (!waiting.length) {
+    if (!waiting.size) {
       for (const resolve of empty) resolve();
       empty = [];
       if (running === 0) {
@@ -344,8 +550,8 @@ function queue(options = {}) {
     }
   };
   const pump = () => {
-    while (!paused && running < concurrency && waiting.length) {
-      const task = /** @type {{ run: () => void }} */ (waiting.shift());
+    while (!paused && running < concurrency && waiting.size) {
+      const task = /** @type {{ run: () => void }} */ (waiting.pop());
       running++;
       task.run();
     }
@@ -369,9 +575,7 @@ function queue(options = {}) {
               });
           },
         };
-        const index = waiting.findIndex((w) => w.priority < entry.priority);
-        if (index === -1) waiting.push(entry);
-        else waiting.splice(index, 0, entry);
+        waiting.push(entry);
         pump();
       });
     },
@@ -388,17 +592,17 @@ function queue(options = {}) {
       return self;
     },
     clear() {
-      waiting.splice(0);
+      waiting.clear();
       check();
     },
     onIdle() {
-      return !waiting.length && running === 0 ? Promise.resolve() : new Promise((resolve) => idle.push(() => resolve(undefined)));
+      return !waiting.size && running === 0 ? Promise.resolve() : new Promise((resolve) => idle.push(() => resolve(undefined)));
     },
     onEmpty() {
-      return !waiting.length ? Promise.resolve() : new Promise((resolve) => empty.push(() => resolve(undefined)));
+      return !waiting.size ? Promise.resolve() : new Promise((resolve) => empty.push(() => resolve(undefined)));
     },
     get size() {
-      return waiting.length;
+      return waiting.size;
     },
     get pending() {
       return running;
@@ -527,12 +731,7 @@ async function settle(promises) {
 async function props(object) {
   const keys = Object.keys(object);
   const values = await Promise.all(keys.map((key) => object[key]));
-  /** @type {any} */
-  const out = {};
-  keys.forEach((key, i) => {
-    out[key] = values[i];
-  });
-  return out;
+  return /** @type {any} */ (Object.fromEntries(keys.map((key, i) => [key, values[i]])));
 }
 
 /**
@@ -553,18 +752,48 @@ async function poll(fn, options = {}) {
   const interval = _ms(options.interval) ?? 100;
   const limitMs = _ms(options.timeout);
   const deadline = limitMs === undefined ? Infinity : Date.now() + limitMs;
+  /** @type {unknown} */
+  let lastError;
   for (;;) {
     if (options.signal?.aborted) throw new AbortError(undefined, { cause: options.signal.reason });
     try {
       const value = await fn();
       if (value) return /** @type {NonNullable<Awaited<T>>} */ (value);
-    } catch {
-      // not ready yet
+      lastError = undefined;
+    } catch (error) {
+      // Not ready yet. Kept, so a timeout can say why.
+      lastError = error;
     }
     const remaining = deadline - Date.now();
-    if (remaining <= 0) throw new TimeoutError(`poll() timed out after ${limitMs}ms`, { timeout: limitMs });
+    if (remaining <= 0) throw new TimeoutError(`poll() timed out after ${limitMs}ms`, { timeout: limitMs, cause: lastError });
     await sleep(Math.min(interval, remaining), { signal: options.signal });
   }
+}
+
+/**
+ * Makes any promise give up when a signal fires. The work behind it keeps
+ * running unless it listens to the signal too.
+ *
+ * @example
+ * const controller = new AbortController();
+ * const rows = await async.abortable(slowQuery(), controller.signal);
+ *
+ * @template T
+ * @param {T | PromiseLike<T>} promise
+ * @param {AbortSignal} [signal]
+ * @returns {Promise<Awaited<T>>}
+ * @throws {AbortError} When the signal fires first.
+ */
+function abortable(promise, signal) {
+  if (!signal) return /** @type {Promise<Awaited<T>>} */ (Promise.resolve(promise));
+  if (signal.aborted) return Promise.reject(new AbortError(undefined, { cause: signal.reason }));
+  return new Promise((resolve, reject) => {
+    const onAbort = () => reject(new AbortError(undefined, { cause: signal.reason }));
+    signal.addEventListener("abort", onAbort, { once: true });
+    Promise.resolve(promise)
+      .then(/** @type {any} */ (resolve), reject)
+      .finally(() => signal.removeEventListener("abort", onAbort));
+  });
 }
 
 module.exports = {
@@ -573,13 +802,16 @@ module.exports = {
   forEach,
   filter,
   series,
+  parallel,
   limit,
+  rateLimit,
   queue,
   mutex,
   deferred,
   settle,
   props,
   poll,
+  abortable,
   retry,
   timeout,
 };

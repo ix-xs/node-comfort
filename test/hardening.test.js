@@ -7,7 +7,8 @@ const { describe, it } = require("node:test");
 const assert = require("node:assert/strict");
 const nc = require("..");
 
-const { str, num, arr, obj, errors } = nc;
+const { str, num, arr, obj, errors, func, time } = nc;
+const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
 describe("errors", () => {
   it("an explicit undefined code keeps the default one", () => {
@@ -370,5 +371,407 @@ describe("obj", () => {
     assert.deepEqual(obj.update({}, "items", (items = []) => [...items, 1]), { items: [1] });
     assert.equal(JSON.stringify(obj.sortKeys({ b: 1, a: { d: 1, c: [{ z: 1, y: 2 }] } })), '{"a":{"c":[{"y":2,"z":1}],"d":1},"b":1}');
     assert.deepEqual(obj.paths({ db: { host: "x", port: 1 }, tags: ["a"] }), ["db.host", "db.port", "tags"]);
+  });
+});
+
+describe("func", () => {
+  it("durations can be written as text", async () => {
+    let calls = 0;
+    const save = func.debounce(() => calls++, "10ms");
+    save();
+    save();
+    save();
+    await sleep(40);
+    assert.equal(calls, 1);
+    assert.throws(() => func.debounce(() => {}, "soon"), TypeError);
+    assert.throws(() => func.throttle(() => {}, "soon"), TypeError);
+  });
+
+  it("debounce keeps the last arguments and maxWait still fires during a long burst", async () => {
+    /** @type {number[]} */
+    const seen = [];
+    const save = func.debounce((n) => seen.push(n), 15, { maxWait: 40 });
+    for (let i = 0; i < 12; i++) {
+      save(i);
+      await sleep(8);
+    }
+    await sleep(40);
+    assert.ok(seen.length >= 2, "maxWait fired before the burst ended");
+    assert.equal(seen.at(-1), 11);
+  });
+
+  it("memoize doesn't mix up arguments that print the same", () => {
+    let calls = 0;
+    const id = func.memoize((value) => (calls++, typeof value));
+    assert.deepEqual([id(1), id("1"), id(null), id(undefined), id("null"), id(1n), id(true), id("true")], [
+      "number", "string", "object", "undefined", "string", "bigint", "boolean", "string",
+    ]);
+    assert.equal(calls, 8);
+    const pair = func.memoize((a, b) => `${a}|${b}`);
+    assert.equal(pair("a,b", "c"), "a,b|c");
+    assert.equal(pair("a", "b,c"), "a|b,c");
+  });
+
+  it("memoize drops entries past their ttl and past max", async () => {
+    let calls = 0;
+    const cached = func.memoize((n) => (calls++, n), { ttl: "15ms", max: 2 });
+    cached(1);
+    cached(1);
+    assert.equal(calls, 1);
+    await sleep(30);
+    cached(1);
+    assert.equal(calls, 2);
+    cached(2);
+    cached(1);
+    cached(3);
+    cached(1);
+    assert.equal(calls, 4, "1 was used last, so 2 was dropped");
+  });
+
+  it("retry gives up at once when the work was aborted", async () => {
+    let tries = 0;
+    await assert.rejects(
+      func.retry(() => {
+        tries++;
+        throw new errors.AbortError("stop");
+      }, { retries: 5, delay: 1 }),
+      { name: "AbortError" },
+    );
+    assert.equal(tries, 1);
+    let later = 0;
+    assert.equal(await func.retry(() => (++later < 3 ? Promise.reject(new Error("x")) : "ok"), { retries: 3, delay: "1ms" }), "ok");
+  });
+
+  it("timeout tells the task to stop", async () => {
+    /** @type {AbortSignal | undefined} */
+    let seen;
+    await assert.rejects(
+      func.timeout((signal) => {
+        seen = signal;
+        return sleep(200);
+      }, "10ms"),
+      { name: "TimeoutError", timeout: 10 },
+    );
+    assert.equal(seen?.aborted, true);
+    assert.equal(await func.timeout(Promise.resolve(1), Infinity), 1);
+    await assert.rejects(func.timeout(Promise.reject(new Error("own")), 50), { message: "own" });
+  });
+
+  it("pipeAsync, batch and dedupe", async () => {
+    const run = func.pipeAsync((n) => n + 1, async (n) => n * 2, String);
+    assert.equal(await run(1), "4");
+
+    /** @type {number[][]} */
+    const batches = [];
+    const load = func.batch(async (ids) => {
+      batches.push(ids);
+      return ids.map((id) => (id === 3 ? new Error("missing") : id * 10));
+    });
+    const [a, b, c] = await Promise.allSettled([load(1), load(2), load(3)]);
+    assert.deepEqual(batches, [[1, 2, 3]]);
+    assert.equal(a.status === "fulfilled" && a.value, 10);
+    assert.equal(b.status === "fulfilled" && b.value, 20);
+    assert.equal(c.status, "rejected");
+
+    const small = func.batch(async (ids) => new Map(ids.map((id) => [id, id + 1])), { max: 2 });
+    assert.deepEqual(await Promise.all([small(1), small(2), small(3)]), [2, 3, 4]);
+    await assert.rejects(func.batch(async () => [])(1), TypeError);
+
+    let calls = 0;
+    const fetchUser = func.dedupe(async (id) => {
+      calls++;
+      await sleep(5);
+      return { id };
+    });
+    const [x, y, z] = await Promise.all([fetchUser(1), fetchUser(1), fetchUser(2)]);
+    assert.equal(x, y);
+    assert.notEqual(x, z);
+    assert.equal(calls, 2);
+    await fetchUser(1);
+    assert.equal(calls, 3, "nothing is cached once the call has settled");
+  });
+});
+
+describe("async", () => {
+  it("map takes items from a generator only when a slot is free, and closes it on failure", async () => {
+    let pulled = 0;
+    let closed = false;
+    function* numbers() {
+      try {
+        for (let i = 1; i <= 100; i++) {
+          pulled++;
+          yield i;
+        }
+      } finally {
+        closed = true;
+      }
+    }
+    await assert.rejects(
+      nc.async.map(numbers(), async (n) => {
+        await sleep(1);
+        if (n === 3) throw new Error("boom");
+        return n;
+      }, { concurrency: 2 }),
+      { message: "boom" },
+    );
+    assert.ok(pulled < 10, `pulled ${pulled} items`);
+    assert.equal(closed, true);
+
+    async function* later() {
+      yield 1;
+      yield 2;
+      yield 3;
+    }
+    assert.deepEqual(await nc.async.map(later(), (n) => n * 2, { concurrency: 2 }), [2, 4, 6]);
+    assert.deepEqual(await nc.async.filter(later(), (n) => n !== 2), [1, 3]);
+  });
+
+  it("limit and queue run tasks in the order they came, priorities first", async () => {
+    /** @type {number[]} */
+    const order = [];
+    const limit = nc.async.limit(1);
+    await Promise.all([1, 2, 3, 4].map((n) => limit(async () => void order.push(n))));
+    assert.deepEqual(order, [1, 2, 3, 4]);
+
+    /** @type {string[]} */
+    const ran = [];
+    const queue = nc.async.queue({ concurrency: 1 });
+    queue.add(async () => void ran.push("first"));
+    queue.add(async () => void ran.push("low"));
+    queue.add(async () => void ran.push("also low"));
+    queue.add(async () => void ran.push("vip"), { priority: 10 });
+    await queue.onIdle();
+    assert.deepEqual(ran, ["first", "vip", "low", "also low"]);
+  });
+
+  it("poll says why it gave up", async () => {
+    const error = await nc.async.poll(() => {
+      throw new Error("not ready");
+    }, { interval: 2, timeout: 20 }).catch((e) => e);
+    assert.equal(error.name, "TimeoutError");
+    assert.equal(error.cause?.message, "not ready");
+  });
+
+  it("parallel, rateLimit and abortable", async () => {
+    assert.deepEqual(await nc.async.parallel([() => 1, async () => 2, () => 3], { concurrency: 2 }), [1, 2, 3]);
+
+    const limiter = nc.async.rateLimit(2, 120);
+    const started = Date.now();
+    /** @type {number[]} */
+    const at = [];
+    await Promise.all([1, 2, 3].map(() => limiter(() => void at.push(Date.now() - started))));
+    assert.ok(at[1] < 100, "the first two start at once");
+    assert.ok(at[2] >= 110, `the third waits for the next window, started after ${at[2]}ms`);
+
+    const controller = new AbortController();
+    const waiting = nc.async.abortable(sleep(200), controller.signal);
+    controller.abort();
+    await assert.rejects(waiting, { name: "AbortError" });
+    assert.equal(await nc.async.abortable(Promise.resolve(5), new AbortController().signal), 5);
+  });
+});
+
+describe("cache", () => {
+  it("a value loaded for a key that was deleted meanwhile is not stored", async () => {
+    const cache = new nc.Cache();
+    /** @type {(value: string) => void} */
+    let finish = () => {};
+    const loading = cache.getOrSet("k", () => new Promise((resolve) => (finish = resolve)));
+    await sleep(1);
+    cache.delete("k");
+    finish("late");
+    assert.equal(await loading, "late");
+    assert.equal(cache.has("k"), false);
+  });
+
+  it("concurrent loads share one call, and a failure isn't cached", async () => {
+    const cache = new nc.Cache();
+    let loads = 0;
+    const [a, b] = await Promise.all([cache.getOrSet("k", async () => ++loads), cache.getOrSet("k", async () => ++loads)]);
+    assert.deepEqual([a, b, loads], [1, 1, 1]);
+    let tries = 0;
+    for (let i = 0; i < 2; i++) {
+      await assert.rejects(cache.getOrSet("bad", () => {
+        tries++;
+        throw new Error("x");
+      }));
+    }
+    assert.equal(tries, 2);
+  });
+
+  it("staleWhileRevalidate answers with the old value and refreshes behind", async () => {
+    let n = 0;
+    const cache = new nc.Cache({ ttl: 60, staleWhileRevalidate: "5s" });
+    assert.equal(await cache.getOrSet("k", () => ++n), 1);
+    await sleep(90);
+    assert.equal(cache.get("k"), undefined, "get() never returns a stale value");
+    assert.equal(await cache.getOrSet("k", () => ++n), 1);
+    await sleep(5);
+    assert.equal(await cache.getOrSet("k", () => ++n), 2);
+    assert.equal(n, 2);
+  });
+
+  it("the least recently used key goes first, expired keys don't pile up", async () => {
+    /** @type {string[]} */
+    const removed = [];
+    const cache = new nc.Cache({ max: 2, onRemove: (key, _value, reason) => removed.push(`${key}:${reason}`) });
+    cache.set("a", 1).set("b", 2);
+    cache.get("a");
+    cache.set("c", 3);
+    assert.deepEqual(cache.keys(), ["a", "c"]);
+    assert.deepEqual(removed, ["b:evict"]);
+
+    const short = new nc.Cache({ ttl: 1 });
+    for (let i = 0; i < 1100; i++) short.set(i, i);
+    await sleep(5);
+    for (let i = 2000; i < 3300; i++) short.set(i, i);
+    assert.ok(short.size < 2400, `kept ${short.size} entries`);
+  });
+
+  it("wrap tells arguments apart, and stats can be reset", async () => {
+    const cache = new nc.Cache();
+    let calls = 0;
+    const load = cache.wrap(async (a, b) => (calls++, `${a}${b}`));
+    await load(undefined, 1);
+    await load(null, 1);
+    await load("1", 1);
+    await load(1, 1);
+    await load(1, 1);
+    assert.equal(calls, 4);
+    assert.equal(cache.stats.hits, 1);
+    assert.deepEqual(cache.resetStats().stats, { hits: 0, misses: 0, sets: 0, evictions: 0, expirations: 0, hitRate: 0 });
+  });
+});
+
+describe("emitter", () => {
+  it("off() finds a listener added with once()", () => {
+    const emitter = new nc.Emitter();
+    let calls = 0;
+    const listener = () => calls++;
+    emitter.once("x", listener);
+    assert.deepEqual(emitter.listeners("x"), [listener]);
+    emitter.off("x", listener);
+    emitter.emit("x");
+    assert.equal(calls, 0);
+    assert.equal(emitter.listenerCount("x"), 0);
+  });
+
+  it("one signal removes many listeners", () => {
+    const emitter = new nc.Emitter();
+    const controller = new AbortController();
+    emitter.on("a", () => {}, { signal: controller.signal });
+    emitter.once("b", () => {}, { signal: controller.signal });
+    controller.abort();
+    assert.deepEqual(emitter.eventNames(), []);
+    emitter.on("c", () => {}, { signal: controller.signal });
+    assert.equal(emitter.listenerCount("c"), 0, "an aborted signal adds nothing");
+  });
+
+  it("listeners added or removed during an emit don't disturb it", () => {
+    const emitter = new nc.Emitter();
+    /** @type {string[]} */
+    const order = [];
+    const self = () => {
+      order.push("self");
+      emitter.off("x", self);
+      emitter.on("x", () => order.push("late"));
+    };
+    emitter.on("x", self);
+    emitter.on("x", () => order.push("second"));
+    emitter.emit("x");
+    emitter.emit("x");
+    assert.deepEqual(order, ["self", "second", "second", "late"]);
+  });
+
+  it("waitFor takes text durations and refuses nonsense", async () => {
+    const emitter = new nc.Emitter();
+    await assert.rejects(emitter.waitFor("never", { timeout: "10ms" }), { name: "TimeoutError", timeout: 10 });
+    await assert.rejects(emitter.waitFor("never", { timeout: "soon" }), TypeError);
+    assert.equal(emitter.listenerCount("never"), 0);
+  });
+});
+
+describe("time", () => {
+  const tokyo = { timeZone: "Asia/Tokyo" };
+  const paris = { timeZone: "Europe/Paris" };
+  const utc = { timeZone: "UTC" };
+  /** @param {Date | undefined} d */
+  const iso = (d) => d?.toISOString();
+
+  it("startOf and endOf follow the time zone", () => {
+    const d = "2024-03-14T10:05:07.042Z";
+    assert.equal(iso(time.startOf(d, "day", tokyo)), "2024-03-13T15:00:00.000Z");
+    assert.equal(iso(time.startOf(d, "month", tokyo)), "2024-02-29T15:00:00.000Z");
+    assert.equal(iso(time.startOf(d, "week", paris)), "2024-03-10T23:00:00.000Z");
+    assert.equal(iso(time.startOf(d, "hour", { timeZone: "Asia/Kolkata" })), "2024-03-14T09:30:00.000Z");
+    assert.equal(iso(time.endOf(d, "day", tokyo)), "2024-03-14T14:59:59.999Z");
+    // the day Paris moves its clocks forward is 23 hours long
+    assert.equal(iso(time.startOf("2024-03-31T12:00:00Z", "day", paris)), "2024-03-30T23:00:00.000Z");
+    assert.equal(iso(time.endOf("2024-03-31T12:00:00Z", "day", paris)), "2024-03-31T21:59:59.999Z");
+  });
+
+  it("the zone set with setTimezone() applies to date maths too", () => {
+    time.setTimezone("Asia/Tokyo");
+    try {
+      assert.equal(iso(time.startOf("2024-03-14T10:05:07Z", "day")), "2024-03-13T15:00:00.000Z");
+      assert.equal(iso(time.add("2024-01-31T23:30:00Z", 1, "month")), "2024-02-29T23:30:00.000Z");
+    } finally {
+      time.setTimezone(undefined);
+    }
+  });
+
+  it("add understands calendar units in text, and refuses what it can't read", () => {
+    assert.equal(iso(time.add("2024-01-31T00:00:00Z", "1 month", "ms", utc)), "2024-02-29T00:00:00.000Z");
+    assert.equal(iso(time.add("2024-01-01T00:00:00Z", "1y 2 months and 3 days", "ms", utc)), "2025-03-04T00:00:00.000Z");
+    assert.equal(iso(time.add("2024-01-01T00:00:00Z", "1h30m")), "2024-01-01T01:30:00.000Z");
+    assert.equal(iso(time.subtract("2024-03-31T00:00:00Z", "1 month", "ms", utc)), "2024-02-29T00:00:00.000Z");
+    assert.throws(() => time.add(new Date(), "soonish"), TypeError);
+  });
+
+  it("parse reads a date written with a pattern", () => {
+    assert.equal(iso(time.parse("15/01/2024 14:30", "DD/MM/YYYY HH:mm", utc)), "2024-01-15T14:30:00.000Z");
+    assert.equal(iso(time.parse("15 janvier 2024", "D MMMM YYYY", { locale: "fr", timeZone: "UTC" })), "2024-01-15T00:00:00.000Z");
+    assert.equal(iso(time.parse("Jan 5, 2024 3:07 PM", "MMM D, YYYY h:mm A", utc)), "2024-01-05T15:07:00.000Z");
+    assert.equal(iso(time.parse("2024-01-15 09:00", "YYYY-MM-DD HH:mm", tokyo)), "2024-01-15T00:00:00.000Z");
+    assert.equal(iso(time.parse("2024-01-15T09:00:00+02:00", "YYYY-MM-DD[T]HH:mm:ssZ")), "2024-01-15T07:00:00.000Z");
+    assert.equal(iso(time.parse("5th March 2024", "Do MMMM YYYY", utc)), "2024-03-05T00:00:00.000Z");
+    assert.equal(iso(time.parse("1705329000", "X")), "2024-01-15T14:30:00.000Z");
+    assert.equal(time.parse("31/02/2024", "DD/MM/YYYY"), undefined);
+    assert.equal(time.parse("nope", "DD/MM/YYYY"), undefined);
+  });
+
+  it("format knows ordinals and zone names", () => {
+    const d = new Date("2024-03-14T10:05:07.042Z");
+    assert.equal(time.format(d, "Do MMM YY, h:mm A z", { timeZone: "America/New_York", locale: "en-US" }), "14th Mar 24, 6:05 AM EDT");
+    assert.equal(time.format(d, "[Week] W, Q, d, X", utc), "Week 11, 1, 4, 1710410707");
+    assert.equal(time.format(d, "[only text]"), "only text");
+  });
+
+  it("isSame, range and fromUnix", () => {
+    assert.equal(time.isSame("2024-03-14T23:30:00Z", "2024-03-15T00:30:00Z", "day", utc), false);
+    assert.equal(time.isSame("2024-03-14T23:30:00Z", "2024-03-15T00:30:00Z", "day", tokyo), true);
+    assert.equal(time.range("2024-01-01T00:00:00Z", "2024-01-04T00:00:00Z").length, 4);
+    assert.deepEqual(
+      time.range("2024-01-31T00:00:00Z", "2024-05-01T00:00:00Z", "month", utc).map((d) => d.toISOString().slice(5, 10)),
+      ["01-31", "02-29", "03-31", "04-30"],
+    );
+    assert.equal(time.range("2024-01-01T00:00:00Z", "2024-01-01T01:00:00Z", "minute", { step: 15 }).length, 5);
+    assert.equal(iso(time.fromUnix(1705329000)), "2024-01-15T14:30:00.000Z");
+  });
+
+  it("cron: L is the last day of the month", () => {
+    assert.equal(iso(time.nextRun("0 0 L * *", { from: "2024-02-10T00:00:00Z", timeZone: "UTC" })), "2024-02-29T00:00:00.000Z");
+    assert.equal(iso(time.nextRun("0 12 15,L * *", { from: "2024-02-16T00:00:00Z", timeZone: "UTC" })), "2024-02-29T12:00:00.000Z");
+    assert.equal(nc.isCron("0 0 L * *"), true);
+    assert.equal(nc.isCron("0 0 1,,2 * *"), false);
+  });
+
+  it("calendar days, not 24 hour blocks, decide what yesterday is", () => {
+    const now = new Date();
+    const lateYesterday = new Date(now.getFullYear(), now.getMonth(), now.getDate() - 1, 23, 59);
+    const earlyTomorrow = new Date(now.getFullYear(), now.getMonth(), now.getDate() + 1, 0, 1);
+    assert.equal(time.isYesterday(lateYesterday), true);
+    assert.equal(time.isTomorrow(earlyTomorrow), true);
+    assert.equal(time.isToday(lateYesterday), false);
   });
 });

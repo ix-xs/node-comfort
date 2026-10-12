@@ -15,11 +15,18 @@
  */
 
 const { TimeoutError, AbortError } = require("./errors.js");
+const { toMs, setLongTimeout } = require("./internal/shared.js");
 
 /**
  * Event names mapped to their arguments, like
  * `{ ready: [], data: [chunk: Buffer], error: [error: Error] }`.
  * @typedef {Record<string, any[]>} EventMap
+ */
+
+/**
+ * Options for `on()` and `once()`.
+ * @typedef {object} ListenOptions
+ * @property {AbortSignal} [signal] Removes the listener when aborted. One signal can clean up many listeners at once.
  */
 
 /**
@@ -32,16 +39,59 @@ const { TimeoutError, AbortError } = require("./errors.js");
  */
 
 /**
+ * A listener as stored: `once()` wraps the function it was given and keeps
+ * it as `listener`, so `off()` can find it.
+ * @typedef {((...args: any[]) => unknown) & { listener?: Function }} StoredListener
+ */
+
+/** @type {readonly StoredListener[]} */
+const NONE = Object.freeze([]);
+
+/**
  * A typed event emitter. In JavaScript, give the variable a JSDoc type such
  * as `import("@ix-xs/node-comfort").Emitter<{ ready: [port: number] }>`.
  *
  * @template {EventMap} [Events=EventMap]
  */
 class Emitter {
-  /** @type {Map<keyof Events, Set<(...args: any[]) => unknown>>} */
+  // Listener lists are replaced, never changed in place: emit() can walk one
+  // without copying it, even if a listener adds or removes others meanwhile.
+  /** @type {Map<keyof Events, readonly StoredListener[]>} */
   #listeners = new Map();
-  /** @type {Set<(event: keyof Events, ...args: any[]) => unknown>} */
-  #any = new Set();
+  /** @type {readonly StoredListener[]} */
+  #any = NONE;
+
+  /**
+   * @param {keyof Events} event
+   * @param {StoredListener} stored
+   * @param {ListenOptions | undefined} options
+   * @returns {() => void}
+   */
+  #add(event, stored, options) {
+    const signal = options?.signal;
+    if (signal?.aborted) return () => {};
+    const current = this.#listeners.get(event) ?? NONE;
+    if (!current.includes(stored)) this.#listeners.set(event, [...current, stored]);
+    const off = () => {
+      signal?.removeEventListener("abort", off);
+      this.#drop(event, stored);
+    };
+    signal?.addEventListener("abort", off, { once: true });
+    return off;
+  }
+
+  /**
+   * @param {keyof Events} event
+   * @param {Function} listener The stored function, or the one given to `once()`.
+   */
+  #drop(event, listener) {
+    const current = this.#listeners.get(event);
+    if (!current) return;
+    const next = current.filter((stored) => stored !== listener && stored.listener !== listener);
+    if (next.length === current.length) return;
+    if (next.length) this.#listeners.set(event, next);
+    else this.#listeners.delete(event);
+  }
 
   /**
    * Listens to an event.
@@ -50,16 +100,19 @@ class Emitter {
    * const off = emitter.on("data", (chunk) => chunks.push(chunk));
    * off(); // stop listening
    *
+   * const controller = new AbortController();
+   * emitter.on("data", onData, { signal: controller.signal });
+   * emitter.on("end", onEnd, { signal: controller.signal });
+   * controller.abort(); // removes both
+   *
    * @template {keyof Events & string} K
    * @param {K} event
    * @param {(...args: Events[K]) => unknown} listener
+   * @param {ListenOptions} [options]
    * @returns {() => void} Removes the listener.
    */
-  on(event, listener) {
-    let set = this.#listeners.get(event);
-    if (!set) this.#listeners.set(event, (set = new Set()));
-    set.add(listener);
-    return () => this.off(event, listener);
+  on(event, listener, options) {
+    return this.#add(event, listener, options);
   }
 
   /**
@@ -68,15 +121,17 @@ class Emitter {
    * @template {keyof Events & string} K
    * @param {K} event
    * @param {(...args: Events[K]) => unknown} listener
+   * @param {ListenOptions} [options]
    * @returns {() => void} Removes the listener if it hasn't run yet.
    */
-  once(event, listener) {
-    /** @type {(...args: Events[K]) => unknown} */
+  once(event, listener, options) {
+    /** @type {StoredListener} */
     const wrapper = (...args) => {
       off();
-      return listener(...args);
+      return listener(.../** @type {Events[K]} */ (args));
     };
-    const off = this.on(event, wrapper);
+    wrapper.listener = listener;
+    const off = this.#add(event, wrapper, options);
     return off;
   }
 
@@ -91,8 +146,10 @@ class Emitter {
    * @returns {() => void} Removes the listener.
    */
   onAny(listener) {
-    this.#any.add(/** @type {any} */ (listener));
-    return () => void this.#any.delete(/** @type {any} */ (listener));
+    if (!this.#any.includes(listener)) this.#any = [...this.#any, listener];
+    return () => {
+      this.#any = this.#any.filter((stored) => stored !== listener);
+    };
   }
 
   /**
@@ -100,16 +157,12 @@ class Emitter {
    *
    * @template {keyof Events & string} K
    * @param {K} event
-   * @param {(...args: Events[K]) => unknown} [listener]
+   * @param {(...args: Events[K]) => unknown} [listener] The function given to `on()` or `once()`.
    * @returns {this}
    */
   off(event, listener) {
     if (!listener) this.#listeners.delete(event);
-    else {
-      const set = this.#listeners.get(event);
-      set?.delete(listener);
-      if (set && !set.size) this.#listeners.delete(event);
-    }
+    else this.#drop(event, listener);
     return this;
   }
 
@@ -126,10 +179,11 @@ class Emitter {
    * @returns {boolean} `true` if anyone was listening.
    */
   emit(event, ...args) {
-    const listeners = [...(this.#listeners.get(event) ?? [])];
-    for (const listener of listeners) listener(...args);
-    for (const listener of [...this.#any]) listener(event, ...args);
-    return listeners.length > 0 || this.#any.size > 0;
+    const listeners = this.#listeners.get(event);
+    const any = this.#any;
+    if (listeners !== undefined) for (let i = 0; i < listeners.length; i++) listeners[i](...args);
+    for (let i = 0; i < any.length; i++) any[i](event, ...args);
+    return listeners !== undefined || any.length > 0;
   }
 
   /**
@@ -146,8 +200,9 @@ class Emitter {
    */
   async emitAsync(event, ...args) {
     const results = [];
-    for (const listener of [...(this.#listeners.get(event) ?? [])]) results.push(await listener(...args));
-    for (const listener of [...this.#any]) await listener(event, ...args);
+    const any = this.#any;
+    for (const listener of this.#listeners.get(event) ?? NONE) results.push(await listener(...args));
+    for (const listener of any) await listener(event, ...args);
     return results;
   }
 
@@ -167,10 +222,11 @@ class Emitter {
    */
   waitFor(event, options = {}) {
     return new Promise((resolve, reject) => {
-      /** @type {NodeJS.Timeout | undefined} */
-      let timer;
+      const limit = options.timeout === undefined ? undefined : toMs(options.timeout, "timeout");
+      /** @type {() => void} */
+      let cancelTimer = () => {};
       const cleanup = () => {
-        clearTimeout(timer);
+        cancelTimer();
         off();
         options.signal?.removeEventListener("abort", onAbort);
       };
@@ -185,12 +241,11 @@ class Emitter {
       }));
       if (options.signal?.aborted) return onAbort();
       options.signal?.addEventListener("abort", onAbort, { once: true });
-      if (options.timeout !== undefined) {
-        const ms = typeof options.timeout === "number" ? options.timeout : require("./Time.js").parseDuration(options.timeout) ?? 0;
-        timer = setTimeout(() => {
+      if (limit !== undefined) {
+        cancelTimer = setLongTimeout(() => {
           cleanup();
-          reject(new TimeoutError(`Timed out waiting for "${event}" after ${ms}ms`, { timeout: ms }));
-        }, ms);
+          reject(new TimeoutError(`Timed out waiting for "${event}" after ${limit}ms`, { timeout: limit }));
+        }, limit);
       }
     });
   }
@@ -255,10 +310,22 @@ class Emitter {
    * @returns {number}
    */
   listenerCount(event) {
-    if (event !== undefined) return this.#listeners.get(event)?.size ?? 0;
+    if (event !== undefined) return this.#listeners.get(event)?.length ?? 0;
     let total = 0;
-    for (const set of this.#listeners.values()) total += set.size;
+    for (const list of this.#listeners.values()) total += list.length;
     return total;
+  }
+
+  /**
+   * The listeners of an event, in the order they run. For `once()`, you get
+   * the function you passed, not its wrapper.
+   *
+   * @template {keyof Events & string} K
+   * @param {K} event
+   * @returns {Array<(...args: Events[K]) => unknown>}
+   */
+  listeners(event) {
+    return (this.#listeners.get(event) ?? NONE).map((stored) => /** @type {any} */ (stored.listener ?? stored));
   }
 
   /**
@@ -280,7 +347,7 @@ class Emitter {
     if (event !== undefined) this.#listeners.delete(event);
     else {
       this.#listeners.clear();
-      this.#any.clear();
+      this.#any = NONE;
     }
     return this;
   }
