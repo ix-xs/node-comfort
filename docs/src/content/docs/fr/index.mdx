@@ -1,0 +1,94 @@
+---
+title: node-comfort
+description: La bibliothèque standard sans dépendance pour Node.js. Logger, fichiers, SQLite, validation, HTTP, CLI, dates, identifiants, chiffrement et des centaines de fonctions typées dans un seul paquet.
+template: splash
+hero:
+  title: Node.js, <em>tout confort.</em>
+  tagline: Un seul paquet pour ce que chaque projet finit par installer. Un logger, les fichiers, SQLite, la validation, un client HTTP, de quoi écrire une CLI, les dates, les identifiants, le chiffrement et des centaines de fonctions typées. Aucune dépendance, et rien ne se charge avant d'être utilisé.
+  actions:
+    - text: Démarrer
+      link: /start/getting-started/
+      variant: primary
+    - text: Parcourir la référence
+      link: /reference/
+      variant: secondary
+---
+
+import Showcase from '../../../components/showcase/Showcase.astro';
+
+<div class="nc-landing not-content">
+
+<section class="nc-section">
+  <header data-reveal><span>01</span><h2>Du vrai code, sa vraie sortie</h2></header>
+  <p data-reveal>Chaque exemple ci-dessous est un fichier qui a tourné avec le paquet au moment où cette page a été construite. Choisissez un sujet, changez de variante, relancez.</p>
+  <div data-reveal><Showcase /></div>
+</section>
+
+<section class="nc-section">
+  <header data-reveal><span>02</span><h2>Vingt-trois espaces de noms, un seul require</h2></header>
+  <p data-reveal>Chacun remplace un paquet ou deux que vous auriez installés, et ils sont conçus ensemble : une durée s'écrit toujours <code>"5m"</code> ou en millisecondes, les options viennent toujours en dernier, chaque erreur porte un <code>code</code> stable.</p>
+  <ul class="nc-names" data-reveal>
+    <li><a href="/essentials/logger/"><strong>nc.logger</strong><small>Des logs en couleurs en développement, en JSON en production, des fichiers qui tournent.</small></a></li>
+    <li><a href="/essentials/fs/"><strong>nc.fs</strong><small>Lire, écrire de façon atomique, copier, déplacer, chercher et surveiller, sans try/catch.</small></a></li>
+    <li><a href="/system/sqlite/"><strong>nc.SQLite</strong><small>La base de données intégrée à Node, avec filtres, migrations et colonnes JSON.</small></a></li>
+    <li><a href="/data/schema/"><strong>nc.schema</strong><small>Valider des données et obtenir le type TypeScript depuis la même description.</small></a></li>
+    <li><a href="/system/http/"><strong>nc.http</strong><small>fetch avec JSON, délais, nouvelles tentatives sûres, erreurs typées et téléchargements.</small></a></li>
+    <li><a href="/system/cli/"><strong>nc.cli</strong><small>Arguments typés, questions, menus, spinners, barres de progression, tableaux.</small></a></li>
+    <li><a href="/essentials/env/"><strong>nc.env</strong><small>Charger les fichiers .env et vérifier toute la configuration au démarrage.</small></a></li>
+    <li><a href="/data/time/"><strong>nc.time</strong><small>Formater, lire et comparer des dates dans toutes les langues et tous les fuseaux.</small></a></li>
+    <li><a href="/system/crypto/"><strong>nc.crypto</strong><small>Mots de passe, chiffrement, JWT et codes à deux facteurs, de la bonne manière.</small></a></li>
+    <li><a href="/data/id/"><strong>nc.id</strong><small>UUID v4, v5 et v7, ULID, identifiants façon nanoid, jetons et codes courts.</small></a></li>
+    <li><a href="/flow/async/"><strong>nc.async</strong><small>Limites de concurrence, files d'attente, limites de débit, attente active, annulation.</small></a></li>
+    <li><a href="/flow/func/"><strong>nc.func</strong><small>debounce, throttle, memoize, retry, timeout, batch et dedupe.</small></a></li>
+    <li><a href="/flow/cache/"><strong>nc.Cache</strong><small>Un cache LRU avec expiration, valeurs périmées servies le temps du rechargement, chargements partagés.</small></a></li>
+    <li><a href="/flow/emitter/"><strong>nc.Emitter</strong><small>Un émetteur d'événements typé, que l'on peut attendre et parcourir.</small></a></li>
+    <li><a href="/data/str/"><strong>nc.str</strong><small>Slugs, casse, troncature, modèles, pluriels et recherche approchée.</small></a></li>
+    <li><a href="/data/num/"><strong>nc.num</strong><small>Des arrondis justes, le formatage, les octets, les statistiques, l'aléatoire.</small></a></li>
+    <li><a href="/data/arr/"><strong>nc.arr</strong><small>Grouper, trier sur plusieurs clés, découper, paginer, opérations d'ensembles.</small></a></li>
+    <li><a href="/data/obj/"><strong>nc.obj</strong><small>Lire, écrire, fusionner, copier, comparer en profondeur, à l'abri de la pollution de prototype.</small></a></li>
+    <li><a href="/essentials/checker/"><strong>nc.checker</strong><small>Plus de soixante-dix gardes de type et contrôles de format, jusqu'à <code>isIBAN</code>.</small></a></li>
+    <li><a href="/system/color/"><strong>nc.color</strong><small>Des couleurs de terminal chaînables, en 16 millions de couleurs, avec repli automatique.</small></a></li>
+    <li><a href="/system/sys/"><strong>nc.sys</strong><small>Lancer des commandes, s'arrêter proprement, trouver un port libre, ouvrir une URL.</small></a></li>
+    <li><a href="/essentials/errors/"><strong>nc.errors</strong><small>Une seule famille d'erreurs avec des codes, pour ne jamais analyser un message.</small></a></li>
+    <li><a href="/essentials/utils/"><strong>nc.utils</strong><small>wait, when, du JSON qui ne lève jamais, et un garde-fou contre les plantages.</small></a></li>
+  </ul>
+</section>
+
+<section class="nc-section">
+  <header data-reveal><span>03</span><h2>Ce qui ne vous inquiète plus</h2></header>
+  <ul class="nc-points">
+    <li data-reveal><h3>L'arbre de dépendances</h3><p>Aucune dépendance à l'exécution. Un paquet à relire, une version à fixer, un changelog à suivre. Rien n'arrive dans <code>node_modules</code> que vous n'ayez demandé.</p></li>
+    <li data-reveal><h3>Le temps de démarrage</h3><p><code>require("@ix-xs/node-comfort")</code> prend environ 4 ms. Chaque espace de noms se charge à sa première utilisation, et peut s'importer seul.</p></li>
+    <li data-reveal><h3>Deviner ce qu'attend une fonction</h3><p>Écrit en JavaScript avec une JSDoc complète, livré avec ses déclarations générées : complétion, documentation au survol et types inférés, en JavaScript comme en TypeScript.</p></li>
+    <li data-reveal><h3>Le réglage par défaut dangereux</h3><p>Écritures atomiques, comparaisons en temps constant, hachage de mots de passe borné, fonctions d'objets qui ignorent <code>__proto__</code>, nouvelles tentatives qui ne rejouent pas un POST sans que vous le demandiez.</p></li>
+    <li data-reveal><h3>À quoi ressemble un échec</h3><p>Ce qui peut échouer en temps normal renvoie <code>undefined</code> ou <code>false</code>. Ce qui échoue parce que quelque chose ne va pas lève une erreur avec un <code>code</code> et le contexte utile.</p></li>
+    <li data-reveal><h3>Savoir si ça tourne chez vous</h3><p>Plus de quatre cents tests sous Windows, macOS et Linux, de Node 22.13 à la dernière version, et chaque exemple de ce site est exécuté avant publication.</p></li>
+  </ul>
+</section>
+
+<section class="nc-section">
+  <header data-reveal><span>04</span><h2>Rapide là où on l'appelle un million de fois</h2></header>
+  <p data-reveal>Opérations par seconde sur un cœur d'ordinateur portable, avec Node 24. Ce que JavaScript a de lent (<code>Intl</code>, les octets aléatoires, les traces de pile) est préparé une fois et réutilisé.</p>
+  <ul class="nc-numbers">
+    <li data-reveal><strong>2.9<small>M/s</small></strong><span>lignes de log formatées par <code>nc.info()</code></span></li>
+    <li data-reveal><strong>7.3<small>M/s</small></strong><span>identifiants triables avec <code>id.uuidv7()</code></span></li>
+    <li data-reveal><strong>1.6<small>M/s</small></strong><span>objets vérifiés par un schéma de cinq champs</span></li>
+    <li data-reveal><strong>52<small>M/s</small></strong><span>événements émis par <code>emitter.emit()</code></span></li>
+    <li data-reveal><strong>460<small>k/s</small></strong><span>lignes lues par clé avec <code>db.get()</code></span></li>
+    <li data-reveal><strong>4<small>ms</small></strong><span>pour charger le paquet, quoi que vous utilisiez ensuite</span></li>
+  </ul>
+</section>
+
+<section class="nc-section">
+  <header data-reveal><span>05</span><h2>Par où continuer</h2></header>
+  <ul class="nc-paths">
+    <li data-reveal><a href="/start/getting-started/"><span>01</span><div><strong>Premiers pas</strong><small>L'installer, écrire un premier script, l'utiliser en CommonJS, en modules ES ou en TypeScript.</small></div></a></li>
+    <li data-reveal><a href="/start/introduction/"><span>02</span><div><strong>Introduction</strong><small>Ce que contient le paquet, comment l'API est organisée, et ce qu'elle remplace.</small></div></a></li>
+    <li data-reveal><a href="/essentials/logger/"><span>03</span><div><strong>Essentiels</strong><small>Le logger, les fichiers, les contrôles de type, la configuration et les erreurs.</small></div></a></li>
+    <li data-reveal><a href="/system/http/"><span>04</span><div><strong>Système et réseau</strong><small>HTTP, SQLite, outils en ligne de commande, processus et chiffrement.</small></div></a></li>
+    <li data-reveal><a href="/recipes/"><span>05</span><div><strong>Recettes</strong><small>Des programmes complets à copier : une configuration typée, un client d'API, une CLI, des tâches de fond.</small></div></a></li>
+    <li data-reveal><a href="/reference/"><span>06</span><div><strong>Référence</strong><small>Chaque fonction, avec sa signature, ses options et un exemple.</small></div></a></li>
+  </ul>
+</section>
+
+</div>
