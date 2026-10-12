@@ -93,7 +93,8 @@ function toHTML(text) {
       html = html.replaceAll(/<span[^>]*><[/]span>/g, "");
       return `<span class="nc-line">${html || " "}</span>`;
     })
-    .join("\n");
+    // Each line is a block of its own: a line break between two would show as an empty line.
+    .join("");
 }
 
 const scratch = mkdtempSync(path.join(tmpdir(), "nc-showcase-"));

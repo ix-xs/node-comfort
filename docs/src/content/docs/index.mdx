@@ -19,32 +19,26 @@ import Showcase from '../../components/showcase/Showcase.astro';
 <div class="nc-landing not-content">
 
 <section class="nc-section">
-  <header data-reveal>
-    <span>Try it</span>
-    <h2>Real code, real output</h2>
-    <p>Every example below is a file that ran against the package when this page was built. Pick a subject, change the variation, run it again.</p>
-  </header>
+  <header data-reveal><span>01</span><h2>Real code, real output</h2></header>
+  <p data-reveal>Every example below is a file that ran against the package when this page was built. Pick a subject, change the variation, run it again.</p>
   <div data-reveal><Showcase /></div>
 </section>
 
 <section class="nc-section">
-  <header data-reveal>
-    <span>What is inside</span>
-    <h2>Twenty-three namespaces, one <code>require</code></h2>
-    <p>Each one replaces a package or two you would otherwise install, and they are designed together: durations are always <code>"5m"</code> or milliseconds, options always come last, every error has a stable <code>code</code>.</p>
-  </header>
-  <ul class="nc-grid" data-reveal>
+  <header data-reveal><span>02</span><h2>Twenty-three namespaces, one require</h2></header>
+  <p data-reveal>Each one replaces a package or two you would otherwise install, and they are designed together: a duration is always <code>"5m"</code> or milliseconds, options always come last, every error has a stable <code>code</code>.</p>
+  <ul class="nc-names" data-reveal>
     <li><a href="/essentials/logger/"><strong>nc.logger</strong><small>Colored logs in development, JSON in production, files that rotate.</small></a></li>
     <li><a href="/essentials/fs/"><strong>nc.fs</strong><small>Read, write atomically, copy, move, glob and watch, without try/catch.</small></a></li>
-    <li><a href="/system/sqlite/"><strong>nc.SQLite</strong><small>The database built into Node, with CRUD, filters, migrations and JSON columns.</small></a></li>
+    <li><a href="/system/sqlite/"><strong>nc.SQLite</strong><small>The database built into Node, with filters, migrations and JSON columns.</small></a></li>
     <li><a href="/data/schema/"><strong>nc.schema</strong><small>Validate data and get the TypeScript type from the same description.</small></a></li>
     <li><a href="/system/http/"><strong>nc.http</strong><small>fetch with JSON, timeouts, safe retries, typed errors and downloads.</small></a></li>
     <li><a href="/system/cli/"><strong>nc.cli</strong><small>Typed arguments, prompts, menus, spinners, progress bars, tables.</small></a></li>
     <li><a href="/essentials/env/"><strong>nc.env</strong><small>Load .env files and check your whole configuration at startup.</small></a></li>
-    <li><a href="/data/time/"><strong>nc.time</strong><small>Format, parse and compare dates in any language and time zone. Cron too.</small></a></li>
-    <li><a href="/system/crypto/"><strong>nc.crypto</strong><small>Password hashing, encryption, JWT, two-factor codes, done the safe way.</small></a></li>
+    <li><a href="/data/time/"><strong>nc.time</strong><small>Format, parse and compare dates in any language and time zone.</small></a></li>
+    <li><a href="/system/crypto/"><strong>nc.crypto</strong><small>Password hashing, encryption, JWT and two-factor codes, the safe way.</small></a></li>
     <li><a href="/data/id/"><strong>nc.id</strong><small>UUID v4, v5 and v7, ULID, nanoid-style ids, tokens and short codes.</small></a></li>
-    <li><a href="/flow/async/"><strong>nc.async</strong><small>Concurrency limits, queues, rate limits, polling and abortable work.</small></a></li>
+    <li><a href="/flow/async/"><strong>nc.async</strong><small>Concurrency limits, queues, rate limits, polling, abortable work.</small></a></li>
     <li><a href="/flow/func/"><strong>nc.func</strong><small>debounce, throttle, memoize, retry, timeout, batch and dedupe.</small></a></li>
     <li><a href="/flow/cache/"><strong>nc.Cache</strong><small>An LRU cache with expiry, stale-while-revalidate and shared loads.</small></a></li>
     <li><a href="/flow/emitter/"><strong>nc.Emitter</strong><small>A typed event emitter you can await and loop over.</small></a></li>
@@ -52,7 +46,7 @@ import Showcase from '../../components/showcase/Showcase.astro';
     <li><a href="/data/num/"><strong>nc.num</strong><small>Rounding that is right, formatting, bytes, statistics, random.</small></a></li>
     <li><a href="/data/arr/"><strong>nc.arr</strong><small>Group, sort by several keys, chunk, paginate, set operations.</small></a></li>
     <li><a href="/data/obj/"><strong>nc.obj</strong><small>Deep get, set, merge, clone, equal and diff, safe from prototype pollution.</small></a></li>
-    <li><a href="/essentials/checker/"><strong>nc.checker</strong><small>Seventy type guards and format checks, from <code>isEmail</code> to <code>isIBAN</code>.</small></a></li>
+    <li><a href="/essentials/checker/"><strong>nc.checker</strong><small>More than seventy type guards and format checks, up to <code>isIBAN</code>.</small></a></li>
     <li><a href="/system/color/"><strong>nc.color</strong><small>Terminal colors you can chain, with truecolor and automatic fallback.</small></a></li>
     <li><a href="/system/sys/"><strong>nc.sys</strong><small>Run commands, shut down cleanly, find a free port, open a URL.</small></a></li>
     <li><a href="/essentials/errors/"><strong>nc.errors</strong><small>One family of errors with codes, so you never parse a message.</small></a></li>
@@ -61,45 +55,39 @@ import Showcase from '../../components/showcase/Showcase.astro';
 </section>
 
 <section class="nc-section">
-  <header data-reveal>
-    <span>Why it holds up</span>
-    <h2>Small promises, kept</h2>
-  </header>
+  <header data-reveal><span>03</span><h2>What you stop worrying about</h2></header>
   <ul class="nc-points">
-    <li data-reveal><h3>Nothing to audit but this</h3><p>Zero runtime dependencies. One package to review, one version to pin, one changelog to read. Nothing arrives in your <code>node_modules</code> that you did not ask for.</p></li>
-    <li data-reveal><h3>You pay for what you touch</h3><p><code>require("@ix-xs/node-comfort")</code> takes about 3 ms. Each namespace loads the first time you use it, and can be imported on its own.</p></li>
-    <li data-reveal><h3>Your editor knows everything</h3><p>Written in JavaScript with complete JSDoc, shipped with generated declarations. Completions, documentation on hover and inferred types, in plain JS as in TypeScript.</p></li>
-    <li data-reveal><h3>Safe by default</h3><p>Atomic writes, constant-time comparisons, bounded password hashing, object helpers that ignore <code>__proto__</code>, retries that never repeat a POST.</p></li>
-    <li data-reveal><h3>Honest about failure</h3><p>Functions that can fail in normal life return <code>undefined</code> or <code>false</code>. Those that fail because something is wrong throw an error with a <code>code</code> and the context you need.</p></li>
-    <li data-reveal><h3>Tested where you run it</h3><p>Four hundred tests on Windows, macOS and Linux, from Node 22.13 to the latest, and every example of this site is run before it is published.</p></li>
+    <li data-reveal><h3>The dependency tree</h3><p>Zero runtime dependencies. One package to review, one version to pin, one changelog to read. Nothing arrives in <code>node_modules</code> that you did not ask for.</p></li>
+    <li data-reveal><h3>Startup time</h3><p><code>require("@ix-xs/node-comfort")</code> takes about 3 ms. Each namespace loads the first time you use it, and can be imported on its own.</p></li>
+    <li data-reveal><h3>Guessing what a function takes</h3><p>Written in JavaScript with complete JSDoc, shipped with generated declarations: completions, documentation on hover and inferred types, in plain JS as in TypeScript.</p></li>
+    <li data-reveal><h3>The unsafe default</h3><p>Atomic writes, constant-time comparisons, bounded password hashing, object helpers that ignore <code>__proto__</code>, retries that never repeat a POST.</p></li>
+    <li data-reveal><h3>What a failure looks like</h3><p>What can fail in normal life returns <code>undefined</code> or <code>false</code>. What fails because something is wrong throws an error with a <code>code</code> and the context you need.</p></li>
+    <li data-reveal><h3>Whether it runs on your machine</h3><p>Four hundred tests on Windows, macOS and Linux, from Node 22.13 to the latest, and every example of this site is run before it is published.</p></li>
   </ul>
 </section>
 
 <section class="nc-section">
-  <header data-reveal>
-    <span>Measured</span>
-    <h2>Fast where it is called a million times</h2>
-    <p>Operations per second on one core of a laptop, Node 24. The slow parts of JavaScript (<code>Intl</code>, random bytes, stack traces) are set up once and reused.</p>
-  </header>
-  <ul class="nc-numbers" data-reveal>
-    <li><strong>2.7<small> M/s</small></strong><span>log lines formatted with <code>nc.info()</code></span></li>
-    <li><strong>7.3<small> M/s</small></strong><span>sortable ids from <code>id.uuidv7()</code></span></li>
-    <li><strong>1.7<small> M/s</small></strong><span>objects validated by a five-field schema</span></li>
-    <li><strong>52<small> M/s</small></strong><span>events through <code>emitter.emit()</code></span></li>
-    <li><strong>490<small> k/s</small></strong><span>rows read by key with <code>db.get()</code></span></li>
-    <li><strong>3<small> ms</small></strong><span>to load the package, whatever you use later</span></li>
+  <header data-reveal><span>04</span><h2>Fast where it is called a million times</h2></header>
+  <p data-reveal>Operations per second on one core of a laptop, with Node 24. The slow parts of JavaScript (<code>Intl</code>, random bytes, stack traces) are set up once and reused.</p>
+  <ul class="nc-numbers">
+    <li data-reveal><strong>2.7<small>M/s</small></strong><span>log lines formatted by <code>nc.info()</code></span></li>
+    <li data-reveal><strong>7.3<small>M/s</small></strong><span>sortable ids from <code>id.uuidv7()</code></span></li>
+    <li data-reveal><strong>1.7<small>M/s</small></strong><span>objects checked by a five-field schema</span></li>
+    <li data-reveal><strong>52<small>M/s</small></strong><span>events through <code>emitter.emit()</code></span></li>
+    <li data-reveal><strong>490<small>k/s</small></strong><span>rows read by key with <code>db.get()</code></span></li>
+    <li data-reveal><strong>3<small>ms</small></strong><span>to load the package, whatever you use later</span></li>
   </ul>
 </section>
 
 <section class="nc-section">
-  <header data-reveal>
-    <span>Next</span>
-    <h2>Where to go from here</h2>
-  </header>
+  <header data-reveal><span>05</span><h2>Where to go next</h2></header>
   <ul class="nc-paths">
-    <li data-reveal><a href="/start/getting-started/"><strong>Getting started</strong><small>Install it, write a first script, use it from CommonJS, ES modules or TypeScript.</small></a></li>
-    <li data-reveal><a href="/recipes/"><strong>Recipes</strong><small>Complete programs to copy: a typed config, an API client, a CLI, a job runner.</small></a></li>
-    <li data-reveal><a href="/reference/"><strong>Reference</strong><small>Every function, with its signature, its options and an example.</small></a></li>
+    <li data-reveal><a href="/start/getting-started/"><span>01</span><div><strong>Getting started</strong><small>Install it, write a first script, use it from CommonJS, ES modules or TypeScript.</small></div></a></li>
+    <li data-reveal><a href="/start/introduction/"><span>02</span><div><strong>Introduction</strong><small>What is in the box, how the API is laid out, and what it replaces.</small></div></a></li>
+    <li data-reveal><a href="/essentials/logger/"><span>03</span><div><strong>Essentials</strong><small>The logger, files, type checks, configuration and errors.</small></div></a></li>
+    <li data-reveal><a href="/system/http/"><span>04</span><div><strong>System and network</strong><small>HTTP, SQLite, command-line tools, processes and crypto.</small></div></a></li>
+    <li data-reveal><a href="/recipes/"><span>05</span><div><strong>Recipes</strong><small>Complete programs to copy: a typed config, an API client, a CLI, a job runner.</small></div></a></li>
+    <li data-reveal><a href="/reference/"><span>06</span><div><strong>Reference</strong><small>Every function, with its signature, its options and an example.</small></div></a></li>
   </ul>
 </section>
 

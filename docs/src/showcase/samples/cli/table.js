@@ -2,7 +2,7 @@ const { cli } = require("@ix-xs/node-comfort");
 
 const servers = [
   { name: "api-1", region: "Paris", cpu: 0.42, tags: "blue\nstable" },
-  { name: "api-2", region: "Tokyo 東京", cpu: 0.87, tags: "green" },
+  { name: "api-2", region: "Tokyo", cpu: 0.87, tags: "green" },
   { name: "worker", region: "Oregon", cpu: 0.05, tags: "" },
 ];
 
