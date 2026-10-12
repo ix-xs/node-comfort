@@ -113,7 +113,7 @@ describe("crypto: encryption", () => {
     const parts = box.split(".");
     parts[4] = parts[4].slice(0, -2) + (parts[4].endsWith("AA") ? "BB" : "AA");
     assert.throws(() => crypto.decrypt(parts.join("."), "k1-long-secret", { associatedData: "user:42" }));
-    assert.throws(() => crypto.decrypt("garbage", "k"), TypeError);
+    assert.throws(() => crypto.decrypt("garbage", "k"), { code: "ERR_DECRYPT" });
     assert.throws(() => crypto.encrypt("x", ""), TypeError);
   });
 });

@@ -12,6 +12,8 @@
  * console.log(color.gradient("node-comfort", ["#ff5f6d", "#ffc371"]));
  */
 
+const { segmenter, graphemes } = require("./internal/shared.js");
+
 /**
  * Every named style.
  * @typedef {"reset" | "bold" | "dim" | "italic" | "underline" | "overline" | "inverse" | "hidden" | "strikethrough"
@@ -108,12 +110,13 @@
 /**
  * Color helpers.
  * @typedef {object} ColorHelpers
- * @property {ColorLevel} level The current color level. Set it to force one; `0` turns colors off.
+ * @property {ColorLevel} level The current color level. Set it to force one: `0` turns colors off, `undefined` goes back to what the terminal supports.
  * @property {boolean} enabled Whether colors are being output.
  * @property {(level?: ColorLevel) => ColorModule} create A separate instance with its own level, for another stream or for tests.
  * @property {(stream?: NodeJS.WriteStream | { isTTY?: boolean }) => ColorLevel} detect The color level a stream supports, taking `NO_COLOR` and `FORCE_COLOR` into account.
  * @property {(text: string) => string} strip Removes colors and other terminal escape codes.
  * @property {(text: string) => number} width How many columns the text takes, ignoring colors and counting emoji and CJK as 2.
+ * @property {(text: string, columns: number, options?: { ellipsis?: string }) => string} truncate Cuts text to a number of columns and adds `…`. Colors are kept and still closed properly.
  * @property {(text: string, url: string) => string} link A clickable link in terminals that support it, `"text (url)"` elsewhere.
  * @property {(text: string, colors: string[]) => string} gradient Colors the text along a gradient of hex colors.
  */
@@ -129,6 +132,10 @@ const _CODES = {
   bgGray: [100, 49], bgGrey: [100, 49], bgBlackBright: [100, 49], bgRedBright: [101, 49], bgGreenBright: [102, 49], bgYellowBright: [103, 49],
   bgBlueBright: [104, 49], bgMagentaBright: [105, 49], bgCyanBright: [106, 49], bgWhiteBright: [107, 49],
 };
+
+/** @type {Record<string, { open: string, close: string }>} */
+const _STYLES = {};
+for (const [name, [open, close]] of Object.entries(_CODES)) _STYLES[name] = { open: `\u001b[${open}m`, close: `\u001b[${close}m` };
 
 /**
  * A style in a chain: fixed codes, or a color resolved at output time.
@@ -163,16 +170,18 @@ const _rgbToAnsi256 = (r, g, b) => {
   return 16 + 36 * Math.round((r / 255) * 5) + 6 * Math.round((g / 255) * 5) + Math.round((b / 255) * 5);
 };
 
+/** @type {Array<[number, number, number]>} */
+const _ANSI16_RGB = [
+  [0, 0, 0], [205, 0, 0], [0, 205, 0], [205, 205, 0], [0, 0, 238], [205, 0, 205], [0, 205, 205], [229, 229, 229],
+  [127, 127, 127], [255, 0, 0], [0, 255, 0], [255, 255, 0], [92, 92, 255], [255, 0, 255], [0, 255, 255], [255, 255, 255],
+];
+
 /**
  * @param {number} code
  * @returns {[number, number, number]}
  */
 const _ansi256ToRgb = (code) => {
-  if (code < 16) {
-    const base = [[0, 0, 0], [205, 0, 0], [0, 205, 0], [205, 205, 0], [0, 0, 238], [205, 0, 205], [0, 205, 205], [229, 229, 229],
-      [127, 127, 127], [255, 0, 0], [0, 255, 0], [255, 255, 0], [92, 92, 255], [255, 0, 255], [0, 255, 255], [255, 255, 255]];
-    return /** @type {[number, number, number]} */ (base[code]);
-  }
+  if (code < 16) return _ANSI16_RGB[code];
   if (code >= 232) {
     const v = (code - 232) * 10 + 8;
     return [v, v, v];
@@ -214,14 +223,30 @@ const _resolve = (entry, level) => {
   return { open: `\u001b[${code}m`, close };
 };
 
+// Command line flags don't change while the program runs: read them once.
+/** @type {{ off: boolean, level: ColorLevel | undefined, forced: boolean } | undefined} */
+let _flags;
+const _argvFlags = () => {
+  if (_flags) return _flags;
+  const argv = process.argv;
+  const has = (/** @type {string[]} */ ...names) => names.some((name) => argv.includes(name));
+  return (_flags = {
+    off: has("--no-color", "--no-colors", "--color=false", "--color=never"),
+    level: has("--color=16m", "--color=full", "--color=truecolor") ? 3 : has("--color=256") ? 2 : undefined,
+    forced: has("--color", "--colors", "--color=true", "--color=always"),
+  });
+};
+
+const _CI_WITH_COLORS = ["TRAVIS", "CIRCLECI", "APPVEYOR", "GITLAB_CI", "BUILDKITE", "DRONE"];
+
 /**
  * @param {NodeJS.WriteStream | { isTTY?: boolean } | undefined} stream
  * @returns {ColorLevel}
  */
 const _detect = (stream = process.stdout) => {
   const env = process.env;
-  const argv = process.argv;
-  if (argv.includes("--no-color") || argv.includes("--no-colors") || argv.includes("--color=false")) return 0;
+  const flags = _argvFlags();
+  if (flags.off) return 0;
   if (env.NO_COLOR !== undefined && env.NO_COLOR !== "") return 0;
   if (env.NODE_DISABLE_COLORS !== undefined && env.NODE_DISABLE_COLORS !== "") return 0;
   if (env.FORCE_COLOR !== undefined) {
@@ -231,24 +256,29 @@ const _detect = (stream = process.stdout) => {
     if (value === "3") return 3;
     return 1;
   }
-  if (argv.includes("--color=16m") || argv.includes("--color=full") || argv.includes("--color=truecolor")) return 3;
-  if (argv.includes("--color=256")) return 2;
-  const forced = argv.includes("--color") || argv.includes("--colors") || argv.includes("--color=true") || argv.includes("--color=always");
-  if (env.TERM === "dumb" && !forced) return 0;
+  if (flags.level !== undefined) return flags.level;
+  if (env.TERM === "dumb" && !flags.forced) return 0;
   const tty = /** @type {NodeJS.WriteStream | undefined} */ (stream && "isTTY" in stream && stream.isTTY ? stream : undefined);
   if (tty && typeof tty.getColorDepth === "function") {
     const depth = tty.getColorDepth();
     if (depth >= 24) return 3;
     if (depth >= 8) return 2;
     if (depth >= 4) return 1;
-    return forced ? 1 : 0;
+    return flags.forced ? 1 : 0;
   }
   if (env.CI !== undefined) {
     if (env.GITHUB_ACTIONS || env.GITEA_ACTIONS) return 3;
-    if (["TRAVIS", "CIRCLECI", "APPVEYOR", "GITLAB_CI", "BUILDKITE", "DRONE"].some((name) => name in env)) return 1;
+    if (_CI_WITH_COLORS.some((name) => name in env)) return 1;
   }
-  return forced ? 1 : 0;
+  return flags.forced ? 1 : 0;
 };
+
+const _PLAIN = /^[\x20-\x7e]*$/;
+// What can turn several code points into one character on screen: accents, joiners, flags, skin tones.
+const _JOINED = /[\p{Mark}\u200d\ufe0e\ufe0f\u{1f1e6}-\u{1f1ff}\u{1f3fb}-\u{1f3ff}\u{e0020}-\u{e007f}]/u;
+const _MARK = /^\p{Mark}+$/u;
+const _EMOJI = /\p{Emoji_Presentation}/u;
+const _WIDE = /[ᄀ-ᅟ⺀-〾ぁ-㏿㐀-䶿一-鿿ꀀ-꓏가-힣豈-﫿︰-﹏＀-｠￠-￦\u{20000}-\u{3FFFD}]/u;
 
 /**
  * Terminal width of one grapheme.
@@ -258,21 +288,22 @@ const _detect = (stream = process.stdout) => {
 const _charWidth = (grapheme) => {
   const cp = /** @type {number} */ (grapheme.codePointAt(0));
   if (cp < 32 || (cp >= 0x7f && cp < 0xa0)) return 0;
-  if (/^\p{Mark}+$/u.test(grapheme)) return 0;
-  if (/\p{Emoji_Presentation}/u.test(grapheme) || grapheme.includes("\ufe0f")) return 2;
-  if (/[ᄀ-ᅟ⺀-〾ぁ-㏿㐀-䶿一-鿿ꀀ-꓏가-힣豈-﫿︰-﹏＀-｠￠-￦\u{20000}-\u{3FFFD}]/u.test(grapheme)) return 2;
-  return 1;
+  if (cp < 0x300 && grapheme.length === 1) return 1;
+  // zero width space and joiners, direction marks, byte order mark
+  if ((cp >= 0x200b && cp <= 0x200f) || cp === 0x2060 || cp === 0xfeff) return 0;
+  if (_MARK.test(grapheme)) return 0;
+  if (_EMOJI.test(grapheme) || grapheme.includes("\ufe0f")) return 2;
+  return _WIDE.test(grapheme) ? 2 : 1;
 };
-
-/** @type {Intl.Segmenter | undefined} */
-let _segmenter;
-const _graphemeSegmenter = () => (_segmenter ??= new Intl.Segmenter(undefined, { granularity: "grapheme" }));
 
 /**
  * @param {string} text
  * @returns {string}
  */
-const strip = (text) => String(text).replace(_ANSI_REGEX, "");
+const strip = (text) => {
+  const value = typeof text === "string" ? text : String(text);
+  return value.indexOf("\u001b") === -1 && value.indexOf("\u009b") === -1 ? value : value.replace(_ANSI_REGEX, "");
+};
 
 /**
  * @param {string} text
@@ -280,10 +311,66 @@ const strip = (text) => String(text).replace(_ANSI_REGEX, "");
  */
 const width = (text) => {
   const plain = strip(text);
-  if (/^[\x20-\x7e]*$/.test(plain)) return plain.length;
+  let i = 0;
+  // ASCII and accented Latin letters: one column each.
+  for (; i < plain.length; i++) {
+    const code = plain.charCodeAt(i);
+    if (code < 0x20 || (code > 0x7e && code < 0xa0) || code > 0x2ff) break;
+  }
+  if (i === plain.length) return i;
   let total = 0;
-  for (const { segment } of _graphemeSegmenter().segment(plain)) total += _charWidth(segment);
+  if (_JOINED.test(plain)) {
+    for (const { segment } of segmenter().segment(plain)) total += _charWidth(segment);
+  } else {
+    for (const char of plain) total += _charWidth(char);
+  }
   return total;
+};
+
+/**
+ * @param {string} text
+ * @param {number} columns
+ * @param {{ ellipsis?: string }} [options]
+ * @returns {string}
+ */
+const truncate = (text, columns, options = {}) => {
+  const value = typeof text === "string" ? text : String(text);
+  const max = Number.isFinite(columns) ? Math.max(0, Math.floor(columns)) : Infinity;
+  if (width(value) <= max) return value;
+  const mark = options.ellipsis ?? "…";
+  const ellipsis = width(mark) <= max ? mark : "";
+  const room = max - width(ellipsis);
+  if (_PLAIN.test(value)) return value.slice(0, room) + ellipsis;
+  let out = "";
+  let used = 0;
+  let cut = false;
+  const take = (/** @type {string} */ plain) => {
+    if (cut || !plain) return;
+    if (_PLAIN.test(plain) && used + plain.length <= room) {
+      out += plain;
+      used += plain.length;
+      return;
+    }
+    for (const { segment } of segmenter().segment(plain)) {
+      const columnsTaken = _charWidth(segment);
+      if (used + columnsTaken > room) {
+        cut = true;
+        out += ellipsis;
+        return;
+      }
+      out += segment;
+      used += columnsTaken;
+    }
+  };
+  let last = 0;
+  // Escape codes past the cut are kept: they are what closes the styles opened before it.
+  for (const match of value.matchAll(_ANSI_REGEX)) {
+    take(value.slice(last, match.index));
+    out += match[0];
+    last = match.index + match[0].length;
+  }
+  take(value.slice(last));
+  return out;
 };
 
 const _supportsHyperlinks = () => {
@@ -297,6 +384,13 @@ const _supportsHyperlinks = () => {
   return false;
 };
 
+/** @param {number} value */
+const _byte = (value) => (value > 0 ? (value < 255 ? Math.round(value) : 255) : 0);
+
+const _NEWLINE = /\r?\n/g;
+const _STACK = Symbol("stack");
+const _CUSTOM = Symbol("custom");
+
 /**
  * Builds an independent color instance.
  * @param {ColorLevel | undefined} forcedLevel
@@ -305,28 +399,10 @@ const _supportsHyperlinks = () => {
 const _createModule = (forcedLevel) => {
   /** @type {ColorLevel | undefined} */
   let level = forcedLevel;
+  // Goes up when the level changes, so every chain knows its codes are out of date.
+  let generation = 0;
   const currentLevel = () => (level === undefined ? (level = _detect()) : level);
 
-  /**
-   * @param {StyleEntry[]} stack
-   * @param {string} text
-   * @returns {string}
-   */
-  const apply = (stack, text) => {
-    const lvl = currentLevel();
-    if (lvl === 0 || !stack.length || text === "") return text;
-    const resolved = stack.map((entry) => _resolve(entry, lvl));
-    let result = text;
-    for (const { open, close } of resolved) {
-      if (close && result.includes(close)) result = result.split(close).join(close + open);
-    }
-    const opens = resolved.map((s) => s.open).join("");
-    const closes = resolved.map((s) => s.close).reverse().join("");
-    if (result.includes("\n")) result = result.replace(/\r?\n/g, (nl) => closes + nl + opens);
-    return opens + result + closes;
-  };
-
-  const STACK = Symbol("stack");
   /** @type {any} */
   const proto = Object.create(Function.prototype);
 
@@ -335,40 +411,127 @@ const _createModule = (forcedLevel) => {
    * @returns {ColorChain}
    */
   const chain = (stack) => {
+    let seen = -1;
+    let open = "";
+    let close = "";
+    /** @type {Array<{ open: string, close: string }>} */
+    let pairs = [];
+    const refresh = () => {
+      seen = generation;
+      open = "";
+      close = "";
+      pairs = [];
+      const current = currentLevel();
+      if (current === 0) return;
+      for (const entry of stack) {
+        const pair = _resolve(entry, current);
+        pairs.push(pair);
+        open += pair.open;
+        close = pair.close + close;
+      }
+    };
     /** @type {any} */
-    const fn = (/** @type {unknown[]} */ ...text) => apply(stack, text.map((t) => String(t)).join(" "));
+    const fn = (/** @type {unknown[]} */ ...parts) => {
+      const text = parts.length === 1 ? (typeof parts[0] === "string" ? parts[0] : String(parts[0])) : parts.map((part) => String(part)).join(" ");
+      if (seen !== generation) refresh();
+      if (open === "" || text === "") return text;
+      if (text.indexOf("\u001b") === -1 && text.indexOf("\n") === -1) return open + text + close;
+      let result = text;
+      // A style closed inside the text would also end ours: open it again right after.
+      for (const pair of pairs) {
+        if (result.includes(pair.close)) result = result.replaceAll(pair.close, pair.close + pair.open);
+      }
+      // Styles stop at the end of each line, or a background would run to the edge of the terminal.
+      if (result.includes("\n")) result = result.replace(_NEWLINE, (newline) => close + newline + open);
+      return open + result + close;
+    };
     Object.setPrototypeOf(fn, proto);
-    fn[STACK] = stack;
+    fn[_STACK] = stack;
     return fn;
   };
 
-  for (const [name, [open, close]] of Object.entries(_CODES)) {
+  // Each chain is built the first time it's read, then kept on its parent:
+  // `color.red.bold` costs two property reads from then on.
+  for (const name of Object.keys(_STYLES)) {
     Object.defineProperty(proto, name, {
       get() {
-        return chain([...(this[STACK] ?? []), { open: `\u001b[${open}m`, close: `\u001b[${close}m` }]);
+        const next = chain([...this[_STACK], _STYLES[name]]);
+        Object.defineProperty(this, name, { value: next });
+        return next;
       },
     });
   }
+
+  /**
+   * @param {any} parent
+   * @param {string} key
+   * @param {() => StyleEntry} entry
+   * @returns {ColorChain}
+   */
+  const custom = (parent, key, entry) => {
+    /** @type {Map<string, ColorChain>} */
+    const known = (parent[_CUSTOM] ??= new Map());
+    let next = known.get(key);
+    if (!next) {
+      if (known.size >= 256) known.clear();
+      known.set(key, (next = chain([...parent[_STACK], entry()])));
+    }
+    return next;
+  };
   /** @type {Record<string, (this: any, ...args: any[]) => ColorChain>} */
   const methods = {
-    rgb(r, g, b) { return chain([...(this[STACK] ?? []), { rgb: [r, g, b], bg: false }]); },
-    bgRgb(r, g, b) { return chain([...(this[STACK] ?? []), { rgb: [r, g, b], bg: true }]); },
-    hex(hex) { return chain([...(this[STACK] ?? []), { rgb: _hexToRgb(hex), bg: false }]); },
-    bgHex(hex) { return chain([...(this[STACK] ?? []), { rgb: _hexToRgb(hex), bg: true }]); },
-    ansi256(code) { return chain([...(this[STACK] ?? []), { ansi256: code, bg: false }]); },
-    bgAnsi256(code) { return chain([...(this[STACK] ?? []), { ansi256: code, bg: true }]); },
+    rgb(r, g, b) { return custom(this, `f${r},${g},${b}`, () => ({ rgb: [_byte(r), _byte(g), _byte(b)], bg: false })); },
+    bgRgb(r, g, b) { return custom(this, `b${r},${g},${b}`, () => ({ rgb: [_byte(r), _byte(g), _byte(b)], bg: true })); },
+    hex(hex) { return custom(this, `F${hex}`, () => ({ rgb: _hexToRgb(hex), bg: false })); },
+    bgHex(hex) { return custom(this, `B${hex}`, () => ({ rgb: _hexToRgb(hex), bg: true })); },
+    ansi256(code) { return custom(this, `a${code}`, () => ({ ansi256: _byte(code), bg: false })); },
+    bgAnsi256(code) { return custom(this, `A${code}`, () => ({ ansi256: _byte(code), bg: true })); },
   };
   for (const [name, method] of Object.entries(methods)) Object.defineProperty(proto, name, { value: method });
 
+  /**
+   * @param {string} text
+   * @param {string[]} colors
+   * @returns {string}
+   */
+  const gradient = (text, colors) => {
+    const value = String(text);
+    const stops = colors.map(_hexToRgb);
+    const current = currentLevel();
+    if (!stops.length || current === 0) return value;
+    const letters = graphemes(value);
+    let visible = 0;
+    for (const letter of letters) if (letter.trim()) visible++;
+    const last = stops.length - 1;
+    let index = 0;
+    let out = "";
+    for (const letter of letters) {
+      if (!letter.trim()) {
+        out += letter;
+        continue;
+      }
+      const position = visible <= 1 ? 0 : (index++ / (visible - 1)) * last;
+      const from = Math.min(Math.floor(position), Math.max(0, last - 1));
+      const a = stops[from];
+      const b = stops[Math.min(from + 1, last)];
+      const share = position - from;
+      const pair = _resolve({ rgb: [Math.round(a[0] + (b[0] - a[0]) * share), Math.round(a[1] + (b[1] - a[1]) * share), Math.round(a[2] + (b[2] - a[2]) * share)], bg: false }, current);
+      out += pair.open + letter + pair.close;
+    }
+    return out;
+  };
+
   /** @type {any} */
   const root = Object.create(proto);
-  root[STACK] = [];
+  root[_STACK] = [];
   Object.defineProperties(root, {
     level: {
       enumerable: true,
       get: currentLevel,
-      set(/** @type {ColorLevel} */ value) {
-        level = /** @type {ColorLevel} */ (Math.max(0, Math.min(3, Math.floor(value))));
+      set(/** @type {ColorLevel | undefined} */ value) {
+        // `undefined` goes back to what the terminal supports.
+        level = value === undefined ? undefined : /** @type {ColorLevel} */ (Number.isFinite(value) ? Math.max(0, Math.min(3, Math.floor(value))) : 0);
+        generation++;
       },
     },
     enabled: { enumerable: true, get: () => currentLevel() > 0 },
@@ -376,34 +539,13 @@ const _createModule = (forcedLevel) => {
     detect: { enumerable: true, value: _detect },
     strip: { enumerable: true, value: strip },
     width: { enumerable: true, value: width },
+    truncate: { enumerable: true, value: truncate },
     link: {
       enumerable: true,
       value: (/** @type {string} */ text, /** @type {string} */ url) =>
         currentLevel() > 0 && _supportsHyperlinks() ? `\u001b]8;;${url}\u0007${text}\u001b]8;;\u0007` : `${text} (${url})`,
     },
-    gradient: {
-      enumerable: true,
-      value: (/** @type {string} */ text, /** @type {string[]} */ colors) => {
-        const stops = colors.map(_hexToRgb);
-        if (!stops.length) return String(text);
-        const graphemes = Array.from(_graphemeSegmenter().segment(String(text)), (s) => s.segment);
-        const visible = graphemes.filter((g) => g.trim()).length;
-        let index = 0;
-        return graphemes
-          .map((g) => {
-            if (!g.trim()) return g;
-            const t = visible <= 1 ? 0 : index++ / (visible - 1);
-            const pos = t * (stops.length - 1);
-            const i = Math.min(Math.floor(pos), stops.length - 2 < 0 ? 0 : stops.length - 2);
-            const a = stops[i];
-            const b = stops[Math.min(i + 1, stops.length - 1)];
-            const f = pos - i;
-            const mix = /** @type {[number, number, number]} */ (a.map((v, k) => Math.round(v + (b[k] - v) * f)));
-            return apply([{ rgb: mix, bg: false }], g);
-          })
-          .join("");
-      },
-    },
+    gradient: { enumerable: true, value: gradient },
   });
   return root;
 };
@@ -412,4 +554,3 @@ const _createModule = (forcedLevel) => {
 const color = _createModule(undefined);
 
 module.exports = color;
-

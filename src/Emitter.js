@@ -41,10 +41,10 @@ const { toMs, setLongTimeout } = require("./internal/shared.js");
 /**
  * A listener as stored: `once()` wraps the function it was given and keeps
  * it as `listener`, so `off()` can find it.
- * @typedef {((...args: any[]) => unknown) & { listener?: Function }} StoredListener
+ * @typedef {((...args: any[]) => unknown) & { listener?: Function }} _StoredListener
  */
 
-/** @type {readonly StoredListener[]} */
+/** @type {readonly _StoredListener[]} */
 const NONE = Object.freeze([]);
 
 /**
@@ -56,14 +56,14 @@ const NONE = Object.freeze([]);
 class Emitter {
   // Listener lists are replaced, never changed in place: emit() can walk one
   // without copying it, even if a listener adds or removes others meanwhile.
-  /** @type {Map<keyof Events, readonly StoredListener[]>} */
+  /** @type {Map<keyof Events, readonly _StoredListener[]>} */
   #listeners = new Map();
-  /** @type {readonly StoredListener[]} */
+  /** @type {readonly _StoredListener[]} */
   #any = NONE;
 
   /**
    * @param {keyof Events} event
-   * @param {StoredListener} stored
+   * @param {_StoredListener} stored
    * @param {ListenOptions | undefined} options
    * @returns {() => void}
    */
@@ -125,7 +125,7 @@ class Emitter {
    * @returns {() => void} Removes the listener if it hasn't run yet.
    */
   once(event, listener, options) {
-    /** @type {StoredListener} */
+    /** @type {_StoredListener} */
     const wrapper = (...args) => {
       off();
       return listener(.../** @type {Events[K]} */ (args));
