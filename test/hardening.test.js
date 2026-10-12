@@ -775,3 +775,216 @@ describe("time", () => {
     assert.equal(time.isToday(lateYesterday), false);
   });
 });
+
+describe("id", () => {
+  const { id } = nc;
+  /** @param {string[]} list */
+  const increases = (list) => list.every((value, i) => i === 0 || list[i - 1] < value);
+
+  it("time ordered ids keep increasing within a millisecond", () => {
+    const v7 = Array.from({ length: 20_000 }, () => id.uuidv7());
+    const ulids = Array.from({ length: 20_000 }, () => id.ulid());
+    assert.ok(increases(v7));
+    assert.ok(increases(ulids));
+    assert.equal(new Set(v7).size, v7.length);
+    assert.ok(v7.every((value) => nc.isUUID(value, { version: 7 })));
+    assert.ok(ulids.every((value) => nc.isULID(value)));
+  });
+
+  it("ulid refuses a time it can't encode", () => {
+    for (const time of [-1, 2 ** 48, 1.5, NaN, "tomorrow"]) assert.throws(() => id.ulid(/** @type {any} */ (time)), RangeError);
+    assert.equal(id.timestamp(id.ulid(new Date("2024-01-01")))?.toISOString(), "2024-01-01T00:00:00.000Z");
+  });
+
+  it("uuidv5 gives the standard result", () => {
+    assert.equal(id.uuidv5("python.org", "dns"), "886313e1-3b8a-5372-9b90-0c9aee199e5d");
+    assert.equal(id.uuidv5("www.example.com", "dns"), "2ed6657d-e927-568b-95e1-2665a8aea6a2");
+    assert.equal(id.uuidv5("a", "6ba7b811-9dad-11d1-80b4-00c04fd430c8"), id.uuidv5("a", "url"));
+    assert.throws(() => id.uuidv5("a", "nope"), TypeError);
+    assert.throws(() => id.uuidv5("a", "constructor"), TypeError);
+  });
+
+  it("objectId and prefixed", () => {
+    const ids = Array.from({ length: 1000 }, () => id.objectId());
+    assert.ok(ids.every((value) => nc.isObjectId(value)));
+    assert.equal(new Set(ids).size, ids.length);
+    assert.equal(id.timestamp(id.objectId(new Date("2024-01-01T00:00:05.900Z")))?.toISOString(), "2024-01-01T00:00:05.000Z");
+    assert.match(id.prefixed("user"), /^user_[0-9A-Za-z]{24}$/);
+    assert.match(id.prefixed("inv", 8), /^inv_[0-9A-Za-z]{8}$/);
+    assert.throws(() => id.prefixed(""), TypeError);
+  });
+
+  it("sizes and snowflakes are checked", () => {
+    assert.equal(id.nano(0), "");
+    assert.equal(id.nano(5000).length, 5000);
+    for (const size of [-1, 1.5, "8"]) assert.throws(() => id.nano(/** @type {any} */ (size)), RangeError);
+    for (const value of ["abc", "", "-5", 12]) assert.throws(() => id.parseSnowflake(/** @type {any} */ (value)), TypeError);
+    assert.throws(() => id.snowflake({ epoch: Date.now() + 86_400_000 }), RangeError);
+    assert.equal(id.seq("__proto__"), "__proto__-1");
+  });
+});
+
+describe("crypto", () => {
+  const crypto = nc.crypto;
+  /** @param {() => unknown} fn */
+  const codeOf = (fn) => {
+    try {
+      fn();
+    } catch (error) {
+      return /** @type {any} */ (error).code ?? /** @type {Error} */ (error).name;
+    }
+    return "no error";
+  };
+
+  it("a missing value is never hashed as the text \"undefined\"", () => {
+    for (const value of [undefined, null, {}]) {
+      assert.throws(() => crypto.hash(/** @type {any} */ (value)), TypeError);
+      assert.throws(() => crypto.hmac("data", /** @type {any} */ (value)), TypeError);
+    }
+    assert.throws(() => crypto.hmac("data", ""), TypeError);
+    assert.equal(crypto.safeEqual(/** @type {any} */ (undefined), "undefined"), false);
+    assert.equal(crypto.safeEqual(/** @type {any} */ (undefined), /** @type {any} */ (undefined)), false);
+    assert.equal(crypto.safeEqual("abc", "abcd"), false);
+    assert.equal(crypto.safeEqual(Buffer.from("abc"), "abc"), true);
+  });
+
+  it("verifyHmac checks webhook signatures", () => {
+    const signature = crypto.hmac("body", "secret");
+    assert.equal(crypto.verifyHmac("body", signature, "secret"), true);
+    assert.equal(crypto.verifyHmac("body", `sha256=${signature.toUpperCase()}`, "secret"), true);
+    assert.equal(crypto.verifyHmac("body", crypto.hmac("body", "secret", { encoding: "base64" }), "secret", { encoding: "base64" }), true);
+    assert.equal(crypto.verifyHmac("other body", signature, "secret"), false);
+    assert.equal(crypto.verifyHmac("body", undefined, "secret"), false);
+  });
+
+  it("a stored hash can't ask for unreasonable work", async () => {
+    const salt = "AAAAAAAAAAAAAAAAAAAAAA";
+    const key = "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA";
+    assert.equal(await crypto.verifyPassword("x", `$scrypt$ln=30,r=8,p=1$${salt}$${key}`), false);
+    assert.equal(await crypto.verifyPassword("x", `$scrypt$ln=10,r=8,p=9999$${salt}$${key}`), false);
+    assert.equal(await crypto.verifyPassword(/** @type {any} */ (undefined), `$scrypt$ln=10,r=8,p=1$${salt}$${key}`), false);
+    await assert.rejects(crypto.hashPassword("x", { cost: 25 }), RangeError);
+    await assert.rejects(crypto.hashPassword(/** @type {any} */ (undefined)), TypeError);
+    const stored = await crypto.hashPassword("hunter2", { cost: 10 });
+    assert.equal(await crypto.verifyPassword("hunter2", stored), true);
+    assert.equal(await crypto.verifyPassword("hunter3", stored), false);
+  });
+
+  it("decrypt refuses a shortened authentication tag", () => {
+    const key = crypto.generateKey();
+    const parts = crypto.encrypt("secret", key).split(".");
+    parts[3] = Buffer.from(parts[3], "base64url").subarray(0, 4).toString("base64url");
+    assert.equal(codeOf(() => crypto.decrypt(parts.join("."), key)), "ERR_DECRYPT");
+    assert.equal(codeOf(() => crypto.decrypt("garbage", key)), "ERR_DECRYPT");
+    assert.equal(codeOf(() => crypto.decrypt(/** @type {any} */ (undefined), key)), "ERR_DECRYPT");
+    assert.equal(codeOf(() => crypto.decrypt(crypto.encrypt("secret", key), crypto.generateKey())), "ERR_DECRYPT");
+    assert.equal(crypto.decrypt(crypto.encrypt("", key), key), "");
+  });
+
+  it("reads the JWT of RFC 7515", () => {
+    const key = Buffer.from("AyM1SysPpbyDfgZld3umj1qzKObwVMkoqQ-EstJQLr_T-1qS0gZH75aKtMN3Yj0iPS4hcgUuTwjAzZr1Z9CAow", "base64url");
+    const token =
+      "eyJ0eXAiOiJKV1QiLA0KICJhbGciOiJIUzI1NiJ9.eyJpc3MiOiJqb2UiLA0KICJleHAiOjEzMDA4MTkzODAsDQogImh0dHA6Ly9leGFtcGxlLmNvbS9pc19yb290Ijp0cnVlfQ.dBjftJeZ4CVP-mB92K27uhbUJU1p1r_wW1gFWFOEjXk";
+    assert.equal(crypto.verifyJWT(token, key, { ignoreExpiration: true }).iss, "joe");
+    assert.equal(codeOf(() => crypto.verifyJWT(token, key)), "ERR_JWT_EXPIRED");
+  });
+
+  it("a JWT needs a real secret and sane claims", () => {
+    assert.throws(() => crypto.signJWT({}, ""), TypeError);
+    assert.throws(() => crypto.signJWT({}, /** @type {any} */ (undefined)), TypeError);
+    assert.throws(() => crypto.signJWT(/** @type {any} */ ("text"), "secret"), TypeError);
+    assert.throws(() => crypto.signJWT({}, "secret", { expiresIn: "soon" }), TypeError);
+    const token = crypto.signJWT({ sub: "1" }, "a-long-shared-secret");
+    assert.throws(() => crypto.verifyJWT(token, ""), TypeError);
+    assert.equal(codeOf(() => crypto.verifyJWT(crypto.signJWT({ exp: "never" }, "a-long-shared-secret"), "a-long-shared-secret")), "ERR_JWT_CLAIM");
+    assert.equal(codeOf(() => crypto.verifyJWT(`${token}x`, "a-long-shared-secret")), "ERR_JWT_SIGNATURE");
+    const unsigned = `${Buffer.from('{"alg":"none"}').toString("base64url")}.${Buffer.from('{"sub":"admin"}').toString("base64url")}.`;
+    assert.equal(codeOf(() => crypto.verifyJWT(unsigned, "a-long-shared-secret", { algorithms: /** @type {any} */ (["none"]) })), "ERR_JWT_ALGORITHM");
+    assert.deepEqual(crypto.decodeJWT(crypto.signJWT({}, "secret-secret", { header: { kid: "k1" }, noTimestamp: true })).header, { typ: "JWT", kid: "k1", alg: "HS256" });
+  });
+
+  it("signs with a private key and verifies with the public one", async () => {
+    const nodeCrypto = require("node:crypto");
+    for (const algorithm of /** @type {const} */ (["EdDSA", "ES256", "ES384", "ES512", "RS256", "PS256"])) {
+      const { publicKey, privateKey } = await crypto.generateKeyPair(algorithm);
+      const token = crypto.signJWT({ sub: "42" }, privateKey, { algorithm, expiresIn: "1m" });
+      assert.equal(crypto.verifyJWT(token, publicKey).sub, "42", algorithm);
+      assert.equal(crypto.verifyJWT(token, nodeCrypto.createPublicKey(publicKey)).sub, "42", algorithm);
+      assert.equal(crypto.verifyJWT(token, nodeCrypto.createPublicKey(publicKey).export({ format: "jwk" })).sub, "42", algorithm);
+      assert.throws(() => crypto.signJWT({}, publicKey), TypeError, "a public key can't sign");
+      assert.throws(() => crypto.signJWT({}, privateKey, { algorithm: "HS256" }), TypeError);
+
+      // the classic attack: an HS256 token signed with the public key as its secret
+      const [, body, signature] = token.split(".");
+      const forged = `${Buffer.from('{"alg":"HS256","typ":"JWT"}').toString("base64url")}.${body}`;
+      const forgedToken = `${forged}.${nodeCrypto.createHmac("sha256", publicKey).update(forged).digest("base64url")}`;
+      assert.equal(codeOf(() => crypto.verifyJWT(forgedToken, publicKey)), "ERR_JWT_ALGORITHM", algorithm);
+      assert.equal(codeOf(() => crypto.verifyJWT(forgedToken, publicKey, { algorithms: ["HS256"] })), "ERR_JWT_ALGORITHM", algorithm);
+      assert.equal(codeOf(() => crypto.verifyJWT(`${token.slice(0, -signature.length)}${signature.slice(0, -4)}AAAA`, publicKey)), "ERR_JWT_SIGNATURE", algorithm);
+    }
+    const weak = nodeCrypto.generateKeyPairSync("rsa", { modulusLength: 1024, privateKeyEncoding: { type: "pkcs8", format: "pem" }, publicKeyEncoding: { type: "spki", format: "pem" } });
+    assert.throws(() => crypto.signJWT({}, weak.privateKey), /2048/);
+    await assert.rejects(crypto.generateKeyPair(/** @type {any} */ ("HS256")), TypeError);
+  });
+
+  it("TOTP matches the vectors of RFC 6238", () => {
+    const secret = "GEZDGNBVGY3TQOJQGEZDGNBVGY3TQOJQ";
+    assert.deepEqual(
+      [59, 1111111109, 1234567890, 20000000000].map((seconds) => crypto.totp(secret, { digits: 8, time: seconds * 1000 })),
+      ["94287082", "07081804", "89005924", "65353130"],
+    );
+    assert.equal(crypto.verifyTOTP("287 082", secret, { time: 59_000 }), true);
+    assert.equal(crypto.verifyTOTP("287082", secret, { time: 59_000 + 90_000 }), false);
+    assert.equal(crypto.verifyTOTP("287082", secret, { time: 59_000 + 90_000, window: 3 }), true);
+    assert.equal(crypto.verifyTOTP(/** @type {any} */ (undefined), secret), false);
+    assert.throws(() => crypto.totp(secret, { digits: 20 }), RangeError);
+  });
+});
+
+describe("color", () => {
+  const ESC = String.fromCharCode(27);
+  const c3 = nc.color.create(3);
+
+  it("a chain is built once and follows level changes", () => {
+    const live = nc.color.create(3);
+    const red = live.red.bold;
+    assert.equal(live.red.bold, red);
+    assert.equal(red("x"), `${ESC}[31m${ESC}[1mx${ESC}[22m${ESC}[39m`);
+    live.level = 0;
+    assert.equal(red("x"), "x");
+    live.level = 1;
+    assert.equal(live.hex("#f80")("x"), `${ESC}[93mx${ESC}[39m`);
+    live.level = /** @type {any} */ (NaN);
+    assert.equal(live.level, 0);
+  });
+
+  it("nested styles and line breaks keep their colors", () => {
+    assert.equal(c3.red(`a ${c3.blue("b")} c`), `${ESC}[31ma ${ESC}[34mb${ESC}[39m${ESC}[31m c${ESC}[39m`);
+    assert.equal(c3.bgRed("a\nb"), `${ESC}[41ma${ESC}[49m\n${ESC}[41mb${ESC}[49m`);
+    assert.equal(c3.rgb(300, -5, 12.6)("x"), `${ESC}[38;2;255;0;13mx${ESC}[39m`);
+    assert.equal(c3.red(1, "a", null), `${ESC}[31m1 a null${ESC}[39m`);
+  });
+
+  it("width counts what the terminal shows", () => {
+    const keycap = String.fromCodePoint(0x31, 0xfe0f, 0x20e3);
+    const accent = `e${String.fromCodePoint(0x301)}`;
+    const zeroWidthSpace = String.fromCodePoint(0x200b);
+    assert.equal(nc.color.width("héllo"), 5);
+    assert.equal(nc.color.width(accent), 1);
+    assert.equal(nc.color.width(keycap), 2);
+    assert.equal(nc.color.width(`a${zeroWidthSpace}b`), 2);
+    assert.equal(nc.color.width(c3.red("日本")), 4);
+    assert.equal(nc.color.width("👨‍👩‍👧"), 2);
+  });
+
+  it("truncate cuts by columns and keeps the colors closed", () => {
+    assert.equal(nc.color.truncate("hello world", 8), "hello w…");
+    assert.equal(nc.color.truncate("hello", 8), "hello");
+    assert.equal(nc.color.truncate("hello world", 8, { ellipsis: "..." }), "hello...");
+    assert.equal(nc.color.truncate("日本語日本語", 5), "日本…");
+    assert.equal(nc.color.truncate(c3.red("hello world"), 8), `${ESC}[31mhello w…${ESC}[39m`);
+    const cut = nc.color.truncate(c3.red.bold(`hello ${c3.blue("wide 日本語 text")} end`), 12);
+    assert.equal(nc.color.width(cut), 12);
+    assert.ok(cut.endsWith(`${ESC}[22m${ESC}[39m`));
+  });
+});

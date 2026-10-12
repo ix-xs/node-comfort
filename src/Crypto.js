@@ -13,8 +13,9 @@
  * const claims = crypto.verifyJWT(token, SECRET);
  */
 
-const { JWTError } = require("./errors.js");
-const { parseDuration } = require("./Time.js");
+const { types } = require("node:util");
+const { JWTError, NodeComfortError } = require("./errors.js");
+const { toMs } = require("./internal/shared.js");
 
 /** @type {typeof import("node:crypto") | undefined} */
 let _nodeCrypto;
@@ -69,6 +70,20 @@ const _scrypt = (password, salt, keylen, options) =>
  */
 
 /**
+ * A key for `signJWT()` and `verifyJWT()`. For the HS algorithms it's a
+ * shared secret. For the others it's a key pair: a PEM string, a
+ * `KeyObject` or a JWK, private to sign and public to verify.
+ * @typedef {string | Buffer | Uint8Array | import("node:crypto").KeyObject | import("node:crypto").JsonWebKey} JWTKey
+ */
+
+/**
+ * A pair of keys in PEM, as made by `generateKeyPair()`.
+ * @typedef {object} KeyPair
+ * @property {string} publicKey Give this one away: it only checks signatures.
+ * @property {string} privateKey Keep this one secret: it signs.
+ */
+
+/**
  * Standard JWT claims.
  * @typedef {object} JWTClaims
  * @property {string} [iss] Issuer.
@@ -81,14 +96,16 @@ const _scrypt = (password, salt, keylen, options) =>
  */
 
 /**
- * Supported JWT algorithms.
- * @typedef {"HS256" | "HS384" | "HS512"} JWTAlgorithm
+ * Supported JWT algorithms. HS signs and verifies with one shared secret.
+ * RS, PS, ES and EdDSA sign with a private key and verify with the public
+ * one, so services that only check tokens never hold the signing key.
+ * @typedef {"HS256" | "HS384" | "HS512" | "RS256" | "RS384" | "RS512" | "PS256" | "PS384" | "PS512" | "ES256" | "ES384" | "ES512" | "EdDSA"} JWTAlgorithm
  */
 
 /**
  * Options for `signJWT()`.
  * @typedef {object} SignJWTOptions
- * @property {JWTAlgorithm} [algorithm] Defaults to `"HS256"`.
+ * @property {JWTAlgorithm} [algorithm] Defaults to what fits the key: `"HS256"` for a secret, `"RS256"` for an RSA key, `"ES256"` for a P-256 key, `"EdDSA"` for an Ed25519 key.
  * @property {string | number} [expiresIn] Lifetime in seconds or as a duration like `"15m"`. Sets `exp`.
  * @property {string | number} [notBefore] Delay before the token is valid. Sets `nbf`.
  * @property {string} [issuer] Sets `iss`.
@@ -102,14 +119,14 @@ const _scrypt = (password, salt, keylen, options) =>
 /**
  * Options for `verifyJWT()`.
  * @typedef {object} VerifyJWTOptions
- * @property {JWTAlgorithm[]} [algorithms] Accepted algorithms. Defaults to all three HMAC ones.
+ * @property {JWTAlgorithm[]} [algorithms] Accepted algorithms. Defaults to the ones that fit the key, so a token can't pick a weaker one.
  * @property {string | string[]} [issuer] Required issuer.
  * @property {string | string[]} [audience] Required audience; one match is enough.
  * @property {string} [subject] Required subject.
  * @property {number} [clockTolerance] Seconds of slack for `exp` and `nbf` when server clocks differ.
  * @property {string | number} [maxAge] Reject tokens issued longer ago than this.
  * @property {boolean} [ignoreExpiration] Skip the `exp` check.
- * @property {Date | number} [now] What time it is. Defaults to now.
+ * @property {Date | number} [now] What time it is. Defaults to now. Handy in tests.
  */
 
 /**
@@ -190,19 +207,58 @@ const _base32Decode = (text) => {
   return Buffer.from(out);
 };
 
-/** @param {unknown} data */
-const _toBuffer = (data) => (Buffer.isBuffer(data) ? data : data instanceof Uint8Array ? Buffer.from(data) : Buffer.from(String(data), "utf8"));
+/**
+ * @param {unknown} data
+ * @returns {Buffer | undefined} `undefined` for what has no obvious bytes: `null`, objects...
+ */
+const _maybeBuffer = (data) => {
+  if (typeof data === "string") return Buffer.from(data, "utf8");
+  if (Buffer.isBuffer(data)) return data;
+  if (ArrayBuffer.isView(data)) return Buffer.from(data.buffer, data.byteOffset, data.byteLength);
+  if (types.isAnyArrayBuffer(data)) return Buffer.from(data);
+  if (typeof data === "number" || typeof data === "bigint") return Buffer.from(String(data), "utf8");
+  return undefined;
+};
+
+/**
+ * @param {unknown} data
+ * @param {string} [what]
+ * @returns {Buffer}
+ */
+const _toBuffer = (data, what = "the data") => {
+  const buffer = _maybeBuffer(data);
+  // Hashing "undefined" because a variable was missing is how secrets end up guessable.
+  if (!buffer) throw new TypeError(`Expected ${what} to be a string, a Buffer or a Uint8Array, got ${data === null ? "null" : typeof data}`);
+  return buffer;
+};
+
+/**
+ * @param {unknown} secret
+ * @param {string} what
+ * @returns {Buffer}
+ */
+const _secret = (secret, what) => {
+  const buffer = _toBuffer(secret, what);
+  if (!buffer.length) throw new TypeError(`Expected ${what} not to be empty`);
+  return buffer;
+};
 
 /**
  * @param {string | number} value
+ * @param {string} what
  * @returns {number}
  */
-const _seconds = (value) => {
-  if (typeof value === "number") return value;
-  const ms = parseDuration(value);
-  if (ms === null) throw new TypeError(`Invalid duration "${value}"`);
-  return Math.round(ms / 1000);
+const _seconds = (value, what) => {
+  const seconds = typeof value === "number" ? value : Math.round(toMs(value, what) / 1000);
+  if (!Number.isFinite(seconds)) throw new TypeError(`Invalid ${what}: ${String(value)}`);
+  return seconds;
 };
+
+/**
+ * @param {Date | number | undefined} value
+ * @returns {number} Milliseconds.
+ */
+const _now = (value) => (value === undefined ? Date.now() : +value);
 
 /**
  * Hashes data, SHA-256 in hex by default.
@@ -216,7 +272,7 @@ const _seconds = (value) => {
  * @returns {string}
  */
 function hash(data, options = {}) {
-  return _crypto().createHash(options.algorithm ?? "sha256").update(_toBuffer(data)).digest(options.encoding ?? "hex");
+  return _crypto().hash(options.algorithm ?? "sha256", typeof data === "string" ? data : _toBuffer(data), options.encoding ?? "hex");
 }
 
 /**
@@ -233,13 +289,40 @@ function hash(data, options = {}) {
  * @returns {string}
  */
 function hmac(data, secret, options = {}) {
-  return _crypto().createHmac(options.algorithm ?? "sha256", _toBuffer(secret)).update(_toBuffer(data)).digest(options.encoding ?? "hex");
+  return _crypto()
+    .createHmac(options.algorithm ?? "sha256", _secret(secret, "the secret"))
+    .update(typeof data === "string" ? data : _toBuffer(data))
+    .digest(options.encoding ?? "hex");
+}
+
+/**
+ * Checks an HMAC signature you received, in constant time. A leading
+ * `sha256=`, as GitHub and others send, is ignored.
+ *
+ * @example
+ * // an Express webhook route: sign the raw body, not the parsed JSON
+ * if (!crypto.verifyHmac(req.rawBody, req.headers["x-hub-signature-256"], process.env.WEBHOOK_SECRET)) {
+ *   return res.status(401).end();
+ * }
+ *
+ * @param {string | Buffer | Uint8Array} data
+ * @param {unknown} signature What the sender computed. Anything but a matching string gives `false`.
+ * @param {string | Buffer | Uint8Array} secret
+ * @param {HashOptions} [options] Must match what the sender used.
+ * @returns {boolean}
+ */
+function verifyHmac(data, signature, secret, options = {}) {
+  const expected = hmac(data, secret, options);
+  if (typeof signature !== "string") return false;
+  const given = signature.replace(/^sha(?:1|256|384|512)=/i, "");
+  return safeEqual(expected, (options.encoding ?? "hex") === "hex" ? given.toLowerCase() : given);
 }
 
 /**
  * Compares two secrets in constant time, so the comparison can't leak
- * anything through timing. Use it instead of `===` for tokens, signatures
- * and API keys.
+ * anything through timing, not even their lengths. Use it instead of `===`
+ * for tokens, signatures and API keys. A missing value (`undefined`, `null`)
+ * never equals anything.
  *
  * @example
  * if (!crypto.safeEqual(providedKey, process.env.API_KEY)) throw new Error("Forbidden");
@@ -249,14 +332,30 @@ function hmac(data, secret, options = {}) {
  * @returns {boolean}
  */
 function safeEqual(a, b) {
-  const x = _toBuffer(a);
-  const y = _toBuffer(b);
-  if (x.length !== y.length) {
-    _crypto().timingSafeEqual(x, x);
-    return false;
-  }
-  return _crypto().timingSafeEqual(x, y);
+  const x = _maybeBuffer(a);
+  const y = _maybeBuffer(b);
+  if (!x || !y) return false;
+  const crypto = _crypto();
+  // Digests have one length, whatever went in.
+  return crypto.timingSafeEqual(crypto.hash("sha256", x, "buffer"), crypto.hash("sha256", y, "buffer"));
 }
+
+const _SCRYPT_HASH = /^\$scrypt\$ln=(\d{1,2}),r=(\d{1,4}),p=(\d{1,4})\$([\w-]+)\$([\w-]+)$/;
+// scrypt needs 128 * N * r bytes. Past 1 GiB it's a mistake, or a doctored hash meant to stall the server.
+const _SCRYPT_MAX_MEMORY = 2 ** 30;
+
+/**
+ * @param {number} ln
+ * @param {number} r
+ * @param {number} p
+ * @returns {import("node:crypto").ScryptOptions | undefined} `undefined` if the settings are out of bounds.
+ */
+const _scryptOptions = (ln, r, p) => {
+  if (![ln, r, p].every(Number.isInteger) || ln < 1 || ln > 30 || r < 1 || p < 1 || p > 1024) return undefined;
+  const N = 2 ** ln;
+  if (128 * N * r > _SCRYPT_MAX_MEMORY) return undefined;
+  return { N, r, p, maxmem: 256 * N * r + 128 * r * p + 1024 * 1024 };
+};
 
 /**
  * Hashes a password with scrypt and a random salt. The result records its
@@ -270,14 +369,21 @@ function safeEqual(a, b) {
  * @param {string} password
  * @param {HashPasswordOptions} [options]
  * @returns {Promise<string>}
+ * @throws {RangeError} If the settings are out of bounds, like a cost that needs more than 1 GiB of memory.
  */
 async function hashPassword(password, options = {}) {
+  if (typeof password !== "string") throw new TypeError(`hashPassword(): expected the password to be a string, got ${password === null ? "null" : typeof password}`);
   const ln = options.cost ?? 15;
   const r = options.blockSize ?? 8;
   const p = options.parallelization ?? 1;
-  const salt = _crypto().randomBytes(options.saltLength ?? 16);
-  const N = 2 ** ln;
-  const key = await _scrypt(password.normalize("NFKC"), salt, options.keyLength ?? 32, { N, r, p, maxmem: 256 * N * r + 1024 * 1024 });
+  const saltLength = options.saltLength ?? 16;
+  const keyLength = options.keyLength ?? 32;
+  const scrypt = _scryptOptions(ln, r, p);
+  if (!scrypt) throw new RangeError(`hashPassword(): cost ${ln}, blockSize ${r}, parallelization ${p} is out of bounds`);
+  if (!Number.isInteger(saltLength) || saltLength < 8) throw new RangeError("hashPassword(): saltLength must be at least 8 bytes");
+  if (!Number.isInteger(keyLength) || keyLength < 16 || keyLength > 128) throw new RangeError("hashPassword(): keyLength must be between 16 and 128 bytes");
+  const salt = _crypto().randomBytes(saltLength);
+  const key = await _scrypt(password.normalize("NFKC"), salt, keyLength, scrypt);
   return `$scrypt$ln=${ln},r=${r},p=${p}$${salt.toString("base64url")}$${key.toString("base64url")}`;
 }
 
@@ -293,15 +399,13 @@ async function hashPassword(password, options = {}) {
  * @returns {Promise<boolean>}
  */
 async function verifyPassword(password, stored) {
-  const match = /^\$scrypt\$ln=(\d+),r=(\d+),p=(\d+)\$([\w-]+)\$([\w-]+)$/.exec(String(stored));
+  const match = typeof password === "string" && typeof stored === "string" ? _SCRYPT_HASH.exec(stored) : null;
   if (!match) return false;
-  const [, ln, r, p, salt, key] = match;
-  const expected = Buffer.from(key, "base64url");
-  const N = 2 ** Number(ln);
+  const scrypt = _scryptOptions(Number(match[1]), Number(match[2]), Number(match[3]));
+  const expected = Buffer.from(match[5], "base64url");
+  if (!scrypt || !expected.length || expected.length > 128) return false;
   try {
-    const actual = await _scrypt(String(password).normalize("NFKC"), Buffer.from(salt, "base64url"), expected.length, {
-      N, r: Number(r), p: Number(p), maxmem: 256 * N * Number(r) + 1024 * 1024,
-    });
+    const actual = await _scrypt(password.normalize("NFKC"), Buffer.from(match[4], "base64url"), expected.length, scrypt);
     return _crypto().timingSafeEqual(actual, expected);
   } catch {
     return false;
@@ -322,7 +426,7 @@ async function verifyPassword(password, stored) {
  * @returns {boolean}
  */
 function needsRehash(stored, options = {}) {
-  const match = /^\$scrypt\$ln=(\d+),r=(\d+),p=(\d+)\$/.exec(String(stored));
+  const match = _SCRYPT_HASH.exec(String(stored));
   if (!match) return true;
   return Number(match[1]) < (options.cost ?? 15) || Number(match[2]) < (options.blockSize ?? 8) || Number(match[3]) < (options.parallelization ?? 1);
 }
@@ -343,8 +447,7 @@ function generateKey() {
  * @returns {Buffer}
  */
 const _deriveKey = (secret, salt) => {
-  const raw = typeof secret === "string" && /^[A-Za-z0-9_-]{43}$/.test(secret) ? Buffer.from(secret, "base64url") : _toBuffer(secret);
-  if (!raw.length) throw new TypeError("The encryption secret must not be empty");
+  const raw = typeof secret === "string" && /^[A-Za-z0-9_-]{43}$/.test(secret) ? Buffer.from(secret, "base64url") : _secret(secret, "the encryption secret");
   return Buffer.from(_crypto().hkdfSync("sha256", raw, salt, "node-comfort:aes-256-gcm", 32));
 };
 
@@ -366,17 +469,20 @@ const _deriveKey = (secret, salt) => {
  * @returns {string} A compact, URL-safe string.
  */
 function encrypt(data, secret, options = {}) {
-  const salt = _crypto().randomBytes(16);
-  const iv = _crypto().randomBytes(12);
-  const cipher = _crypto().createCipheriv("aes-256-gcm", _deriveKey(secret, salt), iv);
-  if (options.associatedData !== undefined) cipher.setAAD(_toBuffer(options.associatedData));
-  const encrypted = Buffer.concat([cipher.update(_toBuffer(data)), cipher.final()]);
-  return ["v1", salt, iv, cipher.getAuthTag(), encrypted].map((part) => (typeof part === "string" ? part : part.toString("base64url"))).join(".");
+  const crypto = _crypto();
+  const salt = crypto.randomBytes(28);
+  const iv = salt.subarray(16);
+  const cipher = crypto.createCipheriv("aes-256-gcm", _deriveKey(secret, salt.subarray(0, 16)), iv);
+  if (options.associatedData !== undefined) cipher.setAAD(_toBuffer(options.associatedData, "associatedData"));
+  const head = cipher.update(_toBuffer(data));
+  const tail = cipher.final();
+  const encrypted = tail.length ? Buffer.concat([head, tail]) : head;
+  return `v1.${salt.toString("base64url", 0, 16)}.${iv.toString("base64url")}.${cipher.getAuthTag().toString("base64url")}.${encrypted.toString("base64url")}`;
 }
 
 /**
- * Decrypts what `encrypt()` produced. Throws if the secret is wrong or the
- * data was changed.
+ * Decrypts what `encrypt()` produced. Throws an error with code
+ * `ERR_DECRYPT` if the secret is wrong or the data was changed.
  *
  * @example
  * const text = crypto.decrypt(box, SECRET);
@@ -402,26 +508,223 @@ function encrypt(data, secret, options = {}) {
  * @param {string | Buffer | Uint8Array} secret
  * @param {DecryptOptions} [options]
  * @returns {string | Buffer}
- * @throws {Error} If the secret is wrong or the payload was modified.
+ * @throws {NodeComfortError} With code `ERR_DECRYPT` if the secret is wrong or the payload was modified.
  */
 function decrypt(payload, secret, options = {}) {
-  const parts = String(payload).split(".");
-  if (parts.length !== 5 || parts[0] !== "v1") throw new TypeError("Invalid encrypted payload");
+  const parts = typeof payload === "string" ? payload.split(".") : [];
   const [salt, iv, tag, encrypted] = parts.slice(1).map((part) => Buffer.from(part, "base64url"));
-  const decipher = _crypto().createDecipheriv("aes-256-gcm", _deriveKey(secret, salt), iv);
-  decipher.setAuthTag(tag);
-  if (options.associatedData !== undefined) decipher.setAAD(_toBuffer(options.associatedData));
+  // A tag cut short is far easier to forge, so only whole ones are read.
+  if (parts.length !== 5 || parts[0] !== "v1" || salt.length !== 16 || iv.length !== 12 || tag.length !== 16) {
+    throw new NodeComfortError("Unable to decrypt: this isn't something encrypt() produced", { code: "ERR_DECRYPT" });
+  }
+  const key = _deriveKey(secret, salt);
+  const associated = options.associatedData === undefined ? undefined : _toBuffer(options.associatedData, "associatedData");
   let decrypted;
   try {
+    const decipher = _crypto().createDecipheriv("aes-256-gcm", key, iv, { authTagLength: 16 });
+    decipher.setAuthTag(tag);
+    if (associated) decipher.setAAD(associated);
     decrypted = Buffer.concat([decipher.update(encrypted), decipher.final()]);
   } catch (error) {
-    throw new Error("Unable to decrypt: wrong secret or tampered data", { cause: error });
+    throw new NodeComfortError("Unable to decrypt: wrong secret or tampered data", { code: "ERR_DECRYPT", cause: error });
   }
   return options.output === "buffer" ? decrypted : decrypted.toString("utf8");
 }
 
+/** @type {readonly JWTAlgorithm[]} */
+const _HS = ["HS256", "HS384", "HS512"];
+/** @type {Record<string, JWTAlgorithm>} */
+const _CURVE_ALGORITHMS = { prime256v1: "ES256", secp384r1: "ES384", secp521r1: "ES512" };
+/** @type {Record<string, string>} */
+const _ALGORITHM_CURVES = { ES256: "prime256v1", ES384: "secp384r1", ES512: "secp521r1" };
+
+/**
+ * A key, ready to use, with the algorithms it may be used with.
+ * @typedef {{ secret: Buffer, key?: undefined, algorithms: readonly JWTAlgorithm[] } | { secret?: undefined, key: import("node:crypto").KeyObject, algorithms: readonly JWTAlgorithm[] }} _ResolvedKey
+ */
+
+/**
+ * @param {string} message
+ * @param {unknown} [cause]
+ */
+const _keyError = (message, cause) => new TypeError(message, { cause });
+
+/**
+ * @param {import("node:crypto").KeyObject} key
+ * @returns {_ResolvedKey}
+ */
+const _asymmetric = (key) => {
+  const type = key.asymmetricKeyType;
+  if (type === "rsa" || type === "rsa-pss") {
+    if ((key.asymmetricKeyDetails?.modulusLength ?? 0) < 2048) throw _keyError("RSA keys must be at least 2048 bits long");
+    return { key, algorithms: type === "rsa" ? ["RS256", "RS384", "RS512", "PS256", "PS384", "PS512"] : ["PS256", "PS384", "PS512"] };
+  }
+  if (type === "ec") {
+    const algorithm = _CURVE_ALGORITHMS[key.asymmetricKeyDetails?.namedCurve ?? ""];
+    if (!algorithm) throw _keyError(`Unsupported curve "${key.asymmetricKeyDetails?.namedCurve}": use P-256, P-384 or P-521`);
+    return { key, algorithms: [algorithm] };
+  }
+  if (type === "ed25519" || type === "ed448") return { key, algorithms: ["EdDSA"] };
+  throw _keyError(`Unsupported key type "${type}"`);
+};
+
+/** @param {unknown} key */
+const _isPEM = (key) => {
+  const start = typeof key === "string" ? key.slice(0, 64) : Buffer.isBuffer(key) ? key.toString("latin1", 0, 64) : "";
+  return start.trimStart().startsWith("-----BEGIN ");
+};
+
+/**
+ * @param {JWTKey} key
+ * @param {"sign" | "verify"} use
+ * @returns {_ResolvedKey}
+ */
+const _readKey = (key, use) => {
+  const crypto = _crypto();
+  if (types.isKeyObject(key)) {
+    if (key.type === "secret") return { secret: key.export(), algorithms: _HS };
+    if (use === "sign" && key.type !== "private") throw _keyError("Signing takes a private key, this one is public");
+    return _asymmetric(use === "verify" && key.type === "private" ? crypto.createPublicKey(key) : key);
+  }
+  const jwk = key !== null && typeof key === "object" && !ArrayBuffer.isView(key) && typeof (/** @type {{ kty?: unknown }} */ (key).kty) === "string";
+  if (jwk && /** @type {import("node:crypto").JsonWebKey} */ (key).kty === "oct") {
+    return { secret: _secret(Buffer.from(String(/** @type {import("node:crypto").JsonWebKey} */ (key).k ?? ""), "base64url"), "the JWT secret"), algorithms: _HS };
+  }
+  if (jwk || _isPEM(key)) {
+    const input = /** @type {any} */ (jwk ? { key, format: "jwk" } : key);
+    let object;
+    try {
+      object = use === "sign" ? crypto.createPrivateKey(input) : crypto.createPublicKey(input);
+    } catch (error) {
+      throw _keyError(use === "sign" ? "Signing takes a private key, and this can't be read as one" : "This key can't be read", error);
+    }
+    return _asymmetric(object);
+  }
+  return { secret: _secret(key, "the JWT secret"), algorithms: _HS };
+};
+
+// Reading a PEM takes far longer than checking a signature, and a server
+// uses the same few keys for every request.
+/** @type {Record<"sign" | "verify", Map<string, _ResolvedKey>>} */
+const _textKeys = { sign: new Map(), verify: new Map() };
+/** @type {Record<"sign" | "verify", WeakMap<object, _ResolvedKey>>} */
+const _objectKeys = { sign: new WeakMap(), verify: new WeakMap() };
+
+/**
+ * @param {JWTKey} key
+ * @param {"sign" | "verify"} use
+ * @returns {_ResolvedKey}
+ */
+const _jwtKey = (key, use) => {
+  if (typeof key === "string") {
+    if (!_isPEM(key)) return _readKey(key, use);
+    let resolved = _textKeys[use].get(key);
+    if (!resolved) {
+      resolved = _readKey(key, use);
+      if (_textKeys[use].size >= 20) _textKeys[use].clear();
+      _textKeys[use].set(key, resolved);
+    }
+    return resolved;
+  }
+  // Buffers can change after the call, so only immutable key objects and JWKs are remembered.
+  if (key === null || typeof key !== "object" || ArrayBuffer.isView(key)) return _readKey(key, use);
+  let resolved = _objectKeys[use].get(key);
+  if (!resolved) _objectKeys[use].set(key, (resolved = _readKey(key, use)));
+  return resolved;
+};
+
+/**
+ * @param {JWTAlgorithm} algorithm
+ * @param {import("node:crypto").KeyObject} key
+ * @returns {any}
+ */
+const _signingKey = (algorithm, key) => {
+  if (algorithm[0] === "P") {
+    const { constants } = _crypto();
+    return { key, padding: constants.RSA_PKCS1_PSS_PADDING, saltLength: constants.RSA_PSS_SALTLEN_DIGEST };
+  }
+  // JWTs carry ECDSA signatures as r and s side by side, not in DER.
+  return algorithm[0] === "E" && algorithm !== "EdDSA" ? { key, dsaEncoding: "ieee-p1363" } : key;
+};
+
+/** @param {JWTAlgorithm} algorithm */
+const _digestOf = (algorithm) => (algorithm === "EdDSA" ? null : `sha${algorithm.slice(2)}`);
+
+/**
+ * @param {JWTAlgorithm} algorithm
+ * @param {string} signed The header and the payload, as sent.
+ * @param {_ResolvedKey} key
+ * @returns {string}
+ */
+const _signature = (algorithm, signed, key) => {
+  const crypto = _crypto();
+  if (key.secret) return crypto.createHmac(/** @type {string} */ (_digestOf(algorithm)), key.secret).update(signed).digest("base64url");
+  return crypto.sign(_digestOf(algorithm), Buffer.from(signed), _signingKey(algorithm, key.key)).toString("base64url");
+};
+
+/**
+ * @param {JWTAlgorithm} algorithm
+ * @param {string} signed
+ * @param {string} signature
+ * @param {_ResolvedKey} key
+ * @returns {boolean}
+ */
+const _signatureMatches = (algorithm, signed, signature, key) => {
+  const crypto = _crypto();
+  if (key.secret) {
+    const expected = Buffer.from(_signature(algorithm, signed, key));
+    const given = Buffer.from(signature);
+    return expected.length === given.length && crypto.timingSafeEqual(expected, given);
+  }
+  try {
+    return crypto.verify(_digestOf(algorithm), Buffer.from(signed), _signingKey(algorithm, key.key), Buffer.from(signature, "base64url"));
+  } catch {
+    return false;
+  }
+};
+
+/** @type {Map<JWTAlgorithm, string>} */
+const _plainHeaders = new Map();
+
+/**
+ * @param {JWTAlgorithm} algorithm
+ * @param {Record<string, unknown> | undefined} extra
+ * @returns {string}
+ */
+const _header = (algorithm, extra) => {
+  if (extra) return Buffer.from(JSON.stringify({ typ: "JWT", ...extra, alg: algorithm })).toString("base64url");
+  let header = _plainHeaders.get(algorithm);
+  if (!header) _plainHeaders.set(algorithm, (header = Buffer.from(JSON.stringify({ alg: algorithm, typ: "JWT" })).toString("base64url")));
+  return header;
+};
+
+/**
+ * @param {unknown} token
+ * @returns {{ header: { alg: string, typ?: string, [key: string]: unknown }, payload: Record<string, unknown>, signature: string, signed: string }}
+ */
+const _decode = (token) => {
+  const text = typeof token === "string" ? token : "";
+  const first = text.indexOf(".");
+  const second = text.indexOf(".", first + 1);
+  if (first < 1 || second === -1 || text.includes(".", second + 1)) throw new JWTError("Malformed JWT: expected 3 parts", { code: "ERR_JWT_MALFORMED" });
+  try {
+    const header = JSON.parse(Buffer.from(text.slice(0, first), "base64url").toString("utf8"));
+    const payload = JSON.parse(Buffer.from(text.slice(first + 1, second), "base64url").toString("utf8"));
+    if (!header || typeof header !== "object" || Array.isArray(header) || !payload || typeof payload !== "object" || Array.isArray(payload)) {
+      throw new TypeError("not an object");
+    }
+    return { header, payload, signature: text.slice(second + 1), signed: text.slice(0, second) };
+  } catch (error) {
+    throw new JWTError("Malformed JWT: header or payload is not valid JSON", { code: "ERR_JWT_MALFORMED", cause: error });
+  }
+};
+
 /**
  * Creates a signed JSON Web Token. `iat` is added for you.
+ *
+ * With a secret, the token is signed with HMAC. With a private key, it's
+ * signed with that key, and anyone holding the public key can verify it
+ * without being able to issue tokens.
  *
  * @example
  * const token = crypto.signJWT({ sub: String(user.id), role: user.role }, process.env.JWT_SECRET, {
@@ -429,27 +732,36 @@ function decrypt(payload, secret, options = {}) {
  *   issuer: "api.example.com",
  * });
  *
+ * // key pair: the auth service signs, every other service verifies
+ * const { publicKey, privateKey } = await crypto.generateKeyPair("ES256");
+ * const signed = crypto.signJWT({ sub: "42" }, privateKey, { expiresIn: "15m" });
+ * crypto.verifyJWT(signed, publicKey);
+ *
  * @param {Record<string, unknown>} payload
- * @param {string | Buffer} secret At least 32 random bytes.
+ * @param {JWTKey} secret For HS algorithms, at least 32 random bytes. Otherwise a private key.
  * @param {SignJWTOptions} [options]
  * @returns {string}
+ * @throws {TypeError} If the key can't be used, or doesn't fit the algorithm.
  */
 function signJWT(payload, secret, options = {}) {
-  const algorithm = options.algorithm ?? "HS256";
-  if (!/^HS(256|384|512)$/.test(algorithm)) throw new JWTError(`Unsupported algorithm "${algorithm}"`, { code: "ERR_JWT_ALGORITHM" });
+  if (payload === null || typeof payload !== "object" || Array.isArray(payload)) throw new TypeError("signJWT(): the payload must be an object");
+  const key = _jwtKey(secret, "sign");
+  const algorithm = options.algorithm ?? key.algorithms[0];
+  if (!key.algorithms.includes(algorithm)) {
+    throw new TypeError(`signJWT(): algorithm "${algorithm}" doesn't fit this key, use ${key.algorithms.join(", ")}`);
+  }
   const now = Math.floor(Date.now() / 1000);
   /** @type {Record<string, unknown>} */
   const claims = { ...payload };
   if (!options.noTimestamp && claims.iat === undefined) claims.iat = now;
-  if (options.expiresIn !== undefined) claims.exp = now + _seconds(options.expiresIn);
-  if (options.notBefore !== undefined) claims.nbf = now + _seconds(options.notBefore);
+  if (options.expiresIn !== undefined) claims.exp = now + _seconds(options.expiresIn, "expiresIn");
+  if (options.notBefore !== undefined) claims.nbf = now + _seconds(options.notBefore, "notBefore");
   if (options.issuer !== undefined) claims.iss = options.issuer;
   if (options.subject !== undefined) claims.sub = options.subject;
   if (options.audience !== undefined) claims.aud = options.audience;
   if (options.jwtId !== undefined) claims.jti = options.jwtId;
-  const header = { ...options.header, alg: algorithm, typ: "JWT" };
-  const body = `${Buffer.from(JSON.stringify(header)).toString("base64url")}.${Buffer.from(JSON.stringify(claims)).toString("base64url")}`;
-  return `${body}.${hmac(body, secret, { algorithm: `sha${algorithm.slice(2)}`, encoding: "base64url" })}`;
+  const signed = `${_header(algorithm, options.header)}.${Buffer.from(JSON.stringify(claims)).toString("base64url")}`;
+  return `${signed}.${_signature(algorithm, signed, key)}`;
 }
 
 /**
@@ -465,22 +777,17 @@ function signJWT(payload, secret, options = {}) {
  * @throws {JWTError} With code `ERR_JWT_MALFORMED` if the token can't be read.
  */
 function decodeJWT(token) {
-  const parts = String(token).split(".");
-  if (parts.length !== 3) throw new JWTError("Malformed JWT: expected 3 parts", { code: "ERR_JWT_MALFORMED" });
-  try {
-    const header = JSON.parse(Buffer.from(parts[0], "base64url").toString("utf8"));
-    const payload = JSON.parse(Buffer.from(parts[1], "base64url").toString("utf8"));
-    if (!header || typeof header !== "object" || !payload || typeof payload !== "object") throw new TypeError("not an object");
-    return { header, payload, signature: parts[2] };
-  } catch (error) {
-    throw new JWTError("Malformed JWT: header or payload is not valid JSON", { code: "ERR_JWT_MALFORMED", cause: error });
-  }
+  const { header, payload, signature } = _decode(token);
+  return { header, payload: /** @type {P & JWTClaims} */ (payload), signature };
 }
 
 /**
  * Verifies a JWT: algorithm, signature, expiry, and whichever claims you
  * require. Returns the payload, or throws a `JWTError` whose `code` says
  * what's wrong.
+ *
+ * The accepted algorithms follow from the key you pass, so a token signed
+ * with HMAC is never accepted where a public key is expected.
  *
  * @example
  * try {
@@ -491,41 +798,81 @@ function decodeJWT(token) {
  *
  * @template [P=Record<string, unknown>]
  * @param {string} token
- * @param {string | Buffer} secret
+ * @param {JWTKey} secret The shared secret, or the public key for RS, PS, ES and EdDSA tokens.
  * @param {VerifyJWTOptions} [options]
  * @returns {P & JWTClaims}
  * @throws {JWTError}
  */
 function verifyJWT(token, secret, options = {}) {
-  const { header, payload } = decodeJWT(token);
-  const allowed = options.algorithms ?? ["HS256", "HS384", "HS512"];
-  if (typeof header.alg !== "string" || !allowed.includes(/** @type {JWTAlgorithm} */ (header.alg))) {
+  const { header, payload, signature, signed } = _decode(token);
+  const key = _jwtKey(secret, "verify");
+  const algorithm = /** @type {JWTAlgorithm} */ (header.alg);
+  if (typeof algorithm !== "string" || !key.algorithms.includes(algorithm) || (options.algorithms !== undefined && !options.algorithms.includes(algorithm))) {
     throw new JWTError(`Algorithm "${String(header.alg)}" is not allowed`, { code: "ERR_JWT_ALGORITHM" });
   }
-  const [head, body, signature] = String(token).split(".");
-  const expected = hmac(`${head}.${body}`, secret, { algorithm: `sha${header.alg.slice(2)}`, encoding: "base64url" });
-  if (!safeEqual(expected, signature)) throw new JWTError("Invalid signature", { code: "ERR_JWT_SIGNATURE" });
+  if (!_signatureMatches(algorithm, signed, signature, key)) throw new JWTError("Invalid signature", { code: "ERR_JWT_SIGNATURE" });
 
-  const now = Math.floor((options.now instanceof Date ? options.now.getTime() : options.now ?? Date.now()) / 1000);
-  const tolerance = options.clockTolerance ?? 0;
   const claims = /** @type {JWTClaims & Record<string, unknown>} */ (payload);
-  if (!options.ignoreExpiration && typeof claims.exp === "number" && now - tolerance >= claims.exp) {
+  for (const name of /** @type {const} */ (["exp", "nbf", "iat"])) {
+    if (claims[name] !== undefined && !Number.isFinite(claims[name])) throw new JWTError(`Invalid "${name}" claim: expected a number`, { code: "ERR_JWT_CLAIM" });
+  }
+  const now = Math.floor(_now(options.now) / 1000);
+  const tolerance = options.clockTolerance ?? 0;
+  if (!options.ignoreExpiration && claims.exp !== undefined && now - tolerance >= claims.exp) {
     throw new JWTError("Token expired", { code: "ERR_JWT_EXPIRED", expiredAt: new Date(claims.exp * 1000) });
   }
-  if (typeof claims.nbf === "number" && now + tolerance < claims.nbf) throw new JWTError("Token not active yet", { code: "ERR_JWT_NOT_BEFORE" });
-  if (options.maxAge !== undefined && (typeof claims.iat !== "number" || now - tolerance > claims.iat + _seconds(options.maxAge))) {
+  if (claims.nbf !== undefined && now + tolerance < claims.nbf) throw new JWTError("Token not active yet", { code: "ERR_JWT_NOT_BEFORE" });
+  if (options.maxAge !== undefined && (claims.iat === undefined || now - tolerance > claims.iat + _seconds(options.maxAge, "maxAge"))) {
     throw new JWTError("Token is too old", { code: "ERR_JWT_EXPIRED" });
   }
-  if (options.issuer !== undefined && ![options.issuer].flat().includes(/** @type {string} */ (claims.iss))) {
+  if (options.issuer !== undefined && !(typeof claims.iss === "string" && (Array.isArray(options.issuer) ? options.issuer.includes(claims.iss) : options.issuer === claims.iss))) {
     throw new JWTError("Invalid issuer", { code: "ERR_JWT_CLAIM" });
   }
   if (options.subject !== undefined && claims.sub !== options.subject) throw new JWTError("Invalid subject", { code: "ERR_JWT_CLAIM" });
   if (options.audience !== undefined) {
-    const expectedAud = [options.audience].flat();
-    const actualAud = [claims.aud ?? []].flat();
-    if (!actualAud.some((aud) => expectedAud.includes(/** @type {string} */ (aud)))) throw new JWTError("Invalid audience", { code: "ERR_JWT_CLAIM" });
+    const wanted = Array.isArray(options.audience) ? options.audience : [options.audience];
+    const actual = Array.isArray(claims.aud) ? claims.aud : [claims.aud];
+    if (!actual.some((audience) => typeof audience === "string" && wanted.includes(audience))) throw new JWTError("Invalid audience", { code: "ERR_JWT_CLAIM" });
   }
   return /** @type {P & JWTClaims} */ (payload);
+}
+
+/**
+ * Makes a pair of keys for signing JWTs: the private one signs, the public
+ * one verifies. Both come as PEM text, ready for an environment variable or
+ * a file.
+ *
+ * `"EdDSA"` (Ed25519) is the fastest with the shortest keys and signatures.
+ * `"ES256"` is the most widely supported after RSA. Pick `"RS256"` when the
+ * other side asks for it.
+ *
+ * @example
+ * const { publicKey, privateKey } = await crypto.generateKeyPair();
+ * const token = crypto.signJWT({ sub: "42" }, privateKey);
+ * crypto.verifyJWT(token, publicKey);
+ *
+ * @param {Exclude<JWTAlgorithm, "HS256" | "HS384" | "HS512">} [algorithm="EdDSA"] The JWT algorithm the keys are for.
+ * @param {{ modulusLength?: number }} [options] RSA key size in bits. Defaults to `2048`.
+ * @returns {Promise<KeyPair>}
+ */
+function generateKeyPair(algorithm = "EdDSA", options = {}) {
+  /** @type {[string, object]} */
+  let spec;
+  if (algorithm === "EdDSA") spec = ["ed25519", {}];
+  else if (Object.hasOwn(_ALGORITHM_CURVES, algorithm)) spec = ["ec", { namedCurve: _ALGORITHM_CURVES[algorithm] }];
+  else if (/^(RS|PS)(256|384|512)$/.test(algorithm)) {
+    const modulusLength = options.modulusLength ?? 2048;
+    if (!Number.isInteger(modulusLength) || modulusLength < 2048) return Promise.reject(new RangeError("generateKeyPair(): modulusLength must be at least 2048"));
+    spec = ["rsa", { modulusLength }];
+  } else {
+    return Promise.reject(new TypeError(`generateKeyPair(): expected an RS, PS, ES or EdDSA algorithm, got "${String(algorithm)}"`));
+  }
+  const encoding = { publicKeyEncoding: { type: "spki", format: "pem" }, privateKeyEncoding: { type: "pkcs8", format: "pem" } };
+  return new Promise((resolve, reject) => {
+    /** @type {any} */ (_crypto().generateKeyPair)(spec[0], { ...spec[1], ...encoding }, (/** @type {Error | null} */ error, /** @type {string} */ publicKey, /** @type {string} */ privateKey) =>
+      error ? reject(error) : resolve({ publicKey, privateKey }),
+    );
+  });
 }
 
 /**
@@ -543,6 +890,35 @@ function totpSecret(bytes = 20) {
 }
 
 /**
+ * @param {Buffer} key
+ * @param {number} counter
+ * @param {number} digits
+ * @param {string} algorithm
+ * @returns {string}
+ */
+const _hotp = (key, counter, digits, algorithm) => {
+  const buffer = Buffer.alloc(8);
+  buffer.writeUInt32BE(Math.floor(counter / 2 ** 32), 0);
+  buffer.writeUInt32BE(counter >>> 0, 4);
+  const digest = _crypto().createHmac(algorithm.toLowerCase(), key).update(buffer).digest();
+  const off = digest[digest.length - 1] & 0x0f;
+  const code = ((digest[off] & 0x7f) << 24) | (digest[off + 1] << 16) | (digest[off + 2] << 8) | digest[off + 3];
+  return String(code % 10 ** digits).padStart(digits, "0");
+};
+
+/**
+ * @param {TOTPOptions} options
+ * @returns {{ digits: number, period: number, algorithm: string, time: number }}
+ */
+const _totpOptions = (options) => {
+  const digits = options.digits ?? 6;
+  const period = options.period ?? 30;
+  if (!Number.isInteger(digits) || digits < 4 || digits > 10) throw new RangeError(`TOTP codes have 4 to 10 digits, got ${digits}`);
+  if (!(period > 0)) throw new RangeError(`The TOTP period must be a positive number of seconds, got ${period}`);
+  return { digits, period, algorithm: options.algorithm ?? "SHA1", time: _now(options.time) };
+};
+
+/**
  * The current 6-digit code for a two-factor secret, as shown by
  * authenticator apps.
  *
@@ -554,16 +930,8 @@ function totpSecret(bytes = 20) {
  * @returns {string}
  */
 function totp(secret, options = {}) {
-  const digits = options.digits ?? 6;
-  const period = options.period ?? 30;
-  const time = options.time instanceof Date ? options.time.getTime() : options.time ?? Date.now();
-  const counter = Math.floor(time / 1000 / period);
-  const buffer = Buffer.alloc(8);
-  buffer.writeBigUInt64BE(BigInt(counter));
-  const digest = _crypto().createHmac((options.algorithm ?? "SHA1").toLowerCase(), _base32Decode(secret)).update(buffer).digest();
-  const off = digest[digest.length - 1] & 0x0f;
-  const code = ((digest[off] & 0x7f) << 24) | (digest[off + 1] << 16) | (digest[off + 2] << 8) | digest[off + 3];
-  return String(code % 10 ** digits).padStart(digits, "0");
+  const { digits, period, algorithm, time } = _totpOptions(options);
+  return _hotp(_base32Decode(secret), Math.floor(time / 1000 / period), digits, algorithm);
 }
 
 /**
@@ -579,15 +947,16 @@ function totp(secret, options = {}) {
  * @returns {boolean}
  */
 function verifyTOTP(token, secret, options = {}) {
-  const code = String(token).replace(/\s/g, "");
-  const digits = options.digits ?? 6;
-  if (!new RegExp(`^\\d{${digits}}$`).test(code)) return false;
-  const period = options.period ?? 30;
-  const time = options.time instanceof Date ? options.time.getTime() : options.time ?? Date.now();
-  const window = options.window ?? 1;
+  const { digits, period, algorithm, time } = _totpOptions(options);
+  const key = _base32Decode(secret);
+  const code = Buffer.from(String(token).replace(/\s/g, ""));
+  if (code.length !== digits) return false;
+  const window = Math.max(0, Math.floor(options.window ?? 1));
+  const counter = Math.floor(time / 1000 / period);
   let valid = false;
+  // Every candidate is checked, so the time taken says nothing about which one matched.
   for (let i = -window; i <= window; i++) {
-    if (safeEqual(totp(secret, { ...options, time: time + i * period * 1000 }), code)) valid = true;
+    if (counter + i >= 0 && _crypto().timingSafeEqual(Buffer.from(_hotp(key, counter + i, digits, algorithm)), code)) valid = true;
   }
   return valid;
 }
@@ -635,7 +1004,10 @@ function randomBytes(size) {
  * @returns {number}
  */
 function randomInt(min, max) {
-  return _crypto().randomInt(Math.ceil(min), Math.floor(max) + 1);
+  const low = Math.ceil(min);
+  const high = Math.floor(max);
+  if (!(high >= low)) throw new RangeError(`randomInt(): expected min <= max, got ${min} and ${max}`);
+  return _crypto().randomInt(low, high + 1);
 }
 
 /**
@@ -679,13 +1051,15 @@ function toBase64(data, options = {}) {
  * @returns {string | Buffer}
  */
 function fromBase64(text, options = {}) {
-  const buffer = Buffer.from(String(text).replace(/-/g, "+").replace(/_/g, "/"), "base64");
+  // Node reads both alphabets, padded or not.
+  const buffer = Buffer.from(String(text), "base64");
   return options.output === "buffer" ? buffer : buffer.toString("utf8");
 }
 
 module.exports = {
   hash,
   hmac,
+  verifyHmac,
   safeEqual,
   hashPassword,
   verifyPassword,
@@ -696,6 +1070,7 @@ module.exports = {
   signJWT,
   decodeJWT,
   verifyJWT,
+  generateKeyPair,
   totpSecret,
   totp,
   verifyTOTP,
