@@ -40,11 +40,11 @@ describe("Cache", () => {
     assert.equal(cache.get("a"), undefined);
     assert.equal(cache.get("forever"), 2);
     assert.equal(cache.stats.expirations, 1);
-    const sliding = new Cache({ ttl: "60ms", updateAgeOnGet: true });
+    const sliding = new Cache({ ttl: "400ms", updateAgeOnGet: true });
     sliding.set("k", 1);
-    await nc.wait(40);
+    await nc.wait(250);
     assert.equal(sliding.get("k"), 1);
-    await nc.wait(40);
+    await nc.wait(250);
     assert.equal(sliding.get("k"), 1, "reading restarted the ttl");
     const pruned = new Cache({ ttl: 5 });
     pruned.set("x", 1).set("y", 2);
