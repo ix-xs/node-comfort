@@ -64,7 +64,8 @@ describe("package entry point", () => {
     const code = `
       const root = ${JSON.stringify(path.join(__dirname, ".."))};
       const nc = require(root);
-      const loaded = () => Object.keys(require.cache).filter((f) => f.includes(require("node:path").join(root, "src"))).length;
+      const src = require("node:path").join(root, "src");
+      const loaded = () => Object.keys(require.cache).filter((f) => require("node:path").dirname(f) === src).length;
       const before = loaded();
       nc.str.slugify("a");
       console.log(JSON.stringify({ before, after: loaded() }));`;

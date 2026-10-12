@@ -13,6 +13,8 @@
  * num.percentile(latencies, 95);
  */
 
+const { intl, preciseSum } = require("./internal/shared.js");
+
 /** The default language, changed with `setLocale()`. */
 const _config = { locale: "en" };
 
@@ -88,8 +90,31 @@ const _shift = (value, exp) => {
  */
 const _roundWith = (value, decimals, fn) => {
   if (!Number.isFinite(value)) return value;
+  if (decimals === 0) return fn(value);
+  if (decimals > 0 && Number.isInteger(value)) return value;
   return _shift(fn(_shift(value, decimals)), -decimals);
 };
+
+/**
+ * How many decimals a number is written with, exponent notation included.
+ * @param {number} n
+ * @returns {number}
+ */
+const _decimalsOf = (n) => {
+  if (Number.isInteger(n) || !Number.isFinite(n)) return 0;
+  const text = String(n);
+  const exponent = text.indexOf("e-");
+  if (exponent === -1) return text.length - text.indexOf(".") - 1;
+  const mantissa = text.slice(0, exponent);
+  return Number(text.slice(exponent + 2)) + (mantissa.includes(".") ? mantissa.length - mantissa.indexOf(".") - 1 : 0);
+};
+
+/** @param {number} n */
+const _halfAwayFromZero = (n) => Math.sign(n) * Math.round(Math.abs(n)) || 0;
+
+/** @type {Array<[number, string]>} */
+const _ABBREVIATIONS = [[1e12, "T"], [1e9, "B"], [1e6, "M"], [1e3, "K"]];
+const _ORDINAL = { type: "ordinal" };
 
 const _SIZE_UNITS = ["B", "KB", "MB", "GB", "TB", "PB", "EB", "ZB", "YB"];
 const _IEC_UNITS = ["B", "KiB", "MiB", "GiB", "TiB", "PiB", "EiB", "ZiB", "YiB"];
@@ -170,7 +195,7 @@ function wrap(value, min, max) {
  * @returns {number}
  */
 function round(value, decimals = 0) {
-  return _roundWith(value, decimals, (n) => Math.sign(n) * Math.round(Math.abs(n)) || 0);
+  return _roundWith(value, decimals, _halfAwayFromZero);
 }
 
 /**
@@ -214,8 +239,7 @@ function ceil(value, decimals = 0) {
  */
 function snap(value, step) {
   if (!step) return value;
-  const decimals = (String(step).split(".")[1] ?? "").length;
-  return round(Math.round(value / step) * step, decimals);
+  return round(Math.round(value / step) * step, _decimalsOf(step));
 }
 
 /**
@@ -302,17 +326,31 @@ function randomInt(min, max) {
 }
 
 /**
- * Adds up numbers.
+ * Adds up numbers, without the drift of a naive loop.
  *
  * @example
- * num.sum([1, 2, 3]); // 6
+ * num.sum([1, 2, 3]);       // 6
+ * num.sum([0.1, 0.2, 0.3]); // 0.6, where a plain loop gives 0.6000000000000001
  *
  * @param {Iterable<number>} values
  * @returns {number}
  */
 function sum(values) {
-  let total = 0;
-  for (const n of values) total += n;
+  return preciseSum(values);
+}
+
+/**
+ * Multiplies numbers. An empty list gives `1`.
+ *
+ * @example
+ * num.product([2, 3, 4]); // 24
+ *
+ * @param {Iterable<number>} values
+ * @returns {number}
+ */
+function product(values) {
+  let total = 1;
+  for (const n of values) total *= n;
   return total;
 }
 
@@ -326,8 +364,8 @@ function sum(values) {
  * @returns {number}
  */
 function average(values) {
-  const list = [...values];
-  return list.length ? sum(list) / list.length : 0;
+  const list = Array.isArray(values) ? values : [...values];
+  return list.length ? preciseSum(list) / list.length : 0;
 }
 
 /**
@@ -359,9 +397,16 @@ function median(values) {
 function mode(values) {
   /** @type {Map<number, number>} */
   const counts = new Map();
-  for (const n of values) counts.set(n, (counts.get(n) ?? 0) + 1);
-  const best = Math.max(0, ...counts.values());
-  return [...counts].filter(([, c]) => c === best && best > 0).map(([n]) => n);
+  let best = 0;
+  for (const n of values) {
+    const count = (counts.get(n) ?? 0) + 1;
+    counts.set(n, count);
+    if (count > best) best = count;
+  }
+  /** @type {number[]} */
+  const out = [];
+  for (const [n, count] of counts) if (count === best) out.push(n);
+  return out;
 }
 
 /**
@@ -375,11 +420,13 @@ function mode(values) {
  * @returns {number}
  */
 function variance(values, options = {}) {
-  const list = [...values];
+  const list = Array.isArray(values) ? values : [...values];
   const divisor = options.sample ? list.length - 1 : list.length;
   if (divisor <= 0) return 0;
-  const mean = sum(list) / list.length;
-  return list.reduce((acc, n) => acc + (n - mean) ** 2, 0) / divisor;
+  const mean = preciseSum(list) / list.length;
+  let total = 0;
+  for (let i = 0; i < list.length; i++) total += (list[i] - mean) ** 2;
+  return total / divisor;
 }
 
 /**
@@ -419,25 +466,33 @@ function percentile(values, p) {
 
 /**
  * The smallest number. Unlike `Math.min(...array)`, huge arrays are fine.
+ * Like `Math.min`, a `NaN` in the list gives `NaN`.
  *
  * @param {Iterable<number>} values
  * @returns {number | undefined} `undefined` for an empty list.
  */
 function min(values) {
   let best;
-  for (const n of values) if (best === undefined || n < best) best = n;
+  for (const n of values) {
+    if (n !== n) return NaN;
+    if (best === undefined || n < best) best = n;
+  }
   return best;
 }
 
 /**
  * The largest number. Unlike `Math.max(...array)`, huge arrays are fine.
+ * Like `Math.max`, a `NaN` in the list gives `NaN`.
  *
  * @param {Iterable<number>} values
  * @returns {number | undefined} `undefined` for an empty list.
  */
 function max(values) {
   let best;
-  for (const n of values) if (best === undefined || n > best) best = n;
+  for (const n of values) {
+    if (n !== n) return NaN;
+    if (best === undefined || n > best) best = n;
+  }
   return best;
 }
 
@@ -459,6 +514,25 @@ function percent(value, total, decimals = 2) {
 }
 
 /**
+ * How much a value changed, in percent. Going from `0` to anything else is
+ * an infinite change.
+ *
+ * @example
+ * num.percentChange(80, 100); // 25
+ * num.percentChange(100, 80); // -20
+ *
+ * @param {number} from
+ * @param {number} to
+ * @param {number} [decimals=2]
+ * @returns {number}
+ */
+function percentChange(from, to, decimals = 2) {
+  if (from === to) return 0;
+  if (!from) return to > 0 ? Infinity : -Infinity;
+  return round(((to - from) / Math.abs(from)) * 100, decimals);
+}
+
+/**
  * Greatest common divisor.
  *
  * @example
@@ -468,12 +542,18 @@ function percent(value, total, decimals = 2) {
  * @returns {number}
  */
 function gcd(...values) {
-  return values.reduce((a, b) => {
-    let x = Math.abs(a);
-    let y = Math.abs(b);
-    while (y) [x, y] = [y, x % y];
-    return x;
-  }, 0);
+  let result = 0;
+  for (const value of values) {
+    let x = Math.abs(result);
+    let y = Math.abs(value);
+    while (y) {
+      const rest = x % y;
+      x = y;
+      y = rest;
+    }
+    result = x;
+  }
+  return result;
 }
 
 /**
@@ -487,7 +567,8 @@ function gcd(...values) {
  */
 function lcm(...values) {
   if (!values.length) return 0;
-  return values.reduce((a, b) => (a === 0 || b === 0 ? 0 : Math.abs(a * b) / gcd(a, b)));
+  // Dividing first keeps the intermediate value small.
+  return values.reduce((a, b) => (a === 0 || b === 0 ? 0 : Math.abs((a / gcd(a, b)) * b)));
 }
 
 /**
@@ -578,10 +659,13 @@ function range(start, end, step) {
   }
   const inc = step ?? (to < from ? -1 : 1);
   if (inc === 0 || (inc > 0 && from > to) || (inc < 0 && from < to)) return [];
-  const decimals = Math.max((String(inc).split(".")[1] ?? "").length, (String(from).split(".")[1] ?? "").length);
-  const out = [];
-  const count = Math.ceil((to - from) / inc);
-  for (let i = 0; i < count; i++) out.push(decimals ? round(from + i * inc, decimals) : from + i * inc);
+  const decimals = Math.max(_decimalsOf(inc), _decimalsOf(from));
+  // Rounding the ratio keeps 1.1 / 0.1 = 11.000000000000002 from adding an item.
+  const count = Math.ceil(round((to - from) / inc, 9));
+  if (!Number.isFinite(count) || count > 0xffffffff) throw new RangeError("range() would produce too many numbers");
+  /** @type {number[]} */
+  const out = new Array(count);
+  for (let i = 0; i < count; i++) out[i] = decimals ? round(from + i * inc, decimals) : from + i * inc;
   return out;
 }
 
@@ -644,13 +728,22 @@ function formatBytes(bytes, options = {}) {
   if (!Number.isFinite(bytes) || bytes === 0) return `0 ${units[0]}`;
   const decimals = options.decimals ?? 1;
   const base = options.binary === false ? 1000 : 1024;
-  const sign = bytes < 0 ? "-" : "";
-  const abs = Math.abs(bytes);
-  const i = Math.min(Math.floor(Math.log(abs) / Math.log(base)), units.length - 1);
-  const amount = round(abs / base ** i, decimals);
+  const last = units.length - 1;
+  let amount = Math.abs(bytes);
+  let unit = 0;
+  while (amount >= base && unit < last) {
+    amount /= base;
+    unit++;
+  }
+  amount = round(amount, decimals);
+  // Rounding can reach the next unit: 1023.99 KB reads better as 1 MB.
+  if (amount >= base && unit < last) {
+    amount = round(amount / base, decimals);
+    unit++;
+  }
   const locale = options.locale ?? (_config.locale === "en" ? undefined : _config.locale);
-  const text = locale ? new Intl.NumberFormat(locale, { maximumFractionDigits: decimals }).format(amount) : String(amount);
-  return `${sign}${text} ${units[i]}`;
+  const text = locale ? intl.number(locale, { maximumFractionDigits: decimals }).format(amount) : String(amount);
+  return `${bytes < 0 ? "-" : ""}${text} ${units[unit]}`;
 }
 
 /**
@@ -670,26 +763,26 @@ function formatBytes(bytes, options = {}) {
  */
 function format(value, options = {}) {
   /** @type {Intl.NumberFormatOptions} */
-  const intl = {};
+  const format = {};
   if (options.decimals !== undefined) {
-    intl.minimumFractionDigits = options.decimals;
-    intl.maximumFractionDigits = options.decimals;
+    format.minimumFractionDigits = options.decimals;
+    format.maximumFractionDigits = options.decimals;
   }
-  if (options.minDecimals !== undefined) intl.minimumFractionDigits = options.minDecimals;
-  if (options.maxDecimals !== undefined) intl.maximumFractionDigits = options.maxDecimals;
+  if (options.minDecimals !== undefined) format.minimumFractionDigits = options.minDecimals;
+  if (options.maxDecimals !== undefined) format.maximumFractionDigits = options.maxDecimals;
   if (options.compact) {
-    intl.notation = "compact";
-    intl.compactDisplay = "short";
+    format.notation = "compact";
+    format.compactDisplay = "short";
   }
-  if (options.style === "percent") intl.style = "percent";
+  if (options.style === "percent") format.style = "percent";
   if (options.unit) {
-    intl.style = "unit";
-    intl.unit = options.unit;
-    intl.unitDisplay = options.unitDisplay ?? "short";
+    format.style = "unit";
+    format.unit = options.unit;
+    format.unitDisplay = options.unitDisplay ?? "short";
   }
-  if (options.signDisplay) intl.signDisplay = options.signDisplay;
-  if (options.grouping === false) intl.useGrouping = false;
-  return new Intl.NumberFormat(options.locale ?? _config.locale, intl).format(value);
+  if (options.signDisplay) format.signDisplay = options.signDisplay;
+  if (options.grouping === false) format.useGrouping = false;
+  return intl.number(options.locale ?? _config.locale, format).format(value);
 }
 
 /**
@@ -707,13 +800,13 @@ function format(value, options = {}) {
  */
 function currency(value, code, options = {}) {
   /** @type {Intl.NumberFormatOptions} */
-  const intl = { style: "currency", currency: code, currencyDisplay: options.display ?? "symbol" };
+  const format = { style: "currency", currency: code, currencyDisplay: options.display ?? "symbol" };
   if (options.decimals !== undefined) {
-    intl.minimumFractionDigits = options.decimals;
-    intl.maximumFractionDigits = options.decimals;
+    format.minimumFractionDigits = options.decimals;
+    format.maximumFractionDigits = options.decimals;
   }
-  if (options.accounting) intl.currencySign = "accounting";
-  return new Intl.NumberFormat(options.locale ?? _config.locale, intl).format(value);
+  if (options.accounting) format.currencySign = "accounting";
+  return intl.number(options.locale ?? _config.locale, format).format(value);
 }
 
 /**
@@ -729,12 +822,19 @@ function currency(value, code, options = {}) {
  * @returns {string}
  */
 function abbreviate(value, decimals = 1) {
+  if (!Number.isFinite(value)) return String(value);
   const sign = value < 0 ? "-" : "";
   const abs = Math.abs(value);
-  for (const [limit, suffix] of /** @type {Array<[number, string]>} */ ([[1e12, "T"], [1e9, "B"], [1e6, "M"], [1e3, "K"]])) {
-    if (abs >= limit) return `${sign}${round(abs / limit, decimals)}${suffix}`;
+  for (let i = 0; i < _ABBREVIATIONS.length; i++) {
+    const [limit, suffix] = _ABBREVIATIONS[i];
+    if (abs < limit) continue;
+    const rounded = round(abs / limit, decimals);
+    // Rounding can reach the next suffix: 999,950 is 1M, not 1000K.
+    if (rounded >= 1000 && i > 0) return `${sign}${round(abs / _ABBREVIATIONS[i - 1][0], decimals)}${_ABBREVIATIONS[i - 1][1]}`;
+    return `${sign}${rounded}${suffix}`;
   }
-  return `${sign}${round(abs, decimals)}`;
+  const rounded = round(abs, decimals);
+  return rounded >= 1000 ? `${sign}${round(abs / 1000, decimals)}K` : `${sign}${rounded}`;
 }
 
 /**
@@ -751,6 +851,25 @@ function thousands(value, separator = ",") {
   const [int, dec] = String(value).split(".");
   const grouped = int.replace(/\B(?=(\d{3})+(?!\d))/g, separator);
   return dec === undefined ? grouped : `${grouped}.${dec}`;
+}
+
+/**
+ * Pads the integer part with zeros (or another character).
+ *
+ * @example
+ * num.pad(7, 3);    // "007"
+ * num.pad(-7, 3);   // "-007"
+ * num.pad(3.5, 2);  // "03.5"
+ *
+ * @param {number} value
+ * @param {number} length Digits wanted before the decimal point.
+ * @param {string} [char="0"]
+ * @returns {string}
+ */
+function pad(value, length, char = "0") {
+  const [int, dec] = String(Math.abs(value)).split(".");
+  const sign = value < 0 || Object.is(value, -0) ? "-" : "";
+  return `${sign}${int.padStart(length, char)}${dec === undefined ? "" : `.${dec}`}`;
 }
 
 /**
@@ -771,9 +890,9 @@ function ordinal(value, options = {}) {
   const suffixes = options.suffixes ?? _ORDINAL_SUFFIXES[language] ?? _ORDINAL_SUFFIXES.en;
   let category;
   try {
-    category = new Intl.PluralRules(locale, { type: "ordinal" }).select(value);
+    category = intl.plural(locale, _ORDINAL).select(value);
   } catch {
-    category = new Intl.PluralRules("en", { type: "ordinal" }).select(value);
+    category = intl.plural("en", _ORDINAL).select(value);
   }
   return `${value}${suffixes[category] ?? suffixes.other ?? ""}`;
 }
@@ -822,6 +941,7 @@ module.exports = {
   random,
   randomInt,
   sum,
+  product,
   average,
   median,
   mode,
@@ -831,6 +951,7 @@ module.exports = {
   min,
   max,
   percent,
+  percentChange,
   gcd,
   lcm,
   isPrime,
@@ -845,5 +966,6 @@ module.exports = {
   currency,
   abbreviate,
   thousands,
+  pad,
   ordinal,
 };

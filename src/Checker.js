@@ -11,6 +11,18 @@
  */
 
 const { types } = require("node:util");
+const shared = require("./internal/shared.js");
+
+/** @type {typeof import("node:net") | undefined} */
+let _net;
+
+const EMAIL = /^(?!\.)(?!.*\.\.)[\p{L}\p{N}.!#$%&'*+/=?^_`{|}~-]{1,64}(?<!\.)@(?:[\p{L}\p{N}](?:[\p{L}\p{N}-]{0,61}[\p{L}\p{N}])?\.)+(?:\p{L}{2,}|xn--[a-z0-9-]{2,})$/iu;
+const TLD = /\.(?:[a-z]{2,}|xn--[a-z0-9-]{2,})\.?$/i;
+const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-([1-8])[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+const UUID_NIL_OR_MAX = /^(?:0{8}-0{4}-0{4}-0{4}-0{12}|f{8}-f{4}-f{4}-f{4}-f{12})$/i;
+const ISO_DATE = /^(\d{4})-(\d{2})-(\d{2})(?:[T ](\d{2}):(\d{2})(?::(\d{2})(?:\.\d{1,9})?)?(?:Z|([+-])(\d{2}):?(\d{2}))?)?$/;
+const HOST_LABEL = /^[\p{L}\p{N}](?:[\p{L}\p{N}-]{0,61}[\p{L}\p{N}])?$/u;
+const DAYS_IN_MONTH = [31, 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31];
 
 /**
  * Any built-in typed array.
@@ -33,6 +45,12 @@ const { types } = require("node:util");
  * Options for `isUUID()`.
  * @typedef {object} IsUUIDOptions
  * @property {1|2|3|4|5|6|7|8} [version] Only accept this version. Otherwise versions 1 to 8 pass, plus the nil and max UUIDs.
+ */
+
+/**
+ * Options for `isHostname()`.
+ * @typedef {object} IsHostnameOptions
+ * @property {boolean} [requireTld] Require a domain like `example.com`, rejecting `localhost`.
  */
 
 /**
@@ -348,10 +366,7 @@ function isObject(value) {
  * @returns {value is Record<string, unknown>}
  */
 function isPlainObject(value) {
-  if (typeof value !== "object" || value === null) return false;
-  const proto = Object.getPrototypeOf(value);
-  // The last check accepts objects from another realm (a worker, a `vm`).
-  return proto === null || proto === Object.prototype || Object.getPrototypeOf(proto) === null;
+  return shared.isPlainObject(value);
 }
 
 /**
@@ -495,7 +510,8 @@ function isError(value) {
 
 /**
  * Is it empty? `null`, `undefined`, `""`, `[]`, `{}` and empty maps and sets
- * are. Numbers, booleans and functions never are.
+ * are. Numbers, booleans, functions, dates, regular expressions and errors
+ * never are.
  *
  * @example
  * nc.isEmpty({});  // true
@@ -508,9 +524,10 @@ function isError(value) {
 function isEmpty(value) {
   if (value === null || value === undefined) return true;
   if (typeof value === "string" || Array.isArray(value)) return value.length === 0;
+  if (typeof value !== "object") return false;
   if (types.isMap(value) || types.isSet(value)) return /** @type {Map<unknown, unknown>} */ (value).size === 0;
-  if (typeof value === "object") return Object.keys(value).length === 0;
-  return false;
+  if (types.isDate(value) || types.isRegExp(value) || types.isNativeError(value)) return false;
+  return Object.keys(value).length === 0;
 }
 
 /**
@@ -574,8 +591,7 @@ function isOneOf(value, allowed) {
  * @returns {value is string}
  */
 function isEmail(value) {
-  if (typeof value !== "string" || value.length > 254) return false;
-  return /^(?!\.)(?!.*\.\.)[\p{L}\p{N}.!#$%&'*+/=?^_`{|}~-]+(?<!\.)@(?:[\p{L}\p{N}](?:[\p{L}\p{N}-]{0,61}[\p{L}\p{N}])?\.)+\p{L}{2,}$/u.test(value);
+  return typeof value === "string" && value.length <= 254 && EMAIL.test(value);
 }
 
 /**
@@ -592,15 +608,11 @@ function isEmail(value) {
  */
 function isURL(value, options = {}) {
   if (typeof value !== "string") return false;
-  const protocols = options.protocols ?? ["http:", "https:"];
-  try {
-    const url = new URL(value);
-    if (!protocols.includes(url.protocol)) return false;
-    if (options.requireTld && !/\.[a-z]{2,}$/i.test(url.hostname)) return false;
-    return true;
-  } catch {
-    return false;
-  }
+  const url = URL.parse(value);
+  if (!url) return false;
+  const protocols = options.protocols;
+  if (protocols ? !protocols.includes(url.protocol) : url.protocol !== "http:" && url.protocol !== "https:") return false;
+  return !options.requireTld || TLD.test(url.hostname);
 }
 
 /**
@@ -616,9 +628,10 @@ function isURL(value, options = {}) {
  */
 function isUUID(value, options = {}) {
   if (typeof value !== "string") return false;
-  if (options.version === undefined && /^(0{8}-0{4}-0{4}-0{4}-0{12}|f{8}-f{4}-f{4}-f{4}-f{12})$/i.test(value)) return true;
-  const version = options.version === undefined ? "[1-8]" : String(options.version);
-  return new RegExp(`^[0-9a-f]{8}-[0-9a-f]{4}-${version}[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$`, "i").test(value);
+  if (value.length !== 36) return false;
+  const match = UUID.exec(value);
+  if (!match) return options.version === undefined && UUID_NIL_OR_MAX.test(value);
+  return options.version === undefined || Number(match[1]) === options.version;
 }
 
 /**
@@ -672,7 +685,7 @@ function isNumeric(value) {
  */
 function isIP(value, version) {
   if (typeof value !== "string") return false;
-  const detected = require("node:net").isIP(value);
+  const detected = (_net ??= require("node:net")).isIP(value);
   return version === undefined ? detected !== 0 : detected === version;
 }
 
@@ -781,15 +794,16 @@ function isSemver(value) {
  */
 function isISODate(value) {
   if (typeof value !== "string") return false;
-  const match = /^(\d{4})-(\d{2})-(\d{2})(?:[T ](\d{2}):(\d{2})(?::(\d{2})(?:\.\d{1,9})?)?(Z|[+-]\d{2}:?\d{2})?)?$/.exec(value);
+  const match = ISO_DATE.exec(value);
   if (!match) return false;
-  const [, y, m, d, hh = "0", mm = "0", ss = "0"] = match;
+  const [, y, m, d, hh = "0", mm = "0", ss = "0", , offsetHours = "0", offsetMinutes = "0"] = match;
   const year = Number(y);
   const month = Number(m);
   const day = Number(d);
   if (month < 1 || month > 12 || day < 1) return false;
-  const daysInMonth = new Date(Date.UTC(year, month, 0)).getUTCDate();
-  return day <= daysInMonth && Number(hh) <= 23 && Number(mm) <= 59 && Number(ss) <= 59;
+  const leap = (year % 4 === 0 && year % 100 !== 0) || year % 400 === 0;
+  if (day > (month === 2 && leap ? 29 : DAYS_IN_MONTH[month - 1])) return false;
+  return Number(hh) <= 23 && Number(mm) <= 59 && Number(ss) <= 59 && Number(offsetHours) <= 14 && Number(offsetMinutes) <= 59;
 }
 
 /**
@@ -872,6 +886,211 @@ function isJWT(value) {
   } catch {
     return false;
   }
+}
+
+/**
+ * Is it a host name, like `example.com`, `api.internal` or `localhost`?
+ * International names are accepted. IP addresses aren't: see `isIP`.
+ *
+ * @example
+ * nc.isHostname("api.example.com");                    // true
+ * nc.isHostname("localhost");                          // true
+ * nc.isHostname("localhost", { requireTld: true });    // false
+ * nc.isHostname("-bad-.com");                          // false
+ *
+ * @param {unknown} value
+ * @param {IsHostnameOptions} [options]
+ * @returns {value is string}
+ */
+function isHostname(value, options = {}) {
+  if (typeof value !== "string" || value.length === 0 || value.length > 253) return false;
+  const labels = value.split(".");
+  if (!labels.every((label) => HOST_LABEL.test(label))) return false;
+  if (/^\d+$/.test(labels[labels.length - 1])) return false;
+  return !options.requireTld || (labels.length > 1 && TLD.test(value));
+}
+
+/**
+ * Is it a MAC address? Accepts `aa:bb:cc:dd:ee:ff`, `aa-bb-cc-dd-ee-ff` and
+ * `aabb.ccdd.eeff`.
+ *
+ * @example
+ * nc.isMACAddress("00:1B:44:11:3A:B7"); // true
+ * nc.isMACAddress("00:1B:44:11:3A");    // false
+ *
+ * @param {unknown} value
+ * @returns {value is string}
+ */
+function isMACAddress(value) {
+  return typeof value === "string" && /^(?:[0-9a-f]{2}(?::[0-9a-f]{2}){5}|[0-9a-f]{2}(?:-[0-9a-f]{2}){5}|[0-9a-f]{4}(?:\.[0-9a-f]{4}){2})$/i.test(value);
+}
+
+/**
+ * Is it a valid IBAN? Checks the format and the checksum, spaces allowed.
+ *
+ * @example
+ * nc.isIBAN("FR76 3000 6000 0112 3456 7890 189"); // true
+ * nc.isIBAN("FR76 3000 6000 0112 3456 7890 180"); // false, wrong checksum
+ *
+ * @param {unknown} value
+ * @returns {value is string}
+ */
+function isIBAN(value) {
+  if (typeof value !== "string") return false;
+  const iban = value.replace(/\s+/g, "").toUpperCase();
+  if (!/^[A-Z]{2}\d{2}[A-Z0-9]{11,30}$/.test(iban)) return false;
+  const rearranged = iban.slice(4) + iban.slice(0, 4);
+  let remainder = 0;
+  for (let i = 0; i < rearranged.length; i++) {
+    const code = rearranged.charCodeAt(i);
+    // Letters count as two digits (A = 10 ... Z = 35).
+    remainder = code >= 65 ? (remainder * 100 + code - 55) % 97 : (remainder * 10 + code - 48) % 97;
+  }
+  return remainder === 1;
+}
+
+/**
+ * Is it a phone number in the international E.164 format: a `+`, then 7 to
+ * 15 digits, no spaces? That's what SMS and telephony APIs expect.
+ *
+ * @example
+ * nc.isE164("+33612345678"); // true
+ * nc.isE164("06 12 34 56 78"); // false
+ *
+ * @param {unknown} value
+ * @returns {value is string}
+ */
+function isE164(value) {
+  return typeof value === "string" && /^\+[1-9]\d{6,14}$/.test(value);
+}
+
+/**
+ * Is it a MongoDB ObjectId, 24 hexadecimal characters?
+ *
+ * @example
+ * nc.isObjectId("507f1f77bcf86cd799439011"); // true
+ *
+ * @param {unknown} value
+ * @returns {value is string}
+ */
+function isObjectId(value) {
+  return typeof value === "string" && value.length === 24 && /^[0-9a-f]{24}$/i.test(value);
+}
+
+/**
+ * Is it a ULID, like the ones `nc.id.ulid()` makes?
+ *
+ * @example
+ * nc.isULID(nc.id.ulid()); // true
+ *
+ * @param {unknown} value
+ * @returns {value is string}
+ */
+function isULID(value) {
+  return typeof value === "string" && value.length === 26 && /^[0-7][0-9A-HJKMNP-TV-Z]{25}$/i.test(value);
+}
+
+/**
+ * Is it a `data:` URL, like an inline image?
+ *
+ * @example
+ * nc.isDataURL("data:image/png;base64,iVBORw0KGgo="); // true
+ * nc.isDataURL("data:,Hello");                         // true
+ *
+ * @param {unknown} value
+ * @returns {value is string}
+ */
+function isDataURL(value) {
+  return typeof value === "string" && /^data:(?:[a-z0-9!#$&^_.+-]+\/[a-z0-9!#$&^_.+-]+)?(?:;[a-z0-9-]+=[^;,]*)*(?:;base64)?,/i.test(value);
+}
+
+/**
+ * Is it a media type, like `application/json` or
+ * `text/html; charset=utf-8`?
+ *
+ * @example
+ * nc.isMimeType("image/svg+xml"); // true
+ * nc.isMimeType("json");          // false
+ *
+ * @param {unknown} value
+ * @returns {value is string}
+ */
+function isMimeType(value) {
+  return typeof value === "string" && /^[a-z0-9][a-z0-9!#$&^_.+-]*\/[a-z0-9][a-z0-9!#$&^_.+-]*(?:\s*;\s*[a-z0-9-]+=(?:"[^"]*"|[^;\s]+))*$/i.test(value);
+}
+
+/**
+ * Is it a time zone Node.js knows, like `"Europe/Paris"` or `"UTC"`?
+ *
+ * @example
+ * nc.isTimeZone("America/New_York"); // true
+ * nc.isTimeZone("Mars/Olympus");     // false
+ *
+ * @param {unknown} value
+ * @returns {value is string}
+ */
+function isTimeZone(value) {
+  if (typeof value !== "string" || value === "") return false;
+  try {
+    shared.intl.dateTime("en", { timeZone: value });
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Is it a well-formed locale, like `"fr"`, `"en-GB"` or `"zh-Hant-TW"`?
+ *
+ * @example
+ * nc.isLocale("pt-BR"); // true
+ * nc.isLocale("en_US"); // false, use a dash
+ *
+ * @param {unknown} value
+ * @returns {value is string}
+ */
+function isLocale(value) {
+  if (typeof value !== "string" || value === "") return false;
+  try {
+    return Intl.getCanonicalLocales(value).length === 1;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Is it a cron expression `nc.time.cron()` understands?
+ *
+ * @example
+ * nc.isCron("0 9 * * 1-5"); // true
+ * nc.isCron("@daily");      // true
+ * nc.isCron("61 * * * *");  // false
+ *
+ * @param {unknown} value
+ * @returns {value is string}
+ */
+function isCron(value) {
+  if (typeof value !== "string") return false;
+  try {
+    shared.parseCron(value);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Is it made only of ASCII characters?
+ *
+ * @example
+ * nc.isASCII("hello"); // true
+ * nc.isASCII("héllo"); // false
+ *
+ * @param {unknown} value
+ * @returns {value is string}
+ */
+function isASCII(value) {
+  return typeof value === "string" && shared.ASCII.test(value);
 }
 
 /**
@@ -974,6 +1193,18 @@ module.exports = {
   isAlphanumeric,
   isCreditCard,
   isJWT,
+  isHostname,
+  isMACAddress,
+  isIBAN,
+  isE164,
+  isObjectId,
+  isULID,
+  isDataURL,
+  isMimeType,
+  isTimeZone,
+  isLocale,
+  isCron,
+  isASCII,
   assert,
   assertType,
 };

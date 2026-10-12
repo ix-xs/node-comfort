@@ -25,6 +25,7 @@
  * @typedef {object} TruncateOptions
  * @property {string} [omission] Added where the text is cut, and counted in the length. Defaults to `"…"`.
  * @property {boolean} [words] Cut at the previous space rather than inside a word.
+ * @property {"end" | "middle" | "start"} [position] Where the text is cut. `"middle"` keeps both ends, which suits paths and ids. Defaults to `"end"`.
  */
 
 /**
@@ -94,22 +95,30 @@
  * @property {string} [charset] Characters to pick from. Defaults to letters and digits.
  */
 
-// Intl objects are expensive to build, so they are created on first use.
-/** @type {Intl.Segmenter | undefined} */
-let _segmenter;
+const shared = require("./internal/shared.js");
+
+const { intl, graphemes: _graphemes, graphemeCount: _count } = shared;
+
 /** @type {Intl.Collator | undefined} */
 let _defaultCollator;
 
-/**
- * @param {string} input
- * @returns {string[]}
- */
-const _graphemes = (input) => {
-  // Fast path: pure ASCII strings have one grapheme per UTF-16 unit.
-  if (/^[\x00-\x7f]*$/.test(input)) return input.split("");
-  _segmenter ??= new Intl.Segmenter(undefined, { granularity: "grapheme" });
-  return Array.from(_segmenter.segment(input), (s) => s.segment);
-};
+const WORD = /[\p{L}\p{N}]+/gu;
+const COMBINING_MARKS = /[\u0300-\u036f]/g;
+const SPECIAL_LATIN = /[\u00df\u1e9e\u00e6\u00c6\u0153\u0152\u00f8\u00d8\u0111\u0110\u00f0\u00d0\u0142\u0141\u00fe\u00de\u0127\u0126\u0131]/g;
+const HTML_UNSAFE = /[&<>"']/;
+const HTML_UNSAFE_ALL = /[&<>"']/g;
+const HTML_ESCAPES = /** @type {Record<string, string>} */ ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" });
+const HTML_ENTITIES = /** @type {Record<string, string>} */ ({
+  amp: "&", lt: "<", gt: ">", quot: '"', apos: "'", nbsp: "\u00a0",
+  copy: "\u00a9", reg: "\u00ae", trade: "\u2122", hellip: "\u2026", mdash: "\u2014", ndash: "\u2013",
+  lsquo: "\u2018", rsquo: "\u2019", ldquo: "\u201c", rdquo: "\u201d", laquo: "\u00ab", raquo: "\u00bb",
+  euro: "\u20ac", pound: "\u00a3", yen: "\u00a5", cent: "\u00a2", deg: "\u00b0", middot: "\u00b7",
+  bull: "\u2022", times: "\u00d7", divide: "\u00f7", sect: "\u00a7", para: "\u00b6",
+});
+const TEMPLATE_DEFAULT = /\{\s*([\w$.-]+)\s*\}/g;
+/** @type {Map<string, RegExp>} */
+const _templateRegexes = new Map();
+const ORDINAL = { type: "ordinal" };
 
 /** Letters that Unicode normalization doesn't decompose. */
 const _SPECIAL_LATIN = /** @type {Record<string, string>} */ ({
@@ -130,8 +139,96 @@ const _words = (input) =>
     .split(/\s+/)
     .filter(Boolean);
 
+/**
+ * Length of the first character in UTF-16 units: 2 for letters outside the
+ * basic plane, like mathematical alphabets.
+ * @param {string} text
+ */
+const _headLength = (text) => ((text.codePointAt(0) ?? 0) > 0xffff ? 2 : 1);
+
 /** @param {string} word */
-const _upperFirst = (word) => word.charAt(0).toUpperCase() + word.slice(1);
+const _upperFirst = (word) => {
+  const n = _headLength(word);
+  return word.slice(0, n).toUpperCase() + word.slice(n);
+};
+
+/**
+ * Repeats `char` to fill `count` visible characters.
+ * @param {string} char
+ * @param {number} count
+ * @returns {string}
+ */
+const _padding = (char, count) => {
+  if (!(count > 0) || !char) return "";
+  if (char.length === 1) return char.repeat(count);
+  const units = _graphemes(char);
+  let out = "";
+  for (let i = 0; i < count; i++) out += units[i % units.length];
+  return out;
+};
+
+/**
+ * Reads a template value. Members inherited from `Object.prototype`
+ * (`constructor`, `toString`...) are not data.
+ * @param {any} value
+ * @param {string} key
+ * @returns {unknown}
+ */
+const _templateValue = (value, key) => {
+  const object = Object(value);
+  if (!(key in object)) return undefined;
+  if (!Object.prototype.hasOwnProperty.call(object, key) && key in Object.prototype) return undefined;
+  const found = object[key];
+  return typeof found === "function" ? undefined : found;
+};
+
+/** One row of the edit-distance table, reused between calls. */
+let _row = new Uint32Array(64);
+
+/**
+ * Levenshtein distance between two sequences of characters.
+ * @param {ArrayLike<string>} s
+ * @param {ArrayLike<string>} t
+ * @returns {number}
+ */
+const _distance = (s, t) => {
+  let sLength = s.length;
+  let tLength = t.length;
+  let start = 0;
+  while (start < sLength && start < tLength && s[start] === t[start]) start++;
+  while (sLength > start && tLength > start && s[sLength - 1] === t[tLength - 1]) {
+    sLength--;
+    tLength--;
+  }
+  sLength -= start;
+  tLength -= start;
+  if (sLength === 0) return tLength;
+  if (tLength === 0) return sLength;
+  if (_row.length <= tLength) _row = new Uint32Array(tLength * 2);
+  const row = _row;
+  for (let j = 0; j <= tLength; j++) row[j] = j;
+  for (let i = 1; i <= sLength; i++) {
+    const char = s[start + i - 1];
+    let diagonal = row[0];
+    row[0] = i;
+    for (let j = 1; j <= tLength; j++) {
+      const above = row[j];
+      let best = char === t[start + j - 1] ? diagonal : diagonal + 1;
+      if (above + 1 < best) best = above + 1;
+      if (row[j - 1] + 1 < best) best = row[j - 1] + 1;
+      row[j] = best;
+      diagonal = above;
+    }
+  }
+  return row[tLength];
+};
+
+/**
+ * A string as a sequence of visible characters. ASCII strings are already one.
+ * @param {string} text
+ * @returns {ArrayLike<string>}
+ */
+const _units = (text) => (shared.ASCII.test(text) ? text : _graphemes(text));
 
 /** @param {string} value */
 const _escapeRegExp = (value) => value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
@@ -147,7 +244,60 @@ const _escapeRegExp = (value) => value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
  */
 function capitalize(input) {
   const s = String(input);
-  return s ? s.charAt(0).toUpperCase() + s.slice(1).toLowerCase() : s;
+  if (!s) return s;
+  const n = _headLength(s);
+  return s.slice(0, n).toUpperCase() + s.slice(n).toLowerCase();
+}
+
+/**
+ * Uppercases the first character and leaves the rest alone.
+ *
+ * @example
+ * str.upperFirst("userName"); // "UserName"
+ *
+ * @param {unknown} input
+ * @returns {string}
+ */
+function upperFirst(input) {
+  return _upperFirst(String(input));
+}
+
+/**
+ * Lowercases the first character and leaves the rest alone.
+ *
+ * @example
+ * str.lowerFirst("UserName"); // "userName"
+ *
+ * @param {unknown} input
+ * @returns {string}
+ */
+function lowerFirst(input) {
+  const s = String(input);
+  const n = _headLength(s);
+  return s.slice(0, n).toLowerCase() + s.slice(n);
+}
+
+/**
+ * Turns an identifier into a label people can read. Acronyms stay as they are.
+ *
+ * @example
+ * str.humanize("user_first_name"); // "User first name"
+ * str.humanize("createdAt");       // "Created at"
+ * str.humanize("userID");          // "User ID"
+ *
+ * @param {unknown} input
+ * @returns {string}
+ */
+function humanize(input) {
+  const list = _words(input);
+  const shouting = list.every((word) => word === word.toUpperCase());
+  return list
+    .map((word, i) => {
+      if (!shouting && word.length > 1 && word === word.toUpperCase() && /\p{Lu}/u.test(word)) return word;
+      const lower = word.toLowerCase();
+      return i === 0 ? _upperFirst(lower) : lower;
+    })
+    .join(" ");
 }
 
 /**
@@ -286,10 +436,12 @@ function words(input) {
  * @returns {string}
  */
 function deburr(input) {
-  return String(input)
+  const s = String(input);
+  if (shared.ASCII.test(s)) return s;
+  return s
     .normalize("NFKD")
-    .replace(/[̀-ͯ]/g, "")
-    .replace(/[ßẞæÆœŒøØđĐðÐłŁþÞħĦı]/g, (c) => _SPECIAL_LATIN[c] ?? c);
+    .replace(COMBINING_MARKS, "")
+    .replace(SPECIAL_LATIN, (c) => _SPECIAL_LATIN[c] ?? c);
 }
 
 /**
@@ -306,18 +458,21 @@ function deburr(input) {
  */
 function slugify(input, options = {}) {
   const separator = options.separator ?? "-";
-  const sep = _escapeRegExp(separator);
-  let slug = deburr(input)
-    .replace(/[^\p{L}\p{N}]+/gu, separator)
-    .replace(new RegExp(`(?:${sep}){2,}`, "g"), separator)
-    .replace(new RegExp(`^(?:${sep})|(?:${sep})$`, "g"), "");
-  if (options.lower ?? true) slug = slug.toLowerCase();
-  if (options.maxLength !== undefined && slug.length > options.maxLength) {
-    const cut = slug.slice(0, options.maxLength);
-    const lastSep = separator ? cut.lastIndexOf(separator) : -1;
-    slug = (lastSep > 0 ? cut.slice(0, lastSep) : cut).replace(new RegExp(`(?:${sep})+$`), "");
+  let text = deburr(input);
+  if (options.lower ?? true) text = text.toLowerCase();
+  const list = text.match(WORD);
+  if (!list) return "";
+  const slug = list.join(separator);
+  const max = options.maxLength;
+  if (max === undefined || slug.length <= max) return slug;
+  // Keep whole words while they fit; a first word that is too long is cut.
+  let length = 0;
+  for (let i = 0; i < list.length; i++) {
+    const next = length + (i ? separator.length : 0) + list[i].length;
+    if (next > max) break;
+    length = next;
   }
-  return slug;
+  return slug.slice(0, length || Math.max(0, max));
 }
 
 /**
@@ -344,7 +499,7 @@ function squish(input) {
  * @returns {string}
  */
 function stripTags(input) {
-  return String(input).replace(/<\/?[^>]+(>|$)/g, "");
+  return String(input).replace(/<!--[\s\S]*?(?:-->|$)|<[/!]?[a-zA-Z][^>]*(?:>|$)/g, "");
 }
 
 /**
@@ -358,8 +513,8 @@ function stripTags(input) {
  * @returns {string}
  */
 function escapeHTML(input) {
-  const map = /** @type {Record<string, string>} */ ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" });
-  return String(input).replace(/[&<>"']/g, (c) => map[c]);
+  const s = String(input);
+  return HTML_UNSAFE.test(s) ? s.replace(HTML_UNSAFE_ALL, (c) => HTML_ESCAPES[c]) : s;
 }
 
 /**
@@ -373,12 +528,16 @@ function escapeHTML(input) {
  * @returns {string}
  */
 function unescapeHTML(input) {
-  const named = /** @type {Record<string, string>} */ ({ amp: "&", lt: "<", gt: ">", quot: '"', apos: "'", nbsp: " " });
-  return String(input).replace(/&(#x[0-9a-f]+|#\d+|amp|lt|gt|quot|apos|nbsp);/gi, (match, entity) => {
-    const lower = entity.toLowerCase();
-    if (lower.startsWith("#x")) return String.fromCodePoint(parseInt(lower.slice(2), 16));
-    if (lower.startsWith("#")) return String.fromCodePoint(parseInt(lower.slice(1), 10));
-    return named[lower] ?? match;
+  const s = String(input);
+  if (!s.includes("&")) return s;
+  return s.replace(/&(#x[0-9a-f]+|#\d+|[a-z][a-z0-9]*);/gi, (match, entity) => {
+    if (entity.charCodeAt(0) === 35) {
+      const hex = entity.charCodeAt(1) === 120 || entity.charCodeAt(1) === 88;
+      const code = parseInt(entity.slice(hex ? 2 : 1), hex ? 16 : 10);
+      // Out-of-range numbers and lone surrogates are not characters: leave them as written.
+      return code > 0x10ffff || (code >= 0xd800 && code <= 0xdfff) || Number.isNaN(code) ? match : String.fromCodePoint(code);
+    }
+    return HTML_ENTITIES[entity] ?? HTML_ENTITIES[entity.toLowerCase()] ?? match;
   });
 }
 
@@ -407,7 +566,7 @@ function escapeRegExp(input) {
  * @returns {number}
  */
 function length(input) {
-  return _graphemes(String(input)).length;
+  return _count(String(input));
 }
 
 /**
@@ -463,10 +622,18 @@ function count(input, search) {
  * @returns {string}
  */
 function truncate(input, length, options = {}) {
+  const s = String(input);
+  // A string never has more visible characters than UTF-16 units.
+  if (s.length <= length) return s;
+  const chars = _graphemes(s);
+  if (chars.length <= length) return s;
   const omission = options.omission ?? "…";
-  const chars = _graphemes(String(input));
-  if (chars.length <= length) return chars.join("");
-  const keep = Math.max(0, length - _graphemes(omission).length);
+  const keep = Math.max(0, length - _count(omission));
+  if (options.position === "start") return omission + chars.slice(chars.length - keep).join("").replace(/^\s+/, "");
+  if (options.position === "middle") {
+    const head = Math.ceil(keep / 2);
+    return chars.slice(0, head).join("") + omission + chars.slice(chars.length - (keep - head)).join("");
+  }
   let sliced = chars.slice(0, keep).join("");
   if (options.words) {
     const nextIsSpace = /\s/.test(chars[keep] ?? " ");
@@ -474,6 +641,32 @@ function truncate(input, length, options = {}) {
     if (!nextIsSpace && lastSpace > 0) sliced = sliced.slice(0, lastSpace);
   }
   return sliced.replace(/\s+$/, "") + omission;
+}
+
+/**
+ * Splits text into pieces of `size` visible characters. The last one can be
+ * shorter.
+ *
+ * @example
+ * str.chunk("4242424242424242", 4).join(" "); // "4242 4242 4242 4242"
+ *
+ * @param {unknown} input
+ * @param {number} size
+ * @returns {string[]}
+ */
+function chunk(input, size) {
+  const n = Math.floor(size);
+  /** @type {string[]} */
+  const out = [];
+  if (!(n >= 1)) return out;
+  const s = String(input);
+  if (shared.ASCII.test(s)) {
+    for (let i = 0; i < s.length; i += n) out.push(s.slice(i, i + n));
+    return out;
+  }
+  const chars = _graphemes(s);
+  for (let i = 0; i < chars.length; i += n) out.push(chars.slice(i, i + n).join(""));
+  return out;
 }
 
 /**
@@ -538,7 +731,8 @@ function lines(input) {
  * @returns {string}
  */
 function padStart(input, length, char = " ") {
-  return String(input).padStart(length, char);
+  const s = String(input);
+  return _padding(char, length - _count(s)) + s;
 }
 
 /**
@@ -553,7 +747,8 @@ function padStart(input, length, char = " ") {
  * @returns {string}
  */
 function padEnd(input, length, char = " ") {
-  return String(input).padEnd(length, char);
+  const s = String(input);
+  return s + _padding(char, length - _count(s));
 }
 
 /**
@@ -569,11 +764,10 @@ function padEnd(input, length, char = " ") {
  */
 function center(input, length, char = " ") {
   const s = String(input);
-  const visible = _graphemes(s).length;
-  if (visible >= length || !char) return s;
-  const total = length - visible;
+  const total = length - _count(s);
+  if (!(total > 0) || !char) return s;
   const left = Math.floor(total / 2);
-  return char.repeat(left) + s + char.repeat(total - left);
+  return _padding(char, left) + s + _padding(char, total - left);
 }
 
 /**
@@ -620,8 +814,13 @@ function dedent(input, ...values) {
   const all = text.replace(/\r\n?/g, "\n").split("\n");
   if (all.length && all[0].trim() === "") all.shift();
   if (all.length && all[all.length - 1].trim() === "") all.pop();
-  const indents = all.filter((line) => line.trim()).map((line) => /^[ \t]*/.exec(line)?.[0].length ?? 0);
-  const min = indents.length ? Math.min(...indents) : 0;
+  let min = Infinity;
+  for (const line of all) {
+    if (!line.trim()) continue;
+    const indentation = /^[ \t]*/.exec(line)?.[0].length ?? 0;
+    if (indentation < min) min = indentation;
+  }
+  if (min === Infinity || min === 0) return all.join("\n");
   return all.map((line) => line.slice(min)).join("\n");
 }
 
@@ -646,28 +845,38 @@ function wrap(input, options = {}) {
   const out = [];
   for (const paragraph of String(input).split(/\r\n|\r|\n/)) {
     let line = "";
-    for (let word of paragraph.split(/\s+/).filter(Boolean)) {
-      while (opts.cut && _graphemes(word).length > width) {
+    let lineWidth = 0;
+    for (let word of paragraph.split(/\s+/)) {
+      if (!word) continue;
+      let wordWidth = _count(word);
+      if (opts.cut && wordWidth > width) {
         if (line) {
           out.push(line);
           line = "";
+          lineWidth = 0;
         }
         const chars = _graphemes(word);
-        out.push(chars.slice(0, width).join(""));
-        word = chars.slice(width).join("");
+        let start = 0;
+        while (chars.length - start > width) {
+          out.push(chars.slice(start, start + width).join(""));
+          start += width;
+        }
+        word = chars.slice(start).join("");
+        wordWidth = chars.length - start;
+        if (!word) continue;
       }
-      if (!word) continue;
-      const candidate = line ? `${line} ${word}` : word;
-      if (_graphemes(candidate).length > width && line) {
+      if (line && lineWidth + 1 + wordWidth > width) {
         out.push(line);
         line = word;
+        lineWidth = wordWidth;
       } else {
-        line = candidate;
+        lineWidth += (line ? 1 : 0) + wordWidth;
+        line = line ? `${line} ${word}` : word;
       }
     }
     out.push(line);
   }
-  return out.map((l) => prefix + l).join(newline);
+  return prefix ? out.map((l) => prefix + l).join(newline) : out.join(newline);
 }
 
 /**
@@ -746,10 +955,10 @@ function initials(input, max = 2) {
 function plural(value, forms, options = {}) {
   const locale = options.locale ?? "en";
   if (value === 0 && forms.zero !== undefined) return forms.zero;
-  const category = new Intl.PluralRules(locale, { type: options.ordinal ? "ordinal" : "cardinal" }).select(value);
+  const category = intl.plural(locale, options.ordinal ? ORDINAL : undefined).select(value);
   const word = forms[category] ?? forms.other;
   if (options.includeCount === false) return word;
-  return `${new Intl.NumberFormat(locale).format(value)} ${word}`;
+  return `${intl.number(locale).format(value)} ${word}`;
 }
 
 /**
@@ -768,13 +977,30 @@ function plural(value, forms, options = {}) {
  * @returns {string}
  */
 function template(input, data, options = {}) {
-  const open = _escapeRegExp(options.open ?? "{");
-  const close = _escapeRegExp(options.close ?? "}");
-  const regex = new RegExp(`${open}\\s*([\\w$.-]+)\\s*${close}`, "g");
+  let regex = TEMPLATE_DEFAULT;
+  if (options.open !== undefined || options.close !== undefined) {
+    const open = options.open ?? "{";
+    const close = options.close ?? "}";
+    const key = `${open}\u0000${close}`;
+    const cached = _templateRegexes.get(key);
+    if (cached) regex = cached;
+    else {
+      regex = new RegExp(`${_escapeRegExp(open)}\\s*([\\w$.-]+)\\s*${_escapeRegExp(close)}`, "g");
+      if (_templateRegexes.size >= 50) _templateRegexes.clear();
+      _templateRegexes.set(key, regex);
+    }
+  }
   return String(input).replace(regex, (match, key) => {
-    /** @type {any} */
+    /** @type {unknown} */
     let value = data;
-    for (const part of String(key).split(".")) value = value == null ? undefined : value[part];
+    if (key.includes(".")) {
+      for (const part of key.split(".")) {
+        if (value === undefined || value === null) break;
+        value = _templateValue(value, part);
+      }
+    } else if (value !== undefined && value !== null) {
+      value = _templateValue(value, key);
+    }
     if (value === undefined || value === null) return options.fallback ?? match;
     return String(value);
   });
@@ -856,7 +1082,7 @@ function removeSuffix(input, suffix) {
 function compare(a, b, options = {}) {
   const collator =
     options && typeof options === "object" && (options.locale || options.sensitivity || options.numeric === false)
-      ? new Intl.Collator(options.locale, { numeric: options.numeric ?? true, sensitivity: options.sensitivity ?? "variant" })
+      ? intl.collator(options.locale, { numeric: options.numeric ?? true, sensitivity: options.sensitivity ?? "variant" })
       : (_defaultCollator ??= new Intl.Collator(undefined, { numeric: true, sensitivity: "variant" }));
   return collator.compare(String(a), String(b));
 }
@@ -872,20 +1098,9 @@ function compare(a, b, options = {}) {
  * @returns {number}
  */
 function levenshtein(a, b) {
-  const s = _graphemes(String(a));
-  const t = _graphemes(String(b));
-  if (!s.length) return t.length;
-  if (!t.length) return s.length;
-  let previous = Array.from({ length: t.length + 1 }, (_, i) => i);
-  for (let i = 1; i <= s.length; i++) {
-    const current = [i];
-    for (let j = 1; j <= t.length; j++) {
-      const cost = s[i - 1] === t[j - 1] ? 0 : 1;
-      current[j] = Math.min(previous[j] + 1, current[j - 1] + 1, previous[j - 1] + cost);
-    }
-    previous = current;
-  }
-  return previous[t.length];
+  const x = String(a);
+  const y = String(b);
+  return x === y ? 0 : _distance(_units(x), _units(y));
 }
 
 /**
@@ -899,8 +1114,13 @@ function levenshtein(a, b) {
  * @returns {number}
  */
 function similarity(a, b) {
-  const longest = Math.max(length(a), length(b));
-  return longest === 0 ? 1 : 1 - levenshtein(a, b) / longest;
+  const x = String(a);
+  const y = String(b);
+  if (x === y) return 1;
+  const s = _units(x);
+  const t = _units(y);
+  const longest = Math.max(s.length, t.length);
+  return longest === 0 ? 1 : 1 - _distance(s, t) / longest;
 }
 
 /**
@@ -919,11 +1139,15 @@ function similarity(a, b) {
 function closest(input, candidates, options = {}) {
   const threshold = options.threshold ?? 0.4;
   const norm = (/** @type {string} */ s) => (options.caseSensitive ? s : s.toLowerCase());
-  const needle = norm(String(input));
+  const needle = _units(norm(String(input)));
   let best;
   let bestScore = -1;
   for (const candidate of candidates) {
-    const score = similarity(needle, norm(candidate));
+    const units = _units(norm(candidate));
+    const longest = Math.max(needle.length, units.length);
+    // The length gap alone bounds the score: skip candidates that can't win.
+    if (longest > 0 && 1 - Math.abs(needle.length - units.length) / longest <= bestScore) continue;
+    const score = longest === 0 ? 1 : 1 - _distance(needle, units) / longest;
     if (score > bestScore) {
       bestScore = score;
       best = candidate;
@@ -953,6 +1177,9 @@ function random(size = 16, options = {}) {
 
 module.exports = {
   capitalize,
+  upperFirst,
+  lowerFirst,
+  humanize,
   titleCase,
   sentenceCase,
   camelCase,
@@ -973,6 +1200,7 @@ module.exports = {
   byteLength,
   count,
   truncate,
+  chunk,
   between,
   splitOnce,
   lines,

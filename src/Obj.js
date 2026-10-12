@@ -13,6 +13,7 @@
  */
 
 const { types } = require("node:util");
+const shared = require("./internal/shared.js");
 
 /**
  * Values that end a path: dates, regexes, maps, sets, functions and arrays.
@@ -81,57 +82,94 @@ const { types } = require("node:util");
  */
 
 /**
+ * Options for `sortKeys()`.
+ * @typedef {object} SortKeysOptions
+ * @property {boolean} [deep] Sort nested objects too, arrays included. Defaults to `true`.
+ * @property {(a: string, b: string) => number} [compare] How to order two keys. Defaults to code-unit order, which is stable across machines.
+ */
+
+/**
  * Options for `compact()`.
  * @typedef {object} CompactOptions
  * @property {boolean} [deep] Clean nested objects and arrays too.
  * @property {boolean} [removeEmpty] Also remove `""`, `[]` and `{}`.
  */
 
-const _UNSAFE = new Set(["__proto__", "constructor", "prototype"]);
+const _UNSAFE = shared.UNSAFE_KEYS;
 
 /** Marks an unknown path segment in `PathStep`. */
 const _NOT_FOUND = Symbol("not-found");
 
-/** @param {unknown} value */
-const _isPlain = (value) => {
-  if (typeof value !== "object" || value === null) return false;
-  const proto = Object.getPrototypeOf(value);
-  // The last check accepts objects from another realm (a worker, a `vm`).
-  return proto === null || proto === Object.prototype || Object.getPrototypeOf(proto) === null;
+const _isPlain = shared.isPlainObject;
+
+/** @param {ReadonlyArray<string | number>} keys */
+const _isSafePath = (keys) => {
+  for (let i = 0; i < keys.length; i++) if (_UNSAFE.has(String(keys[i]))) return false;
+  return true;
 };
 
+/** @type {Map<string, { keys: Array<string | number>, safe: boolean }>} */
+const _paths = new Map();
+
 /**
- * Parses `"a.b[0].c"` or `["a", "b", 0, "c"]` into keys.
+ * Parses `"a.b[0].c"` or `["a", "b", 0, "c"]` into keys, and says whether
+ * the path stays clear of prototypes. Parsed strings are remembered: paths
+ * are almost always literals.
  * @param {unknown} path
- * @returns {Array<string | number>}
+ * @returns {{ keys: ReadonlyArray<string | number>, safe: boolean }}
  */
-const _toPath = (path) => {
-  if (Array.isArray(path)) return path;
-  return String(path)
-    .replace(/\[(\d+)\]/g, ".$1")
-    .replace(/\[["']?([^\]"']+)["']?\]/g, ".$1")
-    .split(".")
-    .filter((part) => part !== "");
+const _parsePath = (path) => {
+  if (Array.isArray(path)) return { keys: path, safe: _isSafePath(path) };
+  const text = String(path);
+  let parsed = _paths.get(text);
+  if (parsed === undefined) {
+    const dotted = text.includes("[") ? text.replace(/\[(\d+)\]/g, ".$1").replace(/\[["']?([^\]"']+)["']?\]/g, ".$1") : text;
+    const keys = dotted.includes(".") ? dotted.split(".").filter((part) => part !== "") : dotted === "" ? [] : [dotted];
+    parsed = { keys, safe: _isSafePath(keys) };
+    if (_paths.size >= 1000) _paths.clear();
+    _paths.set(text, parsed);
+  }
+  return parsed;
 };
 
-/** @param {Array<string | number>} keys */
-const _isSafePath = (keys) => keys.every((key) => !_UNSAFE.has(String(key)));
-
 /**
- * Deep copy for what `structuredClone` can't handle (functions, class instances).
+ * Deep copy that keeps what `structuredClone` loses: functions and class
+ * prototypes. Shared references stay shared and cycles are preserved.
  * @param {any} value
- * @param {WeakMap<object, any>} seen
+ * @param {Map<object, any>} seen
  * @returns {any}
  */
 const _deepClone = (value, seen) => {
   if (value === null || typeof value !== "object") return value;
-  if (seen.has(value)) return seen.get(value);
-  if (types.isDate(value)) return new Date(value.getTime());
-  if (types.isRegExp(value)) return new RegExp(value.source, value.flags);
+  const known = seen.get(value);
+  if (known !== undefined) return known;
   if (Array.isArray(value)) {
-    const out = /** @type {any[]} */ ([]);
+    /** @type {any[]} */
+    const out = new Array(value.length);
     seen.set(value, out);
-    for (const item of value) out.push(_deepClone(item, seen));
+    for (let i = 0; i < value.length; i++) if (i in value) out[i] = _deepClone(value[i], seen);
+    return out;
+  }
+  const proto = Object.getPrototypeOf(value);
+  if (proto === Object.prototype || proto === null) {
+    /** @type {any} */
+    const out = proto === null ? Object.create(null) : {};
+    seen.set(value, out);
+    const keys = Object.keys(value);
+    for (let i = 0; i < keys.length; i++) {
+      const key = keys[i];
+      if (!_UNSAFE.has(key)) out[key] = _deepClone(value[key], seen);
+    }
+    const symbols = Object.getOwnPropertySymbols(value);
+    for (let i = 0; i < symbols.length; i++) {
+      if (Object.prototype.propertyIsEnumerable.call(value, symbols[i])) out[symbols[i]] = _deepClone(value[symbols[i]], seen);
+    }
+    return out;
+  }
+  if (types.isDate(value)) return new Date(value.getTime());
+  if (types.isRegExp(value)) {
+    const out = new RegExp(value.source, value.flags);
+    out.lastIndex = value.lastIndex;
     return out;
   }
   if (types.isMap(value)) {
@@ -146,10 +184,18 @@ const _deepClone = (value, seen) => {
     for (const v of value) out.add(_deepClone(v, seen));
     return out;
   }
-  if (ArrayBuffer.isView(value) && !(value instanceof DataView)) {
+  if (ArrayBuffer.isView(value)) {
+    // Buffer.slice() is a view on the same memory, not a copy.
+    if (Buffer.isBuffer(value)) return Buffer.from(value);
+    if (types.isDataView(value)) return new DataView(value.buffer.slice(value.byteOffset, value.byteOffset + value.byteLength));
     return /** @type {any} */ (value).slice();
   }
-  const out = Object.create(Object.getPrototypeOf(value));
+  if (types.isAnyArrayBuffer(value)) return value.slice(0);
+  if (value instanceof URL) return new URL(value.href);
+  if (value instanceof URLSearchParams) return new URLSearchParams(value);
+  // Things that hold state outside their properties are shared, not copied.
+  if (types.isPromise(value) || types.isWeakMap(value) || types.isWeakSet(value) || types.isProxy(value)) return value;
+  const out = Object.create(proto);
   seen.set(value, out);
   for (const key of Reflect.ownKeys(value)) {
     if (typeof key === "string" && _UNSAFE.has(key)) continue;
@@ -161,36 +207,48 @@ const _deepClone = (value, seen) => {
 };
 
 /**
- * @param {any} target
- * @param {any} source
- * @param {MergeOptions} options
- * @returns {any}
+ * Is it plain data, which merge copies, rather than a live object (a class
+ * instance, a connection) that it must keep as is?
+ * @param {unknown} value
+ * @returns {boolean}
  */
-const _mergeTwo = (target, source, options) => {
-  if (Array.isArray(target) && Array.isArray(source)) {
-    if (options.arrays === "concat") return [...target, ...source];
-    if (options.arrays === "unique") return [...new Set([...target, ...source])];
-    return [...source];
-  }
-  if (!_isPlain(source)) return source;
-  const out = /** @type {Record<string, any>} */ (_isPlain(target) ? { ...target } : {});
-  for (const key of Object.keys(source)) {
+const _isData = (value) =>
+  Array.isArray(value) || _isPlain(value) || types.isDate(value) || types.isMap(value) || types.isSet(value) || types.isRegExp(value) || ArrayBuffer.isView(value) || types.isAnyArrayBuffer(value);
+
+/**
+ * Merges `source` into `target`, which the caller owns. What comes from the
+ * source is copied, so the result shares nothing with the inputs.
+ * @param {Record<string, any>} target
+ * @param {Record<string, any>} source
+ * @param {MergeOptions} options
+ * @returns {Record<string, any>}
+ */
+const _mergeInto = (target, source, options) => {
+  const keys = Object.keys(source);
+  for (let i = 0; i < keys.length; i++) {
+    const key = keys[i];
     if (_UNSAFE.has(key)) continue;
     const value = source[key];
     if (value === undefined && options.skipUndefined) continue;
-    const current = out[key];
-    out[key] = (_isPlain(value) && _isPlain(current)) || (Array.isArray(value) && Array.isArray(current))
-      ? _mergeTwo(current, value, options)
-      : _isPlain(value)
-        ? _mergeTwo({}, value, options)
-        : value;
+    const current = Object.prototype.hasOwnProperty.call(target, key) ? target[key] : undefined;
+    if (_isPlain(value)) {
+      target[key] = _mergeInto(_isPlain(current) ? current : {}, value, options);
+    } else if (Array.isArray(value)) {
+      const copy = _deepClone(value, new Map());
+      if (!Array.isArray(current) || options.arrays === undefined || options.arrays === "replace") target[key] = copy;
+      else target[key] = options.arrays === "unique" ? [...new Set([...current, ...copy])] : [...current, ...copy];
+    } else {
+      target[key] = _isData(value) ? _deepClone(value, new Map()) : value;
+    }
   }
-  return out;
+  return target;
 };
 
+
 /**
- * Deep copy. Uses `structuredClone` when it can, and falls back to a copy
- * that keeps functions and class prototypes.
+ * Deep copy. Unlike `structuredClone`, it keeps functions and class
+ * instances (with their prototype), and it's several times faster on plain
+ * data. Shared references and cycles are preserved.
  *
  * @example
  * const copy = obj.clone({ a: { b: [1, 2] }, when: new Date() });
@@ -202,14 +260,7 @@ const _mergeTwo = (target, source, options) => {
  */
 function clone(value) {
   if (value === null || typeof value !== "object") return value;
-  if (_isPlain(value) || Array.isArray(value)) {
-    try {
-      return structuredClone(value);
-    } catch {
-      // Functions or exotic values inside: fall through to the manual copy.
-    }
-  }
-  return _deepClone(value, new WeakMap());
+  return _deepClone(value, new Map());
 }
 
 /**
@@ -259,7 +310,10 @@ function clone(value) {
  * @returns {Record<string, any>}
  */
 function merge(...sources) {
-  return sources.reduce((acc, source) => (_isPlain(source) ? _mergeTwo(acc, source, {}) : acc), /** @type {Record<string, any>} */ ({}));
+  /** @type {Record<string, any>} */
+  const out = {};
+  for (const source of sources) if (_isPlain(source)) _mergeInto(out, source, _NO_OPTIONS);
+  return out;
 }
 
 /**
@@ -276,7 +330,10 @@ function merge(...sources) {
  * @returns {Record<string, any>}
  */
 function mergeWith(options, ...sources) {
-  return sources.reduce((acc, source) => (_isPlain(source) ? _mergeTwo(acc, source, options) : acc), /** @type {Record<string, any>} */ ({}));
+  /** @type {Record<string, any>} */
+  const out = {};
+  for (const source of sources) if (_isPlain(source)) _mergeInto(out, source, options ?? _NO_OPTIONS);
+  return out;
 }
 
 /**
@@ -321,7 +378,9 @@ function defaults(target, ...sources) {
  * @returns {boolean}
  */
 function equal(a, b) {
-  return _equal(a, b, new WeakMap());
+  if (Object.is(a, b)) return true;
+  if (typeof a !== "object" || typeof b !== "object" || a === null || b === null) return false;
+  return _equal(a, b, [], []);
 }
 
 /**
@@ -338,33 +397,78 @@ const _sameBuiltIn = (a, b) => {
 };
 
 /**
+ * Own enumerable keys and values are the same.
  * @param {any} a
  * @param {any} b
- * @param {WeakMap<object, object>} seen
+ * @param {object[]} stackA
+ * @param {object[]} stackB
  * @returns {boolean}
  */
-function _equal(a, b, seen) {
+const _equalKeys = (a, b, stackA, stackB) => {
+  const keys = Object.keys(a);
+  if (keys.length !== Object.keys(b).length) return false;
+  for (let i = 0; i < keys.length; i++) {
+    const key = keys[i];
+    if (!Object.prototype.hasOwnProperty.call(b, key) || !_equal(a[key], b[key], stackA, stackB)) return false;
+  }
+  return true;
+};
+
+/**
+ * The stacks hold the objects being compared, so a cycle is recognized
+ * without a `WeakMap` lookup for every object.
+ * @param {any} a
+ * @param {any} b
+ * @param {object[]} stackA
+ * @param {object[]} stackB
+ * @returns {boolean}
+ */
+function _equal(a, b, stackA, stackB) {
   if (Object.is(a, b)) return true;
   if (typeof a !== "object" || typeof b !== "object" || a === null || b === null) return false;
-  if (Object.getPrototypeOf(a) !== Object.getPrototypeOf(b) && !_sameBuiltIn(a, b)) return false;
-  if (seen.get(a) === b) return true;
-  seen.set(a, b);
+  const proto = Object.getPrototypeOf(a);
+  if (proto !== Object.getPrototypeOf(b) && !_sameBuiltIn(a, b)) return false;
+  for (let i = stackA.length - 1; i >= 0; i--) if (stackA[i] === a) return stackB[i] === b;
+  stackA.push(a);
+  stackB.push(b);
+  const result = _equalObjects(a, b, proto, stackA, stackB);
+  stackA.pop();
+  stackB.pop();
+  return result;
+}
 
+/**
+ * @param {any} a
+ * @param {any} b
+ * @param {object | null} proto
+ * @param {object[]} stackA
+ * @param {object[]} stackB
+ * @returns {boolean}
+ */
+const _equalObjects = (a, b, proto, stackA, stackB) => {
+  if (Array.isArray(a)) {
+    if (a.length !== b.length) return false;
+    for (let i = 0; i < a.length; i++) if (!_equal(a[i], b[i], stackA, stackB)) return false;
+    return true;
+  }
+  if (proto === Object.prototype || proto === null) return _equalKeys(a, b, stackA, stackB);
   if (types.isDate(a)) return a.getTime() === b.getTime();
   if (types.isRegExp(a)) return a.source === b.source && a.flags === b.flags;
-  if (Array.isArray(a)) return a.length === b.length && a.every((item, i) => _equal(item, b[i], seen));
-  if (ArrayBuffer.isView(a) && !(a instanceof DataView)) {
-    const x = /** @type {any} */ (a);
-    return x.length === b.length && x.every((/** @type {unknown} */ v, /** @type {number} */ i) => Object.is(v, b[i]));
+  if (ArrayBuffer.isView(a) || types.isAnyArrayBuffer(a)) {
+    const x = ArrayBuffer.isView(a) ? new Uint8Array(a.buffer, a.byteOffset, a.byteLength) : new Uint8Array(a);
+    const y = ArrayBuffer.isView(b) ? new Uint8Array(b.buffer, b.byteOffset, b.byteLength) : new Uint8Array(b);
+    if (x.length !== y.length) return false;
+    for (let i = 0; i < x.length; i++) if (x[i] !== y[i]) return false;
+    return true;
   }
   if (types.isMap(a)) {
     if (a.size !== b.size) return false;
     outer: for (const [key, value] of a) {
       if (b.has(key)) {
-        if (!_equal(value, b.get(key), seen)) return false;
+        if (!_equal(value, b.get(key), stackA, stackB)) return false;
         continue;
       }
-      for (const [otherKey, otherValue] of b) if (_equal(key, otherKey, seen) && _equal(value, otherValue, seen)) continue outer;
+      for (const [otherKey, otherValue] of b) if (_equal(key, otherKey, stackA, stackB) && _equal(value, otherValue, stackA, stackB)) continue outer;
       return false;
     }
     return true;
@@ -373,16 +477,18 @@ function _equal(a, b, seen) {
     if (a.size !== b.size) return false;
     outer: for (const value of a) {
       if (b.has(value)) continue;
-      for (const other of b) if (_equal(value, other, seen)) continue outer;
+      for (const other of b) if (_equal(value, other, stackA, stackB)) continue outer;
       return false;
     }
     return true;
   }
-  const keysA = Object.keys(a);
-  const keysB = Object.keys(b);
-  if (keysA.length !== keysB.length) return false;
-  return keysA.every((key) => Object.prototype.hasOwnProperty.call(b, key) && _equal(a[key], b[key], seen));
-}
+  // These keep their content outside enumerable properties.
+  if (types.isBoxedPrimitive(a)) return Object.is(a.valueOf(), b.valueOf());
+  if (types.isNativeError(a)) return a.name === b.name && a.message === b.message && _equalKeys(a, b, stackA, stackB);
+  if (a instanceof URL) return a.href === b.href;
+  if (a instanceof URLSearchParams) return a.toString() === b.toString();
+  return _equalKeys(a, b, stackA, stackB);
+};
 
 /**
  * Lists what changed between two values, deeply. Handy for audit logs and
@@ -402,26 +508,37 @@ function _equal(a, b, seen) {
 function diff(before, after) {
   /** @type {Change[]} */
   const changes = [];
-  /** @type {(a: any, b: any, path: Array<string | number>) => void} */
-  const walk = (a, b, path) => {
-    if (equal(a, b)) return;
-    const bothArrays = Array.isArray(a) && Array.isArray(b);
-    if (bothArrays || (_isPlain(a) && _isPlain(b))) {
-      const keys = bothArrays
-        ? Array.from({ length: Math.max(a.length, b.length) }, (_, i) => i)
-        : [...new Set([...Object.keys(a), ...Object.keys(b)])];
-      for (const key of keys) {
-        const inA = bothArrays ? /** @type {number} */ (key) < a.length : Object.prototype.hasOwnProperty.call(a, key);
-        const inB = bothArrays ? /** @type {number} */ (key) < b.length : Object.prototype.hasOwnProperty.call(b, key);
-        if (inA && !inB) changes.push({ path: [...path, key], type: "removed", from: a[key] });
-        else if (!inA && inB) changes.push({ path: [...path, key], type: "added", to: b[key] });
-        else walk(a[key], b[key], [...path, key]);
+  /** @type {Array<string | number>} */
+  const path = [];
+  /** @type {(a: any, b: any) => void} */
+  const walk = (a, b) => {
+    if (Object.is(a, b)) return;
+    if (Array.isArray(a) && Array.isArray(b)) {
+      const size = Math.max(a.length, b.length);
+      for (let i = 0; i < size; i++) {
+        path.push(i);
+        if (i >= b.length) changes.push({ path: [...path], type: "removed", from: a[i] });
+        else if (i >= a.length) changes.push({ path: [...path], type: "added", to: b[i] });
+        else walk(a[i], b[i]);
+        path.pop();
       }
       return;
     }
-    changes.push({ path, type: "changed", from: a, to: b });
+    if (_isPlain(a) && _isPlain(b)) {
+      for (const key of Object.keys(a)) {
+        path.push(key);
+        if (Object.prototype.hasOwnProperty.call(b, key)) walk(a[key], b[key]);
+        else changes.push({ path: [...path], type: "removed", from: a[key] });
+        path.pop();
+      }
+      for (const key of Object.keys(b)) {
+        if (!Object.prototype.hasOwnProperty.call(a, key)) changes.push({ path: [...path, key], type: "added", to: b[key] });
+      }
+      return;
+    }
+    if (!equal(a, b)) changes.push({ path: [...path], type: "changed", from: a, to: b });
   };
-  walk(before, after, []);
+  walk(before, after);
   return changes;
 }
 
@@ -462,13 +579,13 @@ function diff(before, after) {
  * @returns {any}
  */
 function get(object, path, fallback) {
-  const keys = _toPath(path);
-  if (!_isSafePath(keys)) return fallback;
+  const { keys, safe } = _parsePath(path);
+  if (!safe) return fallback;
   /** @type {any} */
   let current = object;
-  for (const key of keys) {
+  for (let i = 0; i < keys.length; i++) {
     if (current === null || current === undefined) return fallback;
-    current = current[key];
+    current = current[keys[i]];
   }
   return current === undefined ? fallback : current;
 }
@@ -488,10 +605,10 @@ function get(object, path, fallback) {
  * @returns {T}
  */
 function set(object, path, value) {
-  const keys = _toPath(path);
+  const { keys, safe } = _parsePath(path);
   /** @type {any} */
   const root = object === null || typeof object !== "object" ? {} : clone(object);
-  if (!keys.length || !_isSafePath(keys)) return root;
+  if (!keys.length || !safe) return root;
   let current = root;
   for (let i = 0; i < keys.length - 1; i++) {
     const key = keys[i];
@@ -506,6 +623,24 @@ function set(object, path, value) {
 }
 
 /**
+ * Returns a copy where the value at `path` is replaced by what `updater`
+ * returns for it. Handy for counters and lists.
+ *
+ * @example
+ * obj.update(state, "stats.visits", (n = 0) => n + 1);
+ * obj.update(cart, "items", (items = []) => [...items, product]);
+ *
+ * @template T
+ * @param {T} object
+ * @param {PathInput<T>} path
+ * @param {(value: any) => unknown} updater Gets the current value, `undefined` if there's none.
+ * @returns {T}
+ */
+function update(object, path, updater) {
+  return set(object, path, updater(get(object, /** @type {any} */ (path))));
+}
+
+/**
  * Returns a copy without the property at `path`.
  *
  * @example
@@ -517,17 +652,17 @@ function set(object, path, value) {
  * @returns {T}
  */
 function unset(object, path) {
-  const keys = _toPath(path);
+  const { keys, safe } = _parsePath(path);
   /** @type {any} */
   const root = clone(object);
-  if (!keys.length || !_isSafePath(keys) || root === null || typeof root !== "object") return root;
+  if (!keys.length || !safe || root === null || typeof root !== "object") return root;
   let current = root;
   for (let i = 0; i < keys.length - 1; i++) {
     current = current?.[keys[i]];
     if (current === null || typeof current !== "object") return root;
   }
   const lastKey = keys[keys.length - 1];
-  if (Array.isArray(current) && typeof lastKey === "number") current.splice(lastKey, 1);
+  if (Array.isArray(current) && (typeof lastKey === "number" || /^\d+$/.test(lastKey))) current.splice(Number(lastKey), 1);
   else delete current[lastKey];
   return root;
 }
@@ -545,13 +680,13 @@ function unset(object, path) {
  * @returns {boolean}
  */
 function has(object, path) {
-  const keys = _toPath(path);
-  if (!keys.length || !_isSafePath(keys)) return false;
+  const { keys, safe } = _parsePath(path);
+  if (!keys.length || !safe) return false;
   /** @type {any} */
   let current = object;
-  for (const key of keys) {
-    if (current === null || current === undefined || !Object.prototype.hasOwnProperty.call(Object(current), key)) return false;
-    current = current[key];
+  for (let i = 0; i < keys.length; i++) {
+    if (current === null || current === undefined || !Object.prototype.hasOwnProperty.call(Object(current), keys[i])) return false;
+    current = current[keys[i]];
   }
   return true;
 }
@@ -571,8 +706,9 @@ function has(object, path) {
 function pick(object, keys) {
   /** @type {any} */
   const out = {};
+  if (object === null || object === undefined) return out;
   for (const key of keys) {
-    if (object != null && Object.prototype.hasOwnProperty.call(object, key)) out[key] = object[key];
+    if (Object.prototype.hasOwnProperty.call(object, key) && !_UNSAFE.has(/** @type {any} */ (key))) out[key] = object[key];
   }
   return out;
 }
@@ -594,7 +730,7 @@ function omit(object, keys) {
   /** @type {any} */
   const out = {};
   for (const key of Object.keys(object ?? {})) {
-    if (!exclude.has(key)) out[key] = /** @type {any} */ (object)[key];
+    if (!exclude.has(key) && !_UNSAFE.has(key)) out[key] = /** @type {any} */ (object)[key];
   }
   return out;
 }
@@ -613,7 +749,9 @@ function omit(object, keys) {
 function filter(object, predicate) {
   /** @type {any} */
   const out = {};
-  for (const [key, value] of Object.entries(object ?? {})) {
+  for (const key of Object.keys(object ?? {})) {
+    if (_UNSAFE.has(key)) continue;
+    const value = /** @type {any} */ (object)[key];
     if (predicate(value, /** @type {keyof T & string} */ (key))) out[key] = value;
   }
   return out;
@@ -634,7 +772,9 @@ function filter(object, predicate) {
 function mapValues(object, fn) {
   /** @type {any} */
   const out = {};
-  for (const [key, value] of Object.entries(object ?? {})) out[key] = fn(value, /** @type {keyof T & string} */ (key));
+  for (const key of Object.keys(object ?? {})) {
+    if (!_UNSAFE.has(key)) out[key] = fn(/** @type {any} */ (object)[key], /** @type {keyof T & string} */ (key));
+  }
   return out;
 }
 
@@ -724,6 +864,7 @@ function compact(object, options = {}) {
   /** @type {any} */
   const out = {};
   for (const [key, value] of Object.entries(object ?? {})) {
+    if (_UNSAFE.has(key)) continue;
     const cleaned = clean(value);
     if (!isEmptyValue(cleaned)) out[key] = cleaned;
   }
@@ -743,12 +884,31 @@ function compact(object, options = {}) {
 function flatten(object, prefix = "") {
   /** @type {Record<string, unknown>} */
   const out = {};
-  for (const [key, value] of Object.entries(object ?? {})) {
-    const path = prefix ? `${prefix}.${key}` : key;
-    if (_isPlain(value) && Object.keys(/** @type {object} */ (value)).length) Object.assign(out, flatten(/** @type {object} */ (value), path));
-    else out[path] = value;
-  }
+  /** @type {(value: Record<string, unknown>, path: string) => void} */
+  const walk = (value, path) => {
+    for (const key of Object.keys(value)) {
+      if (_UNSAFE.has(key)) continue;
+      const child = value[key];
+      const next = path ? `${path}.${key}` : key;
+      if (_isPlain(child) && Object.keys(child).length) walk(child, next);
+      else out[next] = child;
+    }
+  };
+  walk(/** @type {any} */ (object ?? {}), prefix);
   return out;
+}
+
+/**
+ * Every leaf path of an object, in dotted form. Arrays count as leaves.
+ *
+ * @example
+ * obj.paths({ db: { host: "x", port: 5432 }, tags: ["a"] }); // ["db.host", "db.port", "tags"]
+ *
+ * @param {object} object
+ * @returns {string[]}
+ */
+function paths(object) {
+  return Object.keys(flatten(object));
 }
 
 /**
@@ -764,8 +924,8 @@ function unflatten(object) {
   /** @type {Record<string, any>} */
   const out = {};
   for (const [path, value] of Object.entries(object ?? {})) {
-    const keys = _toPath(path);
-    if (!keys.length || !_isSafePath(keys)) continue;
+    const { keys, safe } = _parsePath(path);
+    if (!keys.length || !safe) continue;
     let current = out;
     for (let i = 0; i < keys.length - 1; i++) {
       const key = keys[i];
@@ -866,12 +1026,55 @@ function isEmpty(object) {
  * @returns {DeepReadonly<T>} The same object.
  */
 function deepFreeze(object) {
-  if (object !== null && (typeof object === "object" || typeof object === "function") && !Object.isFrozen(object)) {
-    Object.freeze(object);
-    for (const key of Reflect.ownKeys(/** @type {object} */ (object))) deepFreeze(/** @type {any} */ (object)[key]);
-  }
+  if (object === null || (typeof object !== "object" && typeof object !== "function") || Object.isFrozen(object)) return /** @type {DeepReadonly<T>} */ (object);
+  // Typed arrays and buffers can't be frozen: their memory stays writable.
+  if (ArrayBuffer.isView(object)) return /** @type {DeepReadonly<T>} */ (object);
+  Object.freeze(object);
+  for (const key of Reflect.ownKeys(/** @type {object} */ (object))) deepFreeze(/** @type {any} */ (object)[key]);
   return /** @type {DeepReadonly<T>} */ (object);
 }
+
+/**
+ * A copy with its keys in order, nested objects included. Two objects with
+ * the same content then give the same JSON, which makes stable hashes,
+ * cache keys and readable diffs.
+ *
+ * @example
+ * obj.sortKeys({ b: 1, a: { d: 1, c: 2 } }); // { a: { c: 2, d: 1 }, b: 1 }
+ * nc.crypto.hash(JSON.stringify(obj.sortKeys(payload)));
+ *
+ * @template T
+ * @param {T} object
+ * @param {SortKeysOptions} [options]
+ * @returns {T}
+ */
+function sortKeys(object, options = {}) {
+  const deep = options.deep ?? true;
+  /** @type {object[]} */
+  const ancestors = [];
+  /** @type {(value: any) => any} */
+  const walk = (value) => {
+    if (value === null || typeof value !== "object" || ancestors.includes(value)) return value;
+    const isArray = Array.isArray(value);
+    if (!isArray && !_isPlain(value)) return value;
+    ancestors.push(value);
+    /** @type {any} */
+    let out;
+    if (isArray) out = deep ? value.map(walk) : value;
+    else {
+      out = {};
+      for (const key of Object.keys(value).sort(options.compare)) {
+        if (!_UNSAFE.has(key)) out[key] = deep ? walk(value[key]) : value[key];
+      }
+    }
+    ancestors.pop();
+    return out;
+  };
+  return walk(object);
+}
+
+/** @type {MergeOptions} */
+const _NO_OPTIONS = {};
 
 module.exports = {
   clone,
@@ -883,6 +1086,7 @@ module.exports = {
   // not shorthand: Node's ES module export detection stops at a bare `get`
   get: get,
   set,
+  update,
   unset,
   has,
   pick,
@@ -895,6 +1099,8 @@ module.exports = {
   compact,
   flatten,
   unflatten,
+  paths,
+  sortKeys,
   keys,
   entries,
   fromEntries,
