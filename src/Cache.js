@@ -178,7 +178,8 @@ class Cache {
 
   /**
    * Stores a value. When the cache is full, the least recently used entry
-   * goes.
+   * goes. A value being loaded for this key by `getOrSet()` is not stored
+   * when it arrives: the one you set stays.
    *
    * @example
    * cache.set("token", token, { ttl: "15m" });
@@ -189,6 +190,7 @@ class Cache {
    * @returns {this}
    */
   set(key, value, options = {}) {
+    this.#loading.delete(key);
     const ttl = options.ttl === undefined ? this.#ttl : _duration(options.ttl, "ttl");
     const grace = options.staleWhileRevalidate === undefined ? this.#stale : _duration(options.staleWhileRevalidate, "staleWhileRevalidate");
     const previous = this.#map.get(key);

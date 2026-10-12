@@ -32,8 +32,8 @@ const _cp = () => (_childProcess ??= require("node:child_process"));
  * @property {Record<string, string | undefined>} [env] Extra environment variables, added to `process.env`. `undefined` removes one.
  * @property {boolean} [extendEnv] Set to `false` to pass only `env`, without `process.env`.
  * @property {string | Buffer} [input] Written to the command's stdin.
- * @property {number | string} [timeout] Kill the command, and everything it started, after this long, like `"30s"`.
- * @property {AbortSignal} [signal] Kills the command, and everything it started, when aborted.
+ * @property {number | string} [timeout] Kill the command after this long, like `"30s"`. On Windows, what it started is stopped with it.
+ * @property {AbortSignal} [signal] Kills the command when aborted. On Windows, what it started is stopped with it.
  * @property {"pipe" | "inherit"} [stdio] `"inherit"` shows the output live instead of capturing it. Defaults to `"pipe"`.
  * @property {(line: string) => void} [onStdout] Called for each line of stdout.
  * @property {(line: string) => void} [onStderr] Called for each line of stderr.
@@ -419,7 +419,8 @@ const _shutdown = async (reason, exitCode) => {
     process.stderr.write(`[@ix-xs/node-comfort] Shutdown (${reason}) took longer than ${_shutdownConfig.timeout}ms, forcing exit\n`);
     process.exit(1);
   }, Math.min(_shutdownConfig.timeout, 2 ** 31 - 1));
-  force.unref();
+  // Not unref'd: a handler that never settles must not let the process end
+  // quietly with the wrong exit code once nothing else keeps it alive.
   let failed = false;
   for (const handler of [..._shutdownHandlers].reverse()) {
     try {

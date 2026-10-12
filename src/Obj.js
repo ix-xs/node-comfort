@@ -84,7 +84,7 @@ const shared = require("./internal/shared.js");
 /**
  * Options for `sortKeys()`.
  * @typedef {object} SortKeysOptions
- * @property {boolean} [deep] Sort nested objects too, arrays included. Defaults to `true`.
+ * @property {boolean} [deep] Sort nested objects too, arrays included. Defaults to `true`. With `false`, only the first level is copied and sorted: what it holds is shared with the original.
  * @property {(a: string, b: string) => number} [compare] How to order two keys. Defaults to code-unit order, which is stable across machines.
  */
 
@@ -247,8 +247,8 @@ const _mergeInto = (target, source, options) => {
 
 /**
  * Deep copy. Unlike `structuredClone`, it keeps functions and class
- * instances (with their prototype), and it's several times faster on plain
- * data. Shared references and cycles are preserved.
+ * instances (with their prototype), and it's faster on plain data. Shared
+ * references and cycles are preserved.
  *
  * @example
  * const copy = obj.clone({ a: { b: [1, 2] }, when: new Date() });
@@ -1004,13 +1004,22 @@ function size(value) {
 }
 
 /**
- * Does the object have no own keys? `null` and `undefined` count as empty.
+ * Is there nothing in it? No own keys for an object, no entries for a Map
+ * or a Set. `null` and `undefined` count as empty; a date, a regular
+ * expression and an error never do.
+ *
+ * @example
+ * obj.isEmpty({});                  // true
+ * obj.isEmpty(new Map([["a", 1]])); // false
  *
  * @param {unknown} object
  * @returns {boolean}
  */
 function isEmpty(object) {
-  return object === null || object === undefined || Object.keys(object).length === 0;
+  if (object === null || object === undefined) return true;
+  if (types.isMap(object) || types.isSet(object)) return /** @type {Set<unknown>} */ (object).size === 0;
+  if (types.isDate(object) || types.isRegExp(object) || types.isNativeError(object)) return false;
+  return Object.keys(object).length === 0;
 }
 
 /**

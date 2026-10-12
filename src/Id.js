@@ -485,7 +485,7 @@ function snowflake(options = {}) {
  * @param {string | bigint} id
  * @param {SnowflakeOptions} [options] Use the epoch it was created with.
  * @returns {ParsedSnowflake}
- * @throws {TypeError} If the id is not a whole positive number.
+ * @throws {TypeError} If the id is not a string of digits or a bigint.
  */
 function parseSnowflake(id, options = {}) {
   if (typeof id !== "bigint" && !(typeof id === "string" && /^\d{1,20}$/.test(id))) {

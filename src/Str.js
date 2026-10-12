@@ -534,8 +534,8 @@ function unescapeHTML(input) {
     if (entity.charCodeAt(0) === 35) {
       const hex = entity.charCodeAt(1) === 120 || entity.charCodeAt(1) === 88;
       const code = parseInt(entity.slice(hex ? 2 : 1), hex ? 16 : 10);
-      // Out-of-range numbers and lone surrogates are not characters: leave them as written.
-      return code > 0x10ffff || (code >= 0xd800 && code <= 0xdfff) || Number.isNaN(code) ? match : String.fromCodePoint(code);
+      // Zero, out-of-range numbers and lone surrogates are not characters: leave them as written.
+      return code === 0 || code > 0x10ffff || (code >= 0xd800 && code <= 0xdfff) || Number.isNaN(code) ? match : String.fromCodePoint(code);
     }
     return HTML_ENTITIES[entity] ?? HTML_ENTITIES[entity.toLowerCase()] ?? match;
   });
@@ -628,7 +628,9 @@ function truncate(input, length, options = {}) {
   const chars = _graphemes(s);
   if (chars.length <= length) return s;
   const omission = options.omission ?? "…";
-  const keep = Math.max(0, length - _count(omission));
+  const keep = length - _count(omission);
+  // No room for anything but the omission, and maybe not all of it.
+  if (keep <= 0) return _graphemes(omission).slice(0, Math.max(0, length)).join("");
   if (options.position === "start") return omission + chars.slice(chars.length - keep).join("").replace(/^\s+/, "");
   if (options.position === "middle") {
     const head = Math.ceil(keep / 2);

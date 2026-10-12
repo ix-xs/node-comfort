@@ -1941,3 +1941,80 @@ describe("fs", () => {
     assert.ok(seen.length > 0, "the write was seen");
   });
 });
+
+describe("found while rereading the guides", () => {
+  const { sys, Cache } = nc;
+
+  it("a shutdown handler that never ends cannot make the process exit quietly", async () => {
+    const sysPath = JSON.stringify(require.resolve("../src/Sys.js"));
+    const script = `
+      const sys = require(${sysPath});
+      sys.onShutdown(() => new Promise(() => {}), { timeout: "150ms" });
+      sys.shutdown(5);
+    `;
+    const result = await sys.run(process.execPath, ["-e", script], { reject: false });
+    assert.equal(result.exitCode, 1);
+    assert.match(result.stderr, /forcing exit/);
+  });
+
+  it("a value set during a load is not replaced when the load ends", async () => {
+    const cache = new Cache();
+    /** @type {(value: string) => void} */
+    let finish = () => {};
+    const loading = cache.getOrSet("k", () => new Promise((resolve) => (finish = resolve)));
+    await sleep(5);
+    cache.set("k", "manual");
+    finish("loaded");
+    assert.equal(await loading, "loaded");
+    assert.equal(cache.get("k"), "manual");
+    assert.equal(await cache.getOrSet("k", () => "again"), "manual");
+  });
+
+  it("one day later is the same time tomorrow, whatever the clocks do", () => {
+    const zone = { timeZone: "Europe/Paris" };
+    // The night of March 30 to 31, 2024 lost an hour in Paris.
+    const noon = "2024-03-30T12:00:00+01:00";
+    assert.equal(time.add(noon, 1, "day", zone).toISOString(), "2024-03-31T10:00:00.000Z");
+    assert.equal(time.add(noon, "1 day", zone).toISOString(), "2024-03-31T10:00:00.000Z");
+    assert.equal(time.add(noon, 1, "week", zone).toISOString(), "2024-04-06T10:00:00.000Z");
+    assert.equal(time.subtract("2024-03-31T12:00:00+02:00", 1, "d", zone).toISOString(), "2024-03-30T11:00:00.000Z");
+    // Hours stay exact, and so do fractions of a day.
+    assert.equal(time.add(noon, "24h", zone).toISOString(), "2024-03-31T11:00:00.000Z");
+    assert.equal(time.add(noon, 0.5, "day", zone).toISOString(), "2024-03-30T23:00:00.000Z");
+    assert.equal(time.add(0, "86400000").getTime(), 86_400_000);
+    const days = time.range("2024-03-30T00:00+01:00", "2024-04-01T00:00+02:00", "day", zone);
+    assert.deepEqual(days.map((day) => time.format(day, "DD HH:mm", zone)), ["30 00:00", "31 00:00", "01 00:00"]);
+    assert.equal(time.add(new Date(Date.UTC(2024, 0, 31)), 1, "day", { timeZone: "UTC" }).toISOString(), "2024-02-01T00:00:00.000Z");
+  });
+
+  it("a unit that does not exist is an error, not milliseconds", () => {
+    assert.throws(() => time.add(0, 3, /** @type {any} */ ("bananas")), TypeError);
+    assert.throws(() => time.diff(0, 1, /** @type {any} */ ("bananas")), TypeError);
+    assert.throws(() => time.startOf(0, /** @type {any} */ ("bogus")), TypeError);
+    assert.throws(() => time.endOf(0, /** @type {any} */ ("bogus")), TypeError);
+    assert.throws(() => time.isSame(0, 1, /** @type {any} */ ("bogus")), TypeError);
+  });
+
+  it("obj.isEmpty looks inside maps and sets, and a date is never empty", () => {
+    assert.equal(obj.isEmpty(new Map()), true);
+    assert.equal(obj.isEmpty(new Map([[1, 2]])), false);
+    assert.equal(obj.isEmpty(new Set([1])), false);
+    assert.equal(obj.isEmpty(new Date()), false);
+    assert.equal(obj.isEmpty(/x/), false);
+    assert.equal(obj.isEmpty(new Error("x")), false);
+    assert.equal(obj.isEmpty({}), true);
+    assert.equal(obj.isEmpty(null), true);
+  });
+
+  it("truncate never returns more than the length asked for", () => {
+    assert.equal(str.truncate("Hello", 2, { omission: "..." }), "..");
+    assert.equal(str.truncate("Hello", 3, { omission: "..." }), "...");
+    assert.equal(str.truncate("Hello", 0), "");
+    assert.equal(str.truncate("Hello world", 8), "Hello w…");
+  });
+
+  it("unescapeHTML does not produce a NUL character", () => {
+    assert.equal(str.unescapeHTML("a&#0;b"), "a&#0;b");
+    assert.equal(str.unescapeHTML("&#65;"), "A");
+  });
+});
