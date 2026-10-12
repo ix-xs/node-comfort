@@ -1,0 +1,23 @@
+{
+  "name": "node-comfort-docs",
+  "version": "2.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "showcase": "node scripts/showcase.mjs",
+    "dev": "node scripts/showcase.mjs && astro dev",
+    "build": "node scripts/showcase.mjs && astro build && node scripts/legacy-pages.mjs",
+    "preview": "astro preview",
+    "check-links": "node scripts/check-links.mjs",
+    "check-translation": "node scripts/check-translation.mjs"
+  },
+  "dependencies": {
+    "@astrojs/markdown-remark": "^7.3.2",
+    "@astrojs/starlight": "^0.42.6",
+    "@fontsource-variable/fraunces": "^5.3.0",
+    "@fontsource-variable/jetbrains-mono": "^5.3.0",
+    "astro": "^7.3.8",
+    "github-slugger": "^2.0.0",
+    "sharp": "^0.35.5"
+  }
+}

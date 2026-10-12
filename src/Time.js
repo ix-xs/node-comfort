@@ -455,13 +455,15 @@ function parseDuration(input) {
  * time.formatDuration(90_000, { long: true, locale: "fr" });    // "1 minute 30 secondes"
  * time.formatDuration(93_784_000, { units: 2 });                // "1d 2h"
  * time.formatDuration(5_405_000, { clock: true });              // "01:30:05"
+ * time.formatDuration("90m");                                   // "1h 30m"
  *
- * @param {number} ms
+ * @param {number | string} duration Milliseconds, or text like `"90m"`.
  * @param {FormatDurationOptions} [options]
  * @returns {string}
  */
-function formatDuration(ms, options = {}) {
-  if (!Number.isFinite(ms)) return String(ms);
+function formatDuration(duration, options = {}) {
+  const ms = typeof duration === "string" ? shared.parseDuration(duration) ?? NaN : duration;
+  if (!Number.isFinite(ms)) return String(duration);
   const sign = ms < 0 ? "-" : "";
   let rest = Math.abs(Math.trunc(ms));
 

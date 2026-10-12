@@ -1,0 +1,7 @@
+# Astro / build
+dist/
+.astro/
+node_modules/
+
+# written by scripts/showcase.mjs before each build
+src/showcase/output.json

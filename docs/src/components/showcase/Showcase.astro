@@ -1,0 +1,184 @@
+---
+// The showcase of the landing page: a subject, a variation, the code, and what
+// it printed when `scripts/showcase.mjs` ran it. Everything is in the page from
+// the start; the script below only decides what is shown and replays the output.
+import { Code } from "@astrojs/starlight/components";
+import { useT } from "../../i18n";
+import { SCENES } from "../../showcase/scenes.mjs";
+import output from "../../showcase/output.json";
+import "../../styles/showcase.css";
+
+type Run = { code: string; html: string; ms: number };
+const runs = output as Record<string, Record<string, Run>>;
+
+const { locale } = Astro.locals.starlightRoute;
+const t = useT(locale);
+const language = (locale ?? "en") as "en" | "fr";
+---
+
+<nc-showcase class="nc-show" aria-label={t("showcase.label")}>
+  <div class="nc-show-tabs">
+    <div class="nc-show-tablist" role="tablist" aria-label={t("showcase.scenes")}>
+      <span class="nc-show-marker" aria-hidden="true"></span>
+      {SCENES.map((scene, index) => (
+        <button class="nc-show-tab" type="button" role="tab" id={`nc-tab-${scene.id}`} aria-controls={`nc-panel-${scene.id}`} aria-selected={index === 0 ? "true" : "false"} tabindex={index === 0 ? 0 : -1}>
+          {scene.label}
+        </button>
+      ))}
+    </div>
+  </div>
+
+  {SCENES.map((scene, index) => (
+    <section class="nc-show-panel" role="tabpanel" id={`nc-panel-${scene.id}`} aria-labelledby={`nc-tab-${scene.id}`} hidden={index !== 0}>
+      <div class="nc-show-head">
+        <p>{scene.about[language]}</p>
+        <div class="nc-show-variants" role="group" aria-label={t("showcase.variants")}>
+          {scene.variants.map((variant, at) => (
+            <button class="nc-show-chip nc-press" type="button" data-variant={variant.id} aria-pressed={at === 0 ? "true" : "false"}>{variant.label}</button>
+          ))}
+        </div>
+      </div>
+      {scene.variants.map((variant, at) => {
+        const run = runs[scene.id][variant.id];
+        return (
+          <div class="nc-show-run" data-variant={variant.id} hidden={at !== 0}>
+            <div class="nc-show-code">
+              <Code code={run.code} lang="js" title={`${variant.id}.js`} />
+            </div>
+            <div class="nc-term">
+              <header>
+                <span class="nc-term-title">{t("showcase.output")}</span>
+                <span class="nc-term-time" data-time={t("showcase.ran", { ms: run.ms })}></span>
+                <button class="nc-term-run nc-press" type="button" data-run>
+                  <svg width="11" height="11" viewBox="0 0 12 12" fill="currentColor" aria-hidden="true"><path d="M2.5 1.2v9.6a.5.5 0 0 0 .76.43l8-4.8a.5.5 0 0 0 0-.86l-8-4.8a.5.5 0 0 0-.76.43Z"></path></svg>
+                  <span>{t("showcase.again")}</span>
+                </button>
+              </header>
+              <pre tabindex="0"><code set:html={run.html} /></pre>
+            </div>
+          </div>
+        );
+      })}
+    </section>
+  ))}
+</nc-showcase>
+
+<script>
+  const reduced = matchMedia("(prefers-reduced-motion: reduce)");
+
+  class Showcase extends HTMLElement {
+    private tabs = [...this.querySelectorAll<HTMLButtonElement>('[role="tab"]')];
+    private marker = this.querySelector<HTMLElement>(".nc-show-marker");
+    private list = this.querySelector<HTMLElement>('[role="tablist"]');
+    // Whether the last thing the reader did here was with a pointer: a marker
+    // slides for a pointer and jumps for the keyboard.
+    private pointer = false;
+
+    connectedCallback(): void {
+      this.addEventListener("pointerdown", () => (this.pointer = true));
+      this.addEventListener("keydown", (event) => {
+        this.pointer = false;
+        this.onKey(event);
+      });
+      for (const tab of this.tabs) tab.addEventListener("click", () => this.select(tab));
+      this.addEventListener("click", (event) => {
+        const target = event.target as Element | null;
+        const chip = target?.closest<HTMLButtonElement>(".nc-show-chip");
+        if (chip) this.choose(chip);
+        const run = target?.closest<HTMLButtonElement>("[data-run]");
+        if (run) this.play(run.closest<HTMLElement>(".nc-show-run"));
+      });
+      addEventListener("resize", () => this.place(false));
+      // Fonts change the width of the tabs once they arrive.
+      document.fonts?.ready.then(() => this.place(false));
+      this.place(false);
+      // The first output plays when the showcase comes into view, once.
+      new IntersectionObserver(
+        (entries, watcher) => {
+          if (!entries.some((entry) => entry.isIntersecting)) return;
+          watcher.disconnect();
+          this.play(this.current());
+        },
+        { threshold: 0.35 },
+      ).observe(this);
+    }
+
+    /** The run on screen. */
+    private current(): HTMLElement | null {
+      return this.querySelector<HTMLElement>(".nc-show-panel:not([hidden]) .nc-show-run:not([hidden])");
+    }
+
+    private onKey(event: KeyboardEvent): void {
+      const tab = (event.target as Element | null)?.closest<HTMLButtonElement>('[role="tab"]');
+      if (!tab) return;
+      const at = this.tabs.indexOf(tab);
+      const to = event.key === "ArrowRight" ? at + 1 : event.key === "ArrowLeft" ? at - 1 : event.key === "Home" ? 0 : event.key === "End" ? this.tabs.length - 1 : -2;
+      if (to === -2) return;
+      event.preventDefault();
+      const next = this.tabs[(to + this.tabs.length) % this.tabs.length];
+      next.focus();
+      this.select(next);
+    }
+
+    private select(tab: HTMLButtonElement): void {
+      if (tab.getAttribute("aria-selected") === "true") return;
+      for (const other of this.tabs) {
+        const selected = other === tab;
+        other.setAttribute("aria-selected", String(selected));
+        other.tabIndex = selected ? 0 : -1;
+        const panel = this.querySelector<HTMLElement>(`#${other.getAttribute("aria-controls")}`);
+        if (panel) panel.hidden = !selected;
+      }
+      this.place(this.pointer);
+      tab.scrollIntoView({ block: "nearest", inline: "nearest" });
+      this.play(this.current());
+    }
+
+    private choose(chip: HTMLButtonElement): void {
+      const panel = chip.closest<HTMLElement>(".nc-show-panel");
+      if (!panel || chip.getAttribute("aria-pressed") === "true") return;
+      for (const other of panel.querySelectorAll<HTMLButtonElement>(".nc-show-chip")) other.setAttribute("aria-pressed", String(other === chip));
+      for (const run of panel.querySelectorAll<HTMLElement>(".nc-show-run")) run.hidden = run.dataset.variant !== chip.dataset.variant;
+      this.play(this.current());
+    }
+
+    /** Moves the marker under the selected tab. */
+    private place(animate: boolean): void {
+      const active = this.tabs.find((tab) => tab.getAttribute("aria-selected") === "true");
+      if (!active || !this.marker || !this.list || active.offsetWidth === 0) return;
+      this.list.toggleAttribute("data-slide", animate && !reduced.matches);
+      // The marker covers the whole row and is cut down to the tab: its round ends keep their shape.
+      const left = active.offsetLeft;
+      const right = this.list.offsetWidth - left - active.offsetWidth;
+      this.marker.style.clipPath = `inset(0 ${right}px 0 ${left}px round 999px)`;
+      this.list.setAttribute("data-ready", "");
+    }
+
+    /** Prints the output again, a line at a time, as a program would. */
+    private play(run: HTMLElement | null): void {
+      if (!run) return;
+      const lines = [...run.querySelectorAll<HTMLElement>(".nc-line")];
+      const time = run.querySelector<HTMLElement>(".nc-term-time");
+      for (const line of lines) for (const animation of line.getAnimations()) animation.cancel();
+      if (time) time.textContent = "";
+      const done = () => {
+        if (time) time.textContent = time.dataset.time ?? "";
+      };
+      if (reduced.matches || lines.length === 0) return done();
+      // Short outputs take their time, long ones don't make you wait: the whole thing lands in half a second at most.
+      const gap = Math.min(45, 420 / lines.length);
+      let last: Animation | undefined;
+      lines.forEach((line, index) => {
+        last = line.animate(
+          [
+            { opacity: 0, transform: "translateY(4px)" },
+            { opacity: 1, transform: "none" },
+          ],
+          { duration: 220, delay: index * gap, easing: "cubic-bezier(0.23, 1, 0.32, 1)", fill: "backwards" },
+        );
+      });
+      last?.finished.then(done, () => {});
+    }
+  }
+  customElements.define("nc-showcase", Showcase);
+</script>
