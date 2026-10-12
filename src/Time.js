@@ -887,16 +887,18 @@ function toISODate(date, options = {}) {
  * time.add(new Date(), 3, "days");
  * time.add(new Date(), "1 month");
  * time.add(new Date(2024, 0, 31), 1, "month"); // 2024-02-29
+ * time.add(date, "1 day", { timeZone: "Europe/Paris" });
  *
  * @param {DateInput} date
  * @param {number | string} amount A number with `unit`, or a duration like `"1h30m"` or `"1 month"`.
- * @param {CalendarUnit} [unit="ms"]
+ * @param {CalendarUnit | TimeZoneOptions} [unit="ms"] The unit of a number. With a text amount there is none to give: the options can come here.
  * @param {TimeZoneOptions} [options] The zone whose calendar is followed.
  * @returns {Date}
  * @throws {TypeError} If a text amount isn't a duration, or the unit isn't one.
  */
 function add(date, amount, unit = "ms", options = {}) {
   const d = _toDate(date);
+  if (typeof unit !== "string") return _addText(d, String(amount), 1, unit.timeZone ?? _config.timeZone);
   const timeZone = options.timeZone ?? _config.timeZone;
   if (typeof amount === "string") return _addText(d, amount, 1, timeZone);
   const u = _knownUnit(unit);
@@ -915,13 +917,14 @@ function add(date, amount, unit = "ms", options = {}) {
  *
  * @param {DateInput} date
  * @param {number | string} amount
- * @param {CalendarUnit} [unit="ms"]
+ * @param {CalendarUnit | TimeZoneOptions} [unit="ms"] The unit of a number, or the options when the amount is text.
  * @param {TimeZoneOptions} [options]
  * @returns {Date}
- * @throws {TypeError} If a text amount isn't a duration.
+ * @throws {TypeError} If a text amount isn't a duration, or the unit isn't one.
  */
 function subtract(date, amount, unit = "ms", options = {}) {
-  if (typeof amount === "string") return _addText(_toDate(date), amount, -1, options.timeZone ?? _config.timeZone);
+  const given = typeof unit === "string" ? options : unit;
+  if (typeof amount === "string" || typeof unit !== "string") return _addText(_toDate(date), String(amount), -1, given.timeZone ?? _config.timeZone);
   return add(date, -amount, unit, options);
 }
 

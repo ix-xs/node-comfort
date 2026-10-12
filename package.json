@@ -187,7 +187,7 @@
     "build": "node scripts/build-types.js && node scripts/build-reference.js",
     "build:types": "node scripts/build-types.js",
     "build:reference": "node scripts/build-reference.js",
-    "test": "node --test --test-timeout=120000 \"test/**/*.test.js\"",
+    "test": "node --test --test-reporter=spec --test-timeout=120000 \"test/**/*.test.js\"",
     "test:types": "node scripts/check-types.js",
     "docs:install": "npm ci --prefix docs",
     "docs:dev": "npm run dev --prefix docs",
