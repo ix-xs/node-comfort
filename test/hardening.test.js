@@ -3,7 +3,7 @@
 // Regression tests for defects fixed in 2.1: one test per defect, named after
 // what used to go wrong.
 
-const { describe, it, before, after } = require("node:test");
+const { describe, it, before, after, afterEach } = require("node:test");
 const assert = require("node:assert/strict");
 const nc = require("..");
 
@@ -1537,5 +1537,153 @@ describe("schema", () => {
     const json = Category.toJSONSchema();
     assert.deepEqual(json.properties.children, { $ref: "#/$defs/schema1" });
     assert.deepEqual(json.$defs.schema1.items.properties.children, { $ref: "#/$defs/schema1" });
+  });
+});
+
+describe("sqlite", () => {
+  /** @type {Array<import("..").SQLite>} */
+  const opened = [];
+  afterEach(() => {
+    for (const db of opened.splice(0)) db.close();
+  });
+  const open = (/** @type {import("..").SQLiteOptions} */ options = {}) => {
+    const db = new nc.SQLite(":memory:", options);
+    opened.push(db);
+    db.createTable({
+      name: "users",
+      columns: {
+        id: { type: "INTEGER", primaryKey: true, autoincrement: true },
+        email: { type: "TEXT", unique: true },
+        role: { type: "TEXT", defaultValue: "user" },
+        active: { type: "BOOLEAN", defaultValue: true },
+        settings: { type: "JSON", defaultValue: {} },
+        visits: { type: "INTEGER" },
+        created_at: { type: "DATETIME", defaultValue: "CURRENT_TIMESTAMP" },
+        token: { type: "TEXT", defaultExpression: "lower(hex(randomblob(4)))" },
+      },
+    });
+    db.insert("users", { email: "ada@x.io", settings: { theme: "dark", beta: true, tags: ["a", "b"] }, visits: 1 });
+    db.insertMany("users", [{ email: "bob@x.io", role: "admin", settings: { theme: "light" } }, { email: "cy@x.io", active: false }, { email: "di@x.io", settings: { theme: "dark" }, visits: 5 }]);
+    return db;
+  };
+  /** @param {any[]} rows */
+  const emails = (rows) => rows.map((row) => row.email);
+
+  it("CURRENT_TIMESTAMP is the clock, not a piece of text", () => {
+    const db = open();
+    const user = db.get("users", { id: 1 });
+    assert.match(user?.created_at, /^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$/);
+    assert.match(user?.token, /^[0-9a-f]{8}$/);
+    assert.equal(Object.getPrototypeOf(user), Object.prototype);
+  });
+
+  it("filters and sorts on keys inside a JSON column", () => {
+    const db = open();
+    assert.deepEqual(emails(db.getAll("users", { "settings.theme": "dark" })), ["ada@x.io", "di@x.io"]);
+    assert.deepEqual(emails(db.getAll("users", { "settings.beta": true })), ["ada@x.io"]);
+    assert.deepEqual(emails(db.getAll("users", { "settings.tags.1": "b" })), ["ada@x.io"]);
+    assert.deepEqual(emails(db.getAll("users", { "settings.theme": { in: ["light", "dark"] } }, { orderBy: [["settings.theme", "DESC"], "email"] })), ["bob@x.io", "ada@x.io", "di@x.io"]);
+    assert.throws(() => db.getAll("users", { "settings.th'eme": 1 }), /Invalid JSON path/);
+  });
+
+  it("increment adds in one statement", () => {
+    const db = open();
+    assert.equal(db.increment("users", { visits: 2 }, { email: "ada@x.io" }).changes, 1);
+    assert.equal(db.get("users", { email: "ada@x.io" })?.visits, 3);
+    db.increment("users", { visits: -1 }, { email: "cy@x.io" });
+    assert.equal(db.get("users", { email: "cy@x.io" })?.visits, -1, "an empty column counts as 0");
+    assert.throws(() => db.increment("users", { visits: 1 }, {}), /non-empty where/);
+    assert.throws(() => db.increment("users", /** @type {any} */ ({ visits: "1" }), { id: 1 }), /expects a number/);
+  });
+
+  it("onConflict ignores or replaces a clashing row", () => {
+    const db = open();
+    assert.throws(() => db.insert("users", { email: "ada@x.io" }), { sqliteCode: "SQLITE_CONSTRAINT_UNIQUE" });
+    assert.equal(db.insert("users", { email: "ada@x.io" }, { onConflict: "ignore" }).changes, 0);
+    assert.equal(db.insertMany("users", [{ email: "ada@x.io" }, { email: "new@x.io" }], { onConflict: "ignore" }).changes, 1);
+    db.insert("users", { id: 2, email: "bob2@x.io" }, { onConflict: "replace" });
+    assert.equal(db.get("users", { id: 2 })?.email, "bob2@x.io");
+    assert.throws(() => db.insert("users", { email: "z" }, /** @type {any} */ ({ onConflict: "nope" })), /Invalid onConflict/);
+  });
+
+  it("insertMany takes rows with different columns, and any iterable", () => {
+    const db = open();
+    function* rows() {
+      yield { email: "a@x.io" };
+      yield { email: "b@x.io", role: "admin" };
+      yield { email: "c@x.io" };
+    }
+    assert.equal(db.insertMany("users", rows()).changes, 3);
+    assert.equal(db.get("users", { email: "b@x.io" })?.role, "admin");
+    assert.equal(db.get("users", { email: "c@x.io" })?.role, "user");
+    assert.throws(() => db.insertMany("users", [{ email: "d@x.io" }, { email: "a@x.io" }]));
+    assert.equal(db.exists("users", { email: "d@x.io" }), false, "all or nothing");
+  });
+
+  it("paginate", () => {
+    const db = open();
+    const page = db.paginate("users", {}, { page: 2, perPage: 3, orderBy: "id" });
+    assert.deepEqual({ ...page, items: emails(page.items) }, { items: ["di@x.io"], page: 2, perPage: 3, total: 4, pages: 2, hasPrev: true, hasNext: false });
+    assert.equal(db.paginate("users", {}, { page: 99, perPage: 3 }).page, 2);
+    assert.deepEqual(db.paginate("users", { role: "nope" }), { items: [], page: 1, perPage: 20, total: 0, pages: 1, hasPrev: false, hasNext: false });
+  });
+
+  it("reads views and temporary tables", () => {
+    const db = open();
+    db.exec("CREATE VIEW admins AS SELECT id, email, active FROM users WHERE role = 'admin'");
+    db.exec("CREATE TEMP TABLE scratch (id INTEGER PRIMARY KEY, done BOOLEAN)");
+    db.insert("scratch", { done: true });
+    assert.deepEqual(db.getAll("admins"), [{ id: 2, email: "bob@x.io", active: true }]);
+    assert.equal(db.count("admins"), 1);
+    assert.deepEqual(db.get("scratch"), { id: 1, done: true });
+    assert.equal(db.hasTable("scratch"), true);
+    assert.equal(db.hasTable("admins"), false, "a view is not a table");
+    assert.throws(() => db.get("nope"), /does not exist/);
+  });
+
+  it("follows the schema as it changes", () => {
+    const db = open();
+    db.get("users", { id: 1 });
+    db.exec("ALTER TABLE users ADD COLUMN flags JSON");
+    db.update("users", { flags: { a: 1 } }, { id: 1 });
+    assert.deepEqual(db.get("users", { id: 1 })?.flags, { a: 1 });
+    assert.throws(() => db.transaction(() => {
+      db.createTable({ name: "tmp", columns: { id: { type: "INTEGER" } } });
+      db.insert("tmp", { id: 1 });
+      throw new Error("undo");
+    }), /undo/);
+    assert.throws(() => db.insert("tmp", { id: 1 }), /does not exist/);
+  });
+
+  it("transaction can take the write lock up front", () => {
+    const db = open();
+    assert.equal(db.transaction(() => db.count("users"), { immediate: true }), 4);
+    assert.equal(db.inTransaction, false);
+  });
+
+  it("converts columns of joins where Node says where they come from, and of single tables everywhere", () => {
+    const db = open();
+    db.createTable({ name: "posts", columns: { id: { type: "INTEGER", primaryKey: true }, user_id: { type: "INTEGER" }, meta: { type: "JSON" }, pinned: { type: "BOOLEAN" } } });
+    db.insert("posts", { id: 1, user_id: 1, meta: { tags: ["x"] }, pinned: true });
+    const statement = /** @type {any} */ (db.native.prepare("SELECT 1"));
+    const sql = "SELECT p.meta, p.pinned AS top, u.active FROM posts p JOIN users u ON u.id = p.user_id";
+    if (typeof statement.setReturnArrays === "function" && typeof statement.columns === "function") {
+      assert.deepEqual(db.queryAll(sql), [{ meta: { tags: ["x"] }, top: true, active: true }]);
+    }
+    assert.deepEqual(db.queryOne("SELECT * FROM posts WHERE id = ?", 1), { id: 1, user_id: 1, meta: { tags: ["x"] }, pinned: true });
+    assert.deepEqual([...db.iterate("SELECT id, pinned FROM posts")], [{ id: 1, pinned: true }]);
+
+    // what Node 22.13 offers: rows come as objects, without column descriptions
+    const proto = Object.getPrototypeOf(statement);
+    const saved = proto.setReturnArrays;
+    proto.setReturnArrays = undefined;
+    try {
+      const old = open();
+      assert.deepEqual(old.get("users", { id: 1 }, { columns: ["id", "active", "settings"] }), { id: 1, active: true, settings: { theme: "dark", beta: true, tags: ["a", "b"] } });
+      assert.equal(Object.getPrototypeOf(old.getAll("users")[0]), Object.prototype);
+      assert.deepEqual(old.queryOne("SELECT id, active FROM users WHERE id = ?", 3), { id: 3, active: false });
+    } finally {
+      proto.setReturnArrays = saved;
+    }
   });
 });

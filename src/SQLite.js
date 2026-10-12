@@ -44,7 +44,8 @@ const { SQLiteError } = require("./errors.js");
  * @property {boolean} [autoincrement] With an `INTEGER` primary key: ids are never reused.
  * @property {boolean} [notNull]
  * @property {boolean} [unique]
- * @property {unknown} [defaultValue] Objects work for JSON columns, booleans for BOOLEAN ones.
+ * @property {unknown} [defaultValue] Objects work for JSON columns, booleans for BOOLEAN ones. `"CURRENT_TIMESTAMP"`, `"CURRENT_DATE"` and `"CURRENT_TIME"` mean the moment of the insert.
+ * @property {string} [defaultExpression] A default computed by SQLite, like `"(unixepoch())"` or `"(lower(hex(randomblob(16))))"`. Written into the table as is: never build it from user input.
  * @property {unknown[]} [values] Allowed values.
  * @property {string} [check] A `CHECK` expression, like `"price >= 0"`.
  * @property {{ table: string, column: string }} [references] Foreign key target.
@@ -99,12 +100,16 @@ const { SQLiteError } = require("./errors.js");
  * `IS NULL`, an array means "one of", and an object uses operators. Keys
  * combine with AND; use `$or` and `$and` for the rest.
  *
+ * A key with dots looks inside a JSON column: `"settings.theme"` is the
+ * `theme` key of the `settings` column, `"tags.0"` the first item of `tags`.
+ *
  * @example
  * { status: "active", age: { gte: 18, lt: 65 }, role: ["admin", "editor"], deleted_at: null }
  * { $or: [{ email: { like: "%@acme.com" } }, { vip: true }] }
+ * { "settings.theme": "dark", "settings.beta": true }
  *
  * @template [R=Record<string, any>] Row type; its keys are suggested as columns.
- * @typedef {{ [K in keyof R]?: WhereValue } & { $or?: Where<R>[], $and?: Where<R>[] }} Where
+ * @typedef {{ [K in keyof R]?: WhereValue } & { [path: `${string}.${string}`]: WhereValue } & { $or?: Where<R>[], $and?: Where<R>[] }} Where
  */
 
 /**
@@ -136,6 +141,7 @@ const { SQLiteError } = require("./errors.js");
  * @property {boolean} [wal] Write-ahead logging: faster, and reads don't wait for writes. Defaults to `true`.
  * @property {boolean} [foreignKeys] Enforce foreign keys. Defaults to `true`.
  * @property {number} [busyTimeout] How long to wait for a lock held by another connection, in ms. Defaults to `5000`.
+ * @property {"OFF" | "NORMAL" | "FULL" | "EXTRA"} [synchronous] How hard SQLite pushes each commit to the disk. With `wal`, `"NORMAL"` writes several times faster and can't corrupt the file; a power cut may undo the last commits. Defaults to SQLite's own setting, `"FULL"`.
  * @property {boolean} [readOnly]
  */
 
@@ -172,9 +178,11 @@ const { SQLiteError } = require("./errors.js");
  * @property {string} name
  * @property {(where?: Where<R>, options?: Pick<QueryOptions, "columns" | "orderBy" | "direction">) => R | undefined} get The first matching row.
  * @property {(where?: Where<R>, options?: QueryOptions) => R[]} getAll All matching rows.
- * @property {(data: Partial<R>) => InsertResult} insert Inserts a row.
- * @property {(rows: Array<Partial<R>>) => ChangeResult} insertMany Inserts rows in one transaction.
+ * @property {(where?: Where<R>, options?: PaginateOptions) => import("./Arr").Page<R>} paginate One page of matching rows.
+ * @property {(data: Partial<R>, options?: InsertOptions) => InsertResult} insert Inserts a row.
+ * @property {(rows: Iterable<Partial<R>>, options?: InsertOptions) => ChangeResult} insertMany Inserts rows in one transaction.
  * @property {(data: Partial<R>, where: Where<R>) => ChangeResult} update Updates matching rows.
+ * @property {(amounts: Partial<Record<keyof R & string, number>>, where: Where<R>) => ChangeResult} increment Adds to number columns.
  * @property {(data: Partial<R>, conflict: string[]) => InsertResult} upsert Inserts, or updates on conflict.
  * @property {(where: Where<R>) => ChangeResult} delete Deletes matching rows.
  * @property {(where?: Where<R>) => number} count Counts matching rows.
@@ -182,7 +190,44 @@ const { SQLiteError } = require("./errors.js");
  * @property {() => { ok: true }} clear Deletes every row.
  */
 
+/**
+ * Options for `insert()` and `insertMany()`.
+ * @typedef {object} InsertOptions
+ * @property {"ignore" | "replace"} [onConflict] What to do when a row clashes with an existing one: `"ignore"` skips it, `"replace"` deletes the old row first. By default, the insert fails.
+ */
+
+/**
+ * Options for `paginate()`.
+ * @typedef {object} PaginateOptions
+ * @property {number} [page] Starts at 1, which is the default.
+ * @property {number} [perPage] Defaults to `20`.
+ * @property {string | Array<string | [string, SortDirection]>} [orderBy] Give one: without it, SQLite is free to return the rows in any order.
+ * @property {SortDirection} [direction]
+ * @property {string[]} [columns]
+ */
+
+/**
+ * Options for `transaction()`.
+ * @typedef {object} TransactionOptions
+ * @property {boolean} [immediate] Take the write lock right away, instead of on the first write. Use it for read-then-write work when several processes share the database: they then wait for each other instead of failing with `SQLITE_BUSY`.
+ */
+
+/**
+ * A prepared query and what's needed to turn its rows into objects.
+ * @typedef {{ stmt: import("node:sqlite").StatementSync, names: string[] | undefined, kinds: Uint8Array | undefined, table: string | undefined }} _Reader
+ */
+
 const IDENTIFIER = /^[A-Za-z_][A-Za-z0-9_]*$/;
+const PATH_PART = /^(?:[A-Za-z_][A-Za-z0-9_]*|\d+)$/;
+const CURRENT = /^CURRENT_(?:TIMESTAMP|DATE|TIME)$/i;
+const EXISTS = (/** @type {string} */ types) =>
+  `SELECT 1 FROM (SELECT name, type FROM sqlite_master UNION ALL SELECT name, type FROM sqlite_temp_master) WHERE type IN (${types}) AND name = ?`;
+const TABLE_EXISTS = EXISTS("'table'");
+const SOURCE_EXISTS = EXISTS("'table', 'view'");
+// how a column is converted when read
+const JSON_KIND = 1;
+const BOOLEAN_KIND = 2;
+const DATE_KIND = 3;
 const OPERATORS = new Set(["eq", "ne", "gt", "gte", "lt", "lte", "in", "notIn", "like", "notLike", "glob", "between", "isNull"]);
 const COMPARATORS = /** @type {Record<string, string>} */ ({ gt: ">", gte: ">=", lt: "<", lte: "<=", like: "LIKE", notLike: "NOT LIKE", glob: "GLOB" });
 const ACTIONS = ["CASCADE", "SET NULL", "SET DEFAULT", "RESTRICT", "NO ACTION"];
@@ -292,6 +337,72 @@ const _wrap = (error, sql) => {
 };
 
 /**
+ * How a column of this declared type is converted when read, or 0.
+ * @param {string} type Upper case.
+ * @param {{ json: boolean, booleans: boolean, dates: boolean }} read
+ * @returns {number}
+ */
+const _kindOf = (type, read) => {
+  if (type === "JSON") return read.json ? JSON_KIND : 0;
+  if (type === "BOOLEAN" || type === "BOOL") return read.booleans ? BOOLEAN_KIND : 0;
+  return read.dates && (type === "DATE" || type === "DATETIME" || type === "TIMESTAMP") ? DATE_KIND : 0;
+};
+
+/**
+ * @param {number} kind
+ * @param {unknown} value Not `null`.
+ * @returns {unknown}
+ */
+const _convert = (kind, value) => {
+  if (kind === JSON_KIND) {
+    if (typeof value !== "string") return value;
+    try {
+      return JSON.parse(value);
+    } catch {
+      // not valid JSON: keep the text
+      return value;
+    }
+  }
+  if (kind === BOOLEAN_KIND) return typeof value === "number" || typeof value === "bigint" ? Number(value) !== 0 : value;
+  if (typeof value !== "string" && typeof value !== "number") return value;
+  const date = new Date(value);
+  return Number.isNaN(date.getTime()) ? value : date;
+};
+
+/** @type {Map<string, string>} */
+const _columns = new Map();
+
+/**
+ * A column in a filter or a sort: a name, or a path into a JSON column
+ * like `settings.theme`.
+ * @param {string} key
+ * @returns {string}
+ */
+const _column = (key) => {
+  const known = _columns.get(key);
+  if (known) return known;
+  let sql;
+  if (typeof key === "string" && key.includes(".")) {
+    const [name, ...path] = key.split(".");
+    if (!path.every((part) => PATH_PART.test(part))) throw new SQLiteError(`Invalid JSON path "${key}" (letters, digits and _ only between the dots)`);
+    sql = `json_extract(${_id(name, "column name")}, '$${path.map((part) => (/^\d+$/.test(part) ? `[${part}]` : `.${part}`)).join("")}')`;
+  } else {
+    sql = _id(key, "column name");
+  }
+  if (_columns.size >= 1000) _columns.clear();
+  _columns.set(key, sql);
+  return sql;
+};
+
+/** @param {InsertOptions | undefined} options */
+const _insertVerb = (options) => {
+  const mode = options?.onConflict;
+  if (mode === undefined) return "INSERT";
+  if (mode !== "ignore" && mode !== "replace") throw new SQLiteError(`Invalid onConflict "${String(mode)}" (use "ignore" or "replace")`);
+  return mode === "ignore" ? "INSERT OR IGNORE" : "INSERT OR REPLACE";
+};
+
+/**
  * Removes quoted strings and names, to look for `;` safely.
  * @param {string} sql
  * @returns {string}
@@ -308,8 +419,15 @@ class SQLite {
   #db;
   /** @type {Map<string, import("node:sqlite").StatementSync>} */
   #statements = new Map();
-  /** @type {Map<string, Map<string, string>>} */
-  #columnTypes = new Map();
+  /** @type {Map<string, _Reader>} */
+  #readers = new Map();
+  // Tables and views known to exist, so that each call doesn't ask SQLite again.
+  /** @type {Set<string>} */
+  #known = new Set();
+  /** @type {Map<string, Map<string, number>>} */
+  #columnKinds = new Map();
+  /** @type {Map<string, string | undefined>} */
+  #sources = new Map();
   /** @type {{ json: boolean, booleans: boolean, dates: boolean }} */
   #read;
   #depth = 0;
@@ -339,6 +457,11 @@ class SQLite {
       this.#db = new DatabaseSync(target, { readOnly: options.readOnly ?? false });
       this.#db.exec(`PRAGMA busy_timeout = ${Math.max(0, Math.floor(Number(options.busyTimeout ?? 5000)) || 0)}`);
       if (!memory && !options.readOnly && (options.wal ?? true)) this.#db.exec("PRAGMA journal_mode = WAL");
+      if (options.synchronous !== undefined) {
+        const level = String(options.synchronous).toUpperCase();
+        if (!["OFF", "NORMAL", "FULL", "EXTRA"].includes(level)) throw new SQLiteError(`Invalid synchronous "${options.synchronous}" (use "OFF", "NORMAL", "FULL" or "EXTRA")`);
+        this.#db.exec(`PRAGMA synchronous = ${level}`);
+      }
       this.#db.exec(`PRAGMA foreign_keys = ${options.foreignKeys === false ? "OFF" : "ON"}`);
     } catch (error) {
       throw _wrap(error);
@@ -348,6 +471,7 @@ class SQLite {
   }
 
   /**
+   * A prepared statement, kept for the next call.
    * @param {string} sql
    * @returns {import("node:sqlite").StatementSync}
    */
@@ -365,6 +489,118 @@ class SQLite {
   }
 
   /**
+   * A prepared query. Where Node allows it, rows are fetched as arrays and
+   * turned into objects here: it's faster than copying the objects Node
+   * returns, and Node says which column each value comes from.
+   * @param {string} sql
+   * @param {boolean} [keep=true] `false` for a statement used once, like an iteration.
+   * @returns {_Reader}
+   */
+  #reader(sql, keep = true) {
+    let reader = keep ? this.#readers.get(sql) : undefined;
+    if (reader) return reader;
+    let stmt;
+    try {
+      stmt = this.#db.prepare(sql);
+    } catch (error) {
+      throw _wrap(error, sql);
+    }
+    reader = { stmt, names: undefined, kinds: undefined, table: undefined };
+    const modern = /** @type {any} */ (stmt);
+    if (typeof modern.setReturnArrays === "function" && typeof modern.columns === "function") {
+      modern.setReturnArrays(true);
+      this.#describe(reader);
+    } else {
+      reader.table = this.#sourceTable(sql);
+    }
+    if (keep) {
+      if (this.#readers.size >= 500) this.#readers.delete(/** @type {string} */ (this.#readers.keys().next().value));
+      this.#readers.set(sql, reader);
+    }
+    return reader;
+  }
+
+  /**
+   * Reads the column names of a query, and how to convert each one.
+   * @param {_Reader} reader
+   */
+  #describe(reader) {
+    /** @type {Array<{ name: string, type: string | null }>} */
+    const columns = /** @type {any} */ (reader.stmt).columns();
+    reader.names = columns.map((column) => column.name);
+    reader.kinds = undefined;
+    for (let i = 0; i < columns.length; i++) {
+      const type = columns[i].type;
+      const kind = type ? _kindOf(String(type).toUpperCase(), this.#read) : 0;
+      if (kind) (reader.kinds ??= new Uint8Array(columns.length))[i] = kind;
+    }
+  }
+
+  /**
+   * @param {_Reader} reader
+   * @param {any} raw What the statement returned for one row.
+   * @returns {any}
+   */
+  #row(reader, raw) {
+    /** @type {Record<string, unknown>} */
+    const row = {};
+    if (reader.names === undefined) {
+      // Node before 22.16: a row is an object without a prototype, copied into a plain one.
+      for (const key in raw) row[key] = raw[key];
+      if (reader.table === undefined) return row;
+      for (const [key, kind] of this.#kinds(reader.table)) {
+        const value = row[key];
+        if (value !== null && value !== undefined) row[key] = _convert(kind, value);
+      }
+      return row;
+    }
+    // A statement prepared before the table changed can come back with other columns.
+    if (raw.length !== reader.names.length) this.#describe(reader);
+    const names = reader.names;
+    const kinds = reader.kinds;
+    if (kinds === undefined) {
+      for (let i = 0; i < names.length; i++) row[names[i]] = raw[i];
+      return row;
+    }
+    for (let i = 0; i < names.length; i++) {
+      const value = raw[i];
+      row[names[i]] = kinds[i] === 0 || value === null ? value : _convert(kinds[i], value);
+    }
+    return row;
+  }
+
+  /**
+   * @param {string} sql
+   * @param {any[]} params
+   * @returns {any}
+   */
+  #one(sql, params) {
+    const reader = this.#reader(sql);
+    try {
+      const raw = reader.stmt.get(...params);
+      return raw === undefined ? undefined : this.#row(reader, raw);
+    } catch (error) {
+      throw _wrap(error, sql);
+    }
+  }
+
+  /**
+   * @param {string} sql
+   * @param {any[]} params
+   * @returns {any[]}
+   */
+  #all(sql, params) {
+    const reader = this.#reader(sql);
+    try {
+      const rows = reader.stmt.all(...params);
+      for (let i = 0; i < rows.length; i++) rows[i] = this.#row(reader, rows[i]);
+      return rows;
+    } catch (error) {
+      throw _wrap(error, sql);
+    }
+  }
+
+  /**
    * @param {unknown} params
    * @returns {any[]}
    */
@@ -376,60 +612,34 @@ class SQLite {
   }
 
   /**
+   * Forgets what was learned about the schema, after it changed.
    * @returns {void}
    */
   #invalidate() {
-    this.#columnTypes.clear();
+    this.#columnKinds.clear();
     this.#statements.clear();
+    this.#readers.clear();
+    this.#known.clear();
+    this.#sources.clear();
   }
 
   /**
-   * Declared column types of a table, by column.
+   * The columns of a table that are converted when read. Only used on Node
+   * versions that don't describe the columns of a query.
    * @param {string} table
-   * @returns {Map<string, string>}
+   * @returns {Map<string, number>}
    */
-  #types(table) {
-    let types = this.#columnTypes.get(table);
-    if (!types) {
-      types = new Map();
+  #kinds(table) {
+    let kinds = this.#columnKinds.get(table);
+    if (!kinds) {
+      kinds = new Map();
       for (const col of /** @type {Array<{ name: string, type: string }>} */ (/** @type {unknown} */ (this.#prepare(`PRAGMA table_info(${_id(table, "table name")})`).all()))) {
-        types.set(col.name, String(col.type).toUpperCase());
+        const kind = _kindOf(String(col.type).toUpperCase(), this.#read);
+        if (kind) kinds.set(col.name, kind);
       }
-      this.#columnTypes.set(table, types);
+      this.#columnKinds.set(table, kinds);
     }
-    return types;
-  }
-
-  /**
-   * @param {unknown} raw
-   * @param {string | undefined} table
-   * @returns {any}
-   */
-  #row(raw, table) {
-    if (!raw) return undefined;
-    /** @type {Record<string, unknown>} */
-    const row = { ...raw };
-    if (!table || !(this.#read.json || this.#read.booleans || this.#read.dates)) return row;
-    const types = this.#types(table);
-    for (const [key, value] of Object.entries(row)) {
-      const type = types.get(key);
-      if (!type || value === null) continue;
-      if (type === "JSON") {
-        if (this.#read.json && typeof value === "string") {
-          try {
-            row[key] = JSON.parse(value);
-          } catch {
-            // not valid JSON: keep the text
-          }
-        }
-      } else if (type === "BOOLEAN" || type === "BOOL") {
-        if (this.#read.booleans && (typeof value === "number" || typeof value === "bigint")) row[key] = Number(value) !== 0;
-      } else if (this.#read.dates && (type === "DATE" || type === "DATETIME" || type === "TIMESTAMP") && (typeof value === "string" || typeof value === "number")) {
-        const date = new Date(value);
-        if (!Number.isNaN(date.getTime())) row[key] = date;
-      }
-    }
-    return row;
+    return kinds;
   }
 
   /**
@@ -456,7 +666,7 @@ class SQLite {
           parts.push(subs.length ? `(${subs.map((s) => `(${s})`).join(key === "$or" ? " OR " : " AND ")})` : key === "$or" ? "0" : "1");
           continue;
         }
-        const col = _id(key, "column name");
+        const col = _column(key);
         if (value === null) parts.push(`${col} IS NULL`);
         else if (Array.isArray(value)) parts.push(this.#op(col, "in", value, params));
         else if (_isPlain(value) && Object.keys(value).some((k) => OPERATORS.has(k))) {
@@ -531,8 +741,8 @@ class SQLite {
       if (upper !== "ASC" && upper !== "DESC") throw new SQLiteError(`Invalid sort direction "${String(direction)}" (use "ASC" or "DESC")`);
       return upper;
     };
-    if (!Array.isArray(options.orderBy)) return ` ORDER BY ${_id(options.orderBy, "column name")} ${dir(options.direction)}`;
-    return ` ORDER BY ${options.orderBy.map((item) => (Array.isArray(item) ? `${_id(item[0], "column name")} ${dir(item[1])}` : `${_id(item, "column name")} ASC`)).join(", ")}`;
+    if (!Array.isArray(options.orderBy)) return ` ORDER BY ${_column(options.orderBy)} ${dir(options.direction)}`;
+    return ` ORDER BY ${options.orderBy.map((item) => (Array.isArray(item) ? `${_column(item[0])} ${dir(item[1])}` : `${_column(item)} ASC`)).join(", ")}`;
   }
 
   /**
@@ -552,7 +762,10 @@ class SQLite {
    */
   #table(table) {
     const quoted = _id(table, "table name");
-    if (!this.hasTable(table)) throw new SQLiteError(`Table "${table}" does not exist`);
+    if (!this.#known.has(table)) {
+      if (this.#prepare(SOURCE_EXISTS).get(table) === undefined) throw new SQLiteError(`Table "${table}" does not exist`);
+      this.#known.add(table);
+    }
     return quoted;
   }
 
@@ -577,9 +790,16 @@ class SQLite {
    * @returns {string | undefined}
    */
   #sourceTable(sql) {
-    if (/\bjoin\b/i.test(sql)) return undefined;
-    const match = /^\s*select\b[\s\S]*?\bfrom\s+"?([A-Za-z_][A-Za-z0-9_]*)"?(?:\s+(?:as\s+)?(?!where\b|order\b|limit\b|group\b)[A-Za-z_]\w*)?\s*(?:where\b|order\b|limit\b|group\b|;|$)/i.exec(sql);
-    return match && this.hasTable(match[1]) ? match[1] : undefined;
+    if (this.#sources.has(sql)) return this.#sources.get(sql);
+    /** @type {string | undefined} */
+    let table;
+    if (!/\bjoin\b/i.test(sql)) {
+      const match = /^\s*select\b[\s\S]*?\bfrom\s+"?([A-Za-z_][A-Za-z0-9_]*)"?(?:\s+(?:as\s+)?(?!where\b|order\b|limit\b|group\b)[A-Za-z_]\w*)?\s*(?:where\b|order\b|limit\b|group\b|;|$)/i.exec(sql);
+      if (match && this.hasTable(match[1])) table = match[1];
+    }
+    if (this.#sources.size >= 500) this.#sources.clear();
+    this.#sources.set(sql, table);
+    return table;
   }
 
   /**
@@ -617,8 +837,9 @@ class SQLite {
   }
 
   /**
-   * Runs a query and returns the first row. When it reads a single table,
-   * JSON and boolean columns are converted.
+   * Runs a query and returns the first row. JSON and boolean columns are
+   * converted like in `get()`, joins and renamed columns included. On Node.js
+   * before 22.16, that only works for a query on a single table.
    *
    * @example
    * const user = db.queryOne("SELECT * FROM users WHERE email = ?", [email]);
@@ -630,12 +851,7 @@ class SQLite {
    * @throws {SQLiteError}
    */
   queryOne(sql, params) {
-    const stmt = this.#prepare(sql);
-    try {
-      return this.#row(stmt.get(...this.#params(params)), this.#sourceTable(sql));
-    } catch (error) {
-      throw _wrap(error, sql);
-    }
+    return this.#one(sql, this.#params(params));
   }
 
   /**
@@ -651,13 +867,7 @@ class SQLite {
    * @throws {SQLiteError}
    */
   queryAll(sql, params) {
-    const stmt = this.#prepare(sql);
-    try {
-      const table = this.#sourceTable(sql);
-      return stmt.all(...this.#params(params)).map((row) => this.#row(row, table));
-    } catch (error) {
-      throw _wrap(error, sql);
-    }
+    return this.#all(sql, this.#params(params));
   }
 
   /**
@@ -676,14 +886,9 @@ class SQLite {
    * @throws {SQLiteError}
    */
   *iterate(sql, params) {
-    const table = this.#sourceTable(sql);
-    let stmt;
-    try {
-      stmt = this.#db.prepare(sql);
-    } catch (error) {
-      throw _wrap(error, sql);
-    }
-    for (const row of stmt.iterate(...this.#params(params))) yield this.#row(row, table);
+    // Not kept: a statement being walked through can't serve another call at the same time.
+    const reader = this.#reader(sql, false);
+    for (const raw of reader.stmt.iterate(...this.#params(params))) yield this.#row(reader, raw);
   }
 
   /**
@@ -718,7 +923,11 @@ class SQLite {
       if (def.primaryKey) sql += ` PRIMARY KEY${def.autoincrement ? " AUTOINCREMENT" : ""}`;
       if (def.notNull) sql += " NOT NULL";
       if (def.unique) sql += " UNIQUE";
-      if (def.defaultValue !== undefined) sql += ` DEFAULT ${_literal(def.defaultValue)}`;
+      if (def.defaultExpression !== undefined) sql += ` DEFAULT (${def.defaultExpression})`;
+      else if (def.defaultValue !== undefined) {
+        // Written bare, these are the clock of the insert. Quoted, they would be plain text.
+        sql += ` DEFAULT ${typeof def.defaultValue === "string" && CURRENT.test(def.defaultValue) ? def.defaultValue.toUpperCase() : _literal(def.defaultValue)}`;
+      }
       if (def.values?.length) sql += ` CHECK (${col} IN (${def.values.map(_literal).join(", ")}))`;
       if (def.check) sql += ` CHECK (${def.check})`;
       if (def.references) {
@@ -825,7 +1034,7 @@ class SQLite {
    */
   hasTable(tableName) {
     if (typeof tableName !== "string" || !IDENTIFIER.test(tableName)) return false;
-    return this.#prepare("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = ?").get(tableName) !== undefined;
+    return this.#prepare(TABLE_EXISTS).get(tableName) !== undefined;
   }
 
   /**
@@ -873,7 +1082,8 @@ class SQLite {
    * @throws {SQLiteError}
    */
   get(tableName, where = {}, options = {}) {
-    return /** @type {T | undefined} */ (this.getAll(tableName, where, { ...options, limit: 1, offset: 0 })[0]);
+    const query = this.#select(tableName, where, options, true);
+    return this.#one(query.sql, query.params);
   }
 
   /**
@@ -896,21 +1106,56 @@ class SQLite {
    * @throws {SQLiteError}
    */
   getAll(tableName, where = {}, options = {}) {
+    const query = this.#select(tableName, where, options, false);
+    return this.#all(query.sql, query.params);
+  }
+
+  /**
+   * @param {string} tableName
+   * @param {Where<any>} where
+   * @param {QueryOptions} options
+   * @param {boolean} single
+   * @returns {{ sql: string, params: any[] }}
+   */
+  #select(tableName, where, options, single) {
     const table = this.#table(tableName);
     const columns = options.columns?.length ? options.columns.map((c) => _id(c, "column name")).join(", ") : "*";
     const clause = this.#where(where);
     let sql = `SELECT ${columns} FROM ${table}${clause.sql}${this.#orderBy(options)}`;
-    const params = clause.params;
-    if (options.limit !== undefined || options.offset !== undefined) {
+    if (single) {
+      sql += " LIMIT 1";
+    } else if (options.limit !== undefined || options.offset !== undefined) {
       sql += " LIMIT ? OFFSET ?";
-      params.push(options.limit === undefined ? -1 : Math.max(0, Math.floor(options.limit)), Math.max(0, Math.floor(options.offset ?? 0)));
+      clause.params.push(options.limit === undefined ? -1 : Math.max(0, Math.floor(options.limit)), Math.max(0, Math.floor(options.offset ?? 0)));
     }
-    const stmt = this.#prepare(sql);
-    try {
-      return stmt.all(...params).map((row) => this.#row(row, tableName));
-    } catch (error) {
-      throw _wrap(error, sql);
-    }
+    return { sql, params: clause.params };
+  }
+
+  /**
+   * One page of the rows that match, with what a pager needs to draw itself.
+   *
+   * @example
+   * const { items, pages, hasNext } = db.paginate("posts", { status: "published" }, {
+   *   page: 3,
+   *   perPage: 20,
+   *   orderBy: "created_at",
+   *   direction: "DESC",
+   * });
+   *
+   * @template [T=R]
+   * @param {string} tableName
+   * @param {Where<R>} [where]
+   * @param {PaginateOptions} [options]
+   * @returns {import("./Arr").Page<T>} A page past the end gives the last one.
+   * @throws {SQLiteError}
+   */
+  paginate(tableName, where = {}, options = {}) {
+    const perPage = Math.max(1, Math.floor(options.perPage ?? 20) || 20);
+    const total = this.count(tableName, where);
+    const pages = Math.max(1, Math.ceil(total / perPage));
+    const page = Math.min(Math.max(1, Math.floor(options.page ?? 1) || 1), pages);
+    const items = total ? this.getAll(tableName, where, { orderBy: options.orderBy, direction: options.direction, columns: options.columns, limit: perPage, offset: (page - 1) * perPage }) : [];
+    return { items: /** @type {any[]} */ (items), page, perPage, total, pages, hasPrev: page > 1, hasNext: page < pages };
   }
 
   /**
@@ -964,17 +1209,19 @@ class SQLite {
    *
    * @example
    * const { lastInsertRowid } = db.insert("users", { email: "ada@example.com", settings: { theme: "dark" } });
+   * db.insert("tags", { label: "news" }, { onConflict: "ignore" }); // no error if it's already there
    *
    * @param {string} tableName
    * @param {Partial<R> & Record<string, unknown>} data
+   * @param {InsertOptions} [options]
    * @returns {InsertResult}
    * @throws {SQLiteError} On a constraint failure; `sqliteCode` tells you which, like `"SQLITE_CONSTRAINT_UNIQUE"`.
    */
-  insert(tableName, data) {
+  insert(tableName, data, options) {
     const table = this.#table(tableName);
     const [cols, values] = this.#values(data);
-    const sql = cols.length ? `INSERT INTO ${table} (${cols.join(", ")}) VALUES (${cols.map(() => "?").join(", ")})` : `INSERT INTO ${table} DEFAULT VALUES`;
-    return this.#run(sql, values);
+    const verb = _insertVerb(options);
+    return this.#run(cols.length ? `${verb} INTO ${table} (${cols.join(", ")}) VALUES (${cols.map(() => "?").join(", ")})` : `${verb} INTO ${table} DEFAULT VALUES`, values);
   }
 
   /**
@@ -983,17 +1230,47 @@ class SQLite {
    *
    * @example
    * db.insertMany("products", rowsFromCsv);
+   * db.insertMany("tags", labels.map((label) => ({ label })), { onConflict: "ignore" });
    *
    * @param {string} tableName
-   * @param {Array<Partial<R> & Record<string, unknown>>} rows
+   * @param {Iterable<Partial<R> & Record<string, unknown>>} rows
+   * @param {InsertOptions} [options]
    * @returns {ChangeResult}
    * @throws {SQLiteError} If a row fails; nothing is inserted then.
    */
-  insertMany(tableName, rows) {
-    this.#table(tableName);
+  insertMany(tableName, rows, options) {
+    const table = this.#table(tableName);
+    const verb = _insertVerb(options);
     return this.transaction(() => {
       let changes = 0;
-      for (const row of rows) changes += this.insert(tableName, row).changes;
+      let shape = "";
+      let sql = "";
+      /** @type {import("node:sqlite").StatementSync | undefined} */
+      let stmt;
+      for (const row of rows) {
+        if (!_isPlain(row)) throw new SQLiteError("Row data must be a plain object");
+        const keys = [];
+        const values = [];
+        for (const key of Object.keys(row)) {
+          const value = /** @type {Record<string, unknown>} */ (row)[key];
+          if (value === undefined) continue;
+          keys.push(key);
+          values.push(_toSQL(value));
+        }
+        // Rows of one import nearly always have the same columns: the statement is prepared once for all of them.
+        const current = keys.join(",");
+        if (stmt === undefined || current !== shape) {
+          shape = current;
+          const cols = keys.map((key) => _id(key, "column name"));
+          sql = cols.length ? `${verb} INTO ${table} (${cols.join(", ")}) VALUES (${cols.map(() => "?").join(", ")})` : `${verb} INTO ${table} DEFAULT VALUES`;
+          stmt = this.#prepare(sql);
+        }
+        try {
+          changes += Number(stmt.run(...values).changes);
+        } catch (error) {
+          throw _wrap(error, sql);
+        }
+      }
       return { ok: /** @type {const} */ (true), changes };
     });
   }
@@ -1087,6 +1364,38 @@ class SQLite {
   }
 
   /**
+   * Adds to number columns in one statement, so two requests at the same
+   * moment both count. Reading the value, adding to it and writing it back
+   * would lose one of them. Negative numbers subtract; an empty column
+   * counts as 0.
+   *
+   * @example
+   * db.increment("posts", { views: 1 }, { id: post.id });
+   * db.increment("accounts", { balance: -25, withdrawals: 1 }, { id: account.id });
+   *
+   * @param {string} tableName
+   * @param {Partial<Record<keyof R & string, number>> & Record<string, number>} amounts Column names and how much to add.
+   * @param {Where<R>} where
+   * @returns {ChangeResult}
+   * @throws {SQLiteError}
+   */
+  increment(tableName, amounts, where) {
+    const table = this.#table(tableName);
+    if (!_isPlain(where) || !Object.keys(where).length) throw new SQLiteError("increment() requires a non-empty where filter");
+    if (!_isPlain(amounts)) throw new SQLiteError("increment() expects an object of columns and amounts");
+    const entries = Object.entries(amounts).filter(([, amount]) => amount !== undefined);
+    if (!entries.length) throw new SQLiteError("increment() requires at least one column");
+    const set = entries.map(([column, amount]) => {
+      if (typeof amount !== "number" || !Number.isFinite(amount)) throw new SQLiteError(`increment() expects a number for "${column}", got ${String(amount)}`);
+      const col = _id(column, "column name");
+      return `${col} = COALESCE(${col}, 0) + ?`;
+    });
+    const clause = this.#where(where);
+    const { changes } = this.#run(`UPDATE ${table} SET ${set.join(", ")}${clause.sql}`, [...entries.map(([, amount]) => amount), ...clause.params]);
+    return { ok: true, changes };
+  }
+
+  /**
    * Shortcuts bound to one table, so you don't repeat its name.
    *
    * @example
@@ -1104,9 +1413,11 @@ class SQLite {
       name: tableName,
       get: (where, options) => this.get(tableName, where, options),
       getAll: (where, options) => this.getAll(tableName, where, options),
-      insert: (data) => this.insert(tableName, /** @type {any} */ (data)),
-      insertMany: (rows) => this.insertMany(tableName, /** @type {any[]} */ (rows)),
+      paginate: (where, options) => this.paginate(tableName, where, options),
+      insert: (data, options) => this.insert(tableName, /** @type {any} */ (data), options),
+      insertMany: (rows, options) => this.insertMany(tableName, /** @type {any} */ (rows), options),
       update: (data, where) => this.update(tableName, /** @type {any} */ (data), where),
+      increment: (amounts, where) => this.increment(tableName, /** @type {any} */ (amounts), where),
       upsert: (data, conflict) => this.upsert(tableName, /** @type {any} */ (data), conflict),
       delete: (where) => this.delete(tableName, where),
       count: (where) => this.count(tableName, where),
@@ -1122,18 +1433,19 @@ class SQLite {
    *
    * @example
    * db.transaction(() => {
-   *   db.update("accounts", { balance: from.balance - amount }, { id: from.id });
-   *   db.update("accounts", { balance: to.balance + amount }, { id: to.id });
+   *   db.increment("accounts", { balance: -amount }, { id: from.id });
+   *   db.increment("accounts", { balance: amount }, { id: to.id });
    * });
    *
    * @template T
    * @param {() => T} callback Can be async; the commit then waits for it.
+   * @param {TransactionOptions} [options]
    * @returns {T}
    * @throws Whatever `callback` threw, after rolling back.
    */
-  transaction(callback) {
+  transaction(callback, options) {
     const savepoint = this.#depth > 0 ? `nc_savepoint_${this.#depth}` : null;
-    this.#db.exec(savepoint ? `SAVEPOINT ${savepoint}` : "BEGIN");
+    this.#db.exec(savepoint ? `SAVEPOINT ${savepoint}` : options?.immediate ? "BEGIN IMMEDIATE" : "BEGIN");
     this.#depth++;
     const commit = () => {
       this.#depth--;
@@ -1141,6 +1453,8 @@ class SQLite {
     };
     const rollback = () => {
       this.#depth--;
+      // A table created in there is gone again.
+      this.#known.clear();
       try {
         this.#db.exec(savepoint ? `ROLLBACK TO ${savepoint}; RELEASE ${savepoint}` : "ROLLBACK");
       } catch {
@@ -1291,6 +1605,7 @@ class SQLite {
    */
   close() {
     this.#statements.clear();
+    this.#readers.clear();
     if (!this.#open) return;
     this.#open = false;
     this.#db.close();
