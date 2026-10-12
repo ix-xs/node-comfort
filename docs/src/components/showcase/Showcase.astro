@@ -65,13 +65,16 @@ const two = (n: number) => String(n).padStart(2, "0");
 
 <script>
   const reduced = matchMedia("(prefers-reduced-motion: reduce)");
+  // The same curve as `--ease-out` in the stylesheet.
+  const EASE_OUT = "cubic-bezier(0.23, 1, 0.32, 1)";
 
   class Showcase extends HTMLElement {
     private rail = this.querySelector<HTMLElement>(".nc-show-rail");
     private tabs = [...this.querySelectorAll<HTMLButtonElement>('[role="tab"]')];
     private mark = this.querySelector<HTMLElement>(".nc-show-mark");
-    // Whether the last thing the reader did here was with a pointer: the mark
-    // slides for a pointer and jumps for the keyboard.
+    // Whether the last thing the reader did here was with a pointer. A pointer
+    // gets the motion (the mark slides, the output prints); the keyboard gets
+    // the result at once, since arrow keys go through subjects quickly.
     private pointer = false;
 
     connectedCallback(): void {
@@ -86,8 +89,9 @@ const two = (n: number) => String(n).padStart(2, "0");
         if (tab) return this.select(tab);
         const variant = target?.closest<HTMLButtonElement>(".nc-show-variants button");
         if (variant) return this.choose(variant);
+        // Asking to run it again is asking to see it print, whatever the device.
         const run = target?.closest<HTMLButtonElement>("[data-run]");
-        if (run) this.play(run.closest<HTMLElement>(".nc-show-run"));
+        if (run) this.play(run.closest<HTMLElement>(".nc-show-run"), true);
       });
       addEventListener("resize", () => this.place(false));
       // The tabs change width once their font arrives.
@@ -98,7 +102,7 @@ const two = (n: number) => String(n).padStart(2, "0");
         (entries, watcher) => {
           if (!entries.some((entry) => entry.isIntersecting)) return;
           watcher.disconnect();
-          this.play(this.current());
+          this.play(this.current(), true);
         },
         { threshold: 0.35 },
       ).observe(this);
@@ -138,7 +142,7 @@ const two = (n: number) => String(n).padStart(2, "0");
         if (this.rail.scrollLeft > left) this.rail.scrollLeft = Math.max(0, left);
         else if (this.rail.scrollLeft < right) this.rail.scrollLeft = right;
       }
-      this.play(this.current());
+      this.swap();
     }
 
     private choose(button: HTMLButtonElement): void {
@@ -146,7 +150,14 @@ const two = (n: number) => String(n).padStart(2, "0");
       if (!panel || button.getAttribute("aria-pressed") === "true") return;
       for (const other of panel.querySelectorAll<HTMLButtonElement>(".nc-show-variants button")) other.setAttribute("aria-pressed", String(other === button));
       for (const run of panel.querySelectorAll<HTMLElement>(".nc-show-run")) run.hidden = run.dataset.variant !== button.dataset.variant;
-      this.play(this.current());
+      this.swap();
+    }
+
+    /** Shows the run that was just picked: the file fades in, then its output prints. */
+    private swap(): void {
+      const run = this.current();
+      if (this.pointer) run?.querySelector<HTMLElement>(".nc-show-code")?.animate([{ opacity: 0 }, { opacity: 1 }], { duration: 160, easing: EASE_OUT });
+      this.play(run, this.pointer);
     }
 
     /** Moves the mark under the selected tab. It is 100px long and scaled to the tab. */
@@ -158,17 +169,19 @@ const two = (n: number) => String(n).padStart(2, "0");
       this.mark.setAttribute("data-placed", "");
     }
 
-    /** Prints the output again, a line at a time, as a program would. */
-    private play(run: HTMLElement | null): void {
+    /** Prints the output again, a line at a time, as a program would, or shows it at once. */
+    private play(run: HTMLElement | null, animate: boolean): void {
       if (!run) return;
       const lines = [...run.querySelectorAll<HTMLElement>(".nc-line")];
       const time = run.querySelector<HTMLElement>(".nc-term-time");
       for (const line of lines) for (const animation of line.getAnimations()) animation.cancel();
       if (time) time.textContent = "";
-      const done = () => {
-        if (time) time.textContent = time.dataset.time ?? "";
+      const done = (fade: boolean) => {
+        if (!time) return;
+        time.textContent = time.dataset.time ?? "";
+        if (fade) time.animate([{ opacity: 0 }, { opacity: 1 }], { duration: 200, easing: EASE_OUT });
       };
-      if (reduced.matches || lines.length === 0) return done();
+      if (!animate || reduced.matches || lines.length === 0) return done(false);
       // Short outputs take their time, long ones don't make you wait: the last line starts within 420 ms.
       const gap = Math.min(45, 420 / lines.length);
       let last: Animation | undefined;
@@ -178,10 +191,10 @@ const two = (n: number) => String(n).padStart(2, "0");
             { opacity: 0, transform: "translateY(4px)" },
             { opacity: 1, transform: "none" },
           ],
-          { duration: 220, delay: index * gap, easing: "cubic-bezier(0.23, 1, 0.32, 1)", fill: "backwards" },
+          { duration: 220, delay: index * gap, easing: EASE_OUT, fill: "backwards" },
         );
       });
-      last?.finished.then(done, () => {});
+      last?.finished.then(() => done(true), () => {});
     }
   }
   customElements.define("nc-showcase", Showcase);
