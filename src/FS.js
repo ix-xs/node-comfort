@@ -21,7 +21,9 @@
 const fs = require("node:fs");
 const os = require("node:os");
 const nodePath = require("node:path");
+const util = require("node:util");
 const { fileURLToPath } = require("node:url");
+const { sleepSync } = require("./internal/shared.js");
 
 /**
  * Options for `copyFoldersIn()` and `moveFoldersIn()`.
@@ -75,7 +77,8 @@ const { fileURLToPath } = require("node:url");
  * @typedef {object} WriteFileOptions
  * @property {boolean} [atomic] Write to a temporary file and rename it, so nobody reads a half-written file and a crash can't corrupt it. Defaults to `true`.
  * @property {BufferEncoding} [encoding] Defaults to `"utf8"`.
- * @property {number} [mode] Permissions, like `0o600` for secrets.
+ * @property {number} [mode] Permissions, like `0o600` for secrets. A file that already exists keeps the ones it has.
+ * @property {boolean} [fsync] Wait until the data is on the disk before returning. Slower, for files that must survive a power cut.
  * @property {number} [spaces] Indentation when writing an object as JSON. Defaults to `2`.
  */
 
@@ -132,7 +135,7 @@ const { fileURLToPath } = require("node:url");
 /**
  * Returned by `watch()`.
  * @typedef {object} Watcher
- * @property {<E extends "change" | "rename" | "all">(event: E, callback: E extends "all" ? (event: "change" | "rename", file: string) => void : (file: string) => void) => Watcher} on Listens for changes. `"all"` also gets the event name.
+ * @property {<E extends "change" | "rename" | "all" | "error">(event: E, callback: E extends "all" ? (event: "change" | "rename", file: string) => void : E extends "error" ? (error: Error) => void : (file: string) => void) => Watcher} on Listens for changes. `"all"` also gets the event name. `"error"` tells you the watch broke, for instance because the folder was deleted.
  * @property {() => void} stop Stops watching.
  * @property {() => Watcher} pause Ignores events until `resume()`.
  * @property {() => Watcher} resume
@@ -146,20 +149,8 @@ const INDEX_FILE = nodePath.join(__dirname, "..", "index.js");
  * @returns {string}
  */
 const _callerDir = () => {
-  const originalPrepare = Error.prepareStackTrace;
-  const originalLimit = Error.stackTraceLimit;
-  /** @type {NodeJS.CallSite[] | undefined} */
-  let stack;
-  try {
-    Error.stackTraceLimit = 50;
-    Error.prepareStackTrace = (_, frames) => frames;
-    stack = /** @type {any} */ (new Error()).stack;
-  } finally {
-    Error.prepareStackTrace = originalPrepare;
-    Error.stackTraceLimit = originalLimit;
-  }
-  for (const frame of stack ?? []) {
-    let file = frame.getFileName();
+  for (const frame of util.getCallSites(50)) {
+    let file = frame.scriptName;
     if (!file) continue;
     if (file.startsWith("file://")) file = fileURLToPath(file);
     if (file.startsWith("node:") || file.includes("node_modules")) continue;
@@ -209,25 +200,36 @@ const _existing = (input, type) => {
 const _walk = (root, type, options) => {
   /** @type {string[]} */
   const out = [];
+  _walkInto(root, type, options, new Set(options.ignore), out);
+  return out;
+};
+
+/**
+ * @param {string} dir
+ * @param {"file" | "folder"} type
+ * @param {Required<ListOptions>} options
+ * @param {Set<string>} ignore
+ * @param {string[]} out Filled in place: no array is built and thrown away at each level.
+ */
+const _walkInto = (dir, type, options, ignore, out) => {
   /** @type {fs.Dirent[]} */
   let entries;
   try {
-    entries = fs.readdirSync(root, { withFileTypes: true });
+    entries = fs.readdirSync(dir, { withFileTypes: true });
   } catch {
-    return out;
+    return;
   }
   for (const entry of entries) {
     if (!options.hidden && entry.name.startsWith(".")) continue;
-    const full = nodePath.join(root, entry.name);
+    const full = nodePath.join(dir, entry.name);
     if (entry.isDirectory()) {
-      if (options.ignore.includes(entry.name)) continue;
+      if (ignore.has(entry.name)) continue;
       if (type === "folder") out.push(full);
-      if (options.recursive) out.push(..._walk(full, type, options));
+      if (options.recursive) _walkInto(full, type, options, ignore, out);
     } else if (type === "file" && (entry.isFile() || entry.isSymbolicLink())) {
       out.push(full);
     }
   }
-  return out;
 };
 
 /**
@@ -252,6 +254,26 @@ const _content = (data, spaces) => {
   return JSON.stringify(data, null, spaces);
 };
 
+const _RETRY_CODES = new Set(["EPERM", "EBUSY", "EACCES"]);
+
+/**
+ * Renames a file. On Windows, an antivirus or an indexer can hold the
+ * target for a few milliseconds: a refused rename is tried again.
+ * @param {string} from
+ * @param {string} to
+ */
+const _rename = (from, to) => {
+  for (let attempt = 0; ; attempt++) {
+    try {
+      fs.renameSync(from, to);
+      return;
+    } catch (error) {
+      if (process.platform !== "win32" || attempt >= 8 || !_RETRY_CODES.has(/** @type {NodeJS.ErrnoException} */ (error).code ?? "")) throw error;
+      sleepSync(5 * (attempt + 1));
+    }
+  }
+};
+
 /**
  * @param {string} target
  * @param {string | Buffer} content
@@ -259,17 +281,31 @@ const _content = (data, spaces) => {
  */
 const _write = (target, content, options) => {
   fs.mkdirSync(nodePath.dirname(target), { recursive: true });
-  /** @type {fs.WriteFileOptions} */
-  const writeOptions = { encoding: options.encoding ?? "utf8" };
-  if (options.mode !== undefined) writeOptions.mode = options.mode;
+  const encoding = options.encoding ?? "utf8";
   if (options.atomic === false) {
-    fs.writeFileSync(target, content, writeOptions);
+    /** @type {fs.WriteFileOptions} */
+    const direct = { encoding, flush: options.fsync ?? false };
+    if (options.mode !== undefined) direct.mode = options.mode;
+    fs.writeFileSync(target, content, direct);
     return;
+  }
+  // The new file takes the place of the old one, so it must take its permissions too:
+  // a secret readable by its owner only stays that way.
+  let mode = options.mode;
+  if (mode === undefined) {
+    try {
+      mode = fs.statSync(target).mode & 0o777;
+    } catch {
+      mode = undefined;
+    }
   }
   const temp = `${target}.${process.pid}.${Date.now().toString(36)}${Math.random().toString(36).slice(2, 8)}.tmp`;
   try {
+    /** @type {fs.WriteFileOptions} */
+    const writeOptions = { encoding, flush: options.fsync ?? false };
+    if (mode !== undefined) writeOptions.mode = mode;
     fs.writeFileSync(temp, content, writeOptions);
-    fs.renameSync(temp, target);
+    _rename(temp, target);
   } catch (error) {
     fs.rmSync(temp, { force: true });
     throw error;
@@ -315,7 +351,7 @@ const _stripJSONComments = (text) => {
  * @param {boolean} dot
  * @returns {RegExp}
  */
-const _globToRegExp = (pattern, dot) => {
+const _compileGlob = (pattern, dot) => {
   const noDot = dot ? "" : "(?!\\.)";
   let re = "";
   let i = 0;
@@ -375,6 +411,26 @@ const _globToRegExp = (pattern, dot) => {
     i++;
   }
   return new RegExp(`^${re}$`);
+};
+
+/** @type {Map<string, RegExp>} */
+const _globs = new Map();
+
+/**
+ * A glob pattern as a regular expression, compiled once.
+ * @param {string} pattern Forward slashes only.
+ * @param {boolean} dot Whether `*` matches names starting with a dot.
+ * @returns {RegExp}
+ */
+const _globToRegExp = (pattern, dot) => {
+  const key = dot ? `.${pattern}` : `/${pattern}`;
+  let regex = _globs.get(key);
+  if (!regex) {
+    regex = _compileGlob(pattern, dot);
+    if (_globs.size >= 500) _globs.clear();
+    _globs.set(key, regex);
+  }
+  return regex;
 };
 
 /**
@@ -544,8 +600,11 @@ const _globIn = (cwd, patterns, options, absolute) => {
   const matchers = patterns.map((p) => _globToRegExp(p, options.dot ?? false));
   const ignores = (options.ignore ?? ["**/node_modules/**", "**/.git/**"]).map((p) => _globToRegExp(p.replace(/\\/g, "/"), true));
   const type = options.type ?? "files";
+  // Without "**", a pattern can't match deeper than it has parts: no need to read further down.
+  let maxDepth = 0;
   const bases = patterns.map((p) => {
     const segments = p.split("/");
+    maxDepth = p.includes("**") ? Infinity : Math.max(maxDepth, segments.length);
     const staticParts = [];
     for (const segment of segments.slice(0, -1)) {
       if (/[*?[{]/.test(segment)) break;
@@ -558,8 +617,11 @@ const _globIn = (cwd, patterns, options, absolute) => {
   /** @type {Set<string>} */
   const visited = new Set();
 
-  /** @param {string} relDir */
-  const visit = (relDir) => {
+  /**
+   * @param {string} relDir
+   * @param {number} depth How many parts `relDir` has.
+   */
+  const visit = (relDir, depth) => {
     if (visited.has(relDir)) return;
     visited.add(relDir);
     /** @type {fs.Dirent[]} */
@@ -575,10 +637,10 @@ const _globIn = (cwd, patterns, options, absolute) => {
       if (ignores.some((re) => re.test(rel) || (isDir && re.test(`${rel}/`)))) continue;
       const wanted = type === "all" || (type === "folders" ? isDir : !isDir);
       if (wanted && matchers.some((re) => re.test(rel))) results.add(rel);
-      if (isDir) visit(rel);
+      if (isDir && depth + 1 < maxDepth) visit(rel, depth + 1);
     }
   };
-  for (const base of new Set(bases)) visit(base);
+  for (const base of new Set(bases)) visit(base, base ? base.split("/").length : 0);
   return [...results].sort().map((rel) => (absolute ? nodePath.join(cwd, rel) : rel));
 };
 
@@ -596,10 +658,10 @@ const _globIn = (cwd, patterns, options, absolute) => {
  */
 function find(name, options = {}) {
   const type = options.type ?? "file";
-  const ignore = options.ignore ?? ["node_modules", ".git"];
+  const ignore = new Set(options.ignore ?? ["node_modules", ".git"]);
   const queue = [_abs(options.cwd)];
-  while (queue.length) {
-    const dir = /** @type {string} */ (queue.shift());
+  for (let next = 0; next < queue.length; next++) {
+    const dir = queue[next];
     /** @type {fs.Dirent[]} */
     let entries;
     try {
@@ -611,9 +673,39 @@ function find(name, options = {}) {
       const isDir = entry.isDirectory();
       if (entry.name === name && (type === "any" || (type === "folder" ? isDir : !isDir))) return nodePath.join(dir, entry.name);
     }
-    for (const entry of entries) if (entry.isDirectory() && !ignore.includes(entry.name)) queue.push(nodePath.join(dir, entry.name));
+    for (const entry of entries) if (entry.isDirectory() && !ignore.has(entry.name)) queue.push(nodePath.join(dir, entry.name));
   }
   return undefined;
+}
+
+/**
+ * Looks for a file or folder in a folder, then in its parent, and so on up
+ * to the root. It's how you find the `package.json` or the `.git` a file
+ * belongs to.
+ *
+ * @example
+ * nc.findUp("package.json");                         // the closest one above the working directory
+ * nc.findUp(".git", { type: "folder", cwd: __dirname });
+ * nc.findUp(["pnpm-lock.yaml", "yarn.lock", "package-lock.json"]);
+ *
+ * @param {string | string[]} name One name, or several to try in each folder, in this order.
+ * @param {{ cwd?: string, type?: "file" | "folder" | "any", stopAt?: string }} [options] Where to start (the working directory by default), what to look for (`"any"` by default), and a folder not to go above.
+ * @returns {string | undefined} The absolute path.
+ */
+function findUp(name, options = {}) {
+  const names = Array.isArray(name) ? name : [name];
+  const type = options.type ?? "any";
+  const stopAt = options.stopAt === undefined ? undefined : _abs(options.stopAt);
+  let dir = _abs(options.cwd);
+  for (;;) {
+    for (const candidate of names) {
+      const found = _existing(nodePath.join(dir, candidate), type);
+      if (found) return found;
+    }
+    const parent = nodePath.dirname(dir);
+    if (parent === dir || dir === stopAt) return undefined;
+    dir = parent;
+  }
 }
 
 /**
@@ -642,11 +734,11 @@ function find(name, options = {}) {
  * @returns {string | Buffer | undefined}
  */
 function readFile(path, encoding = "utf8") {
-  const target = _existing(path, "file");
-  if (!target) return undefined;
+  if (!path) return undefined;
   try {
-    return encoding === "buffer" ? fs.readFileSync(target) : fs.readFileSync(target, encoding);
+    return encoding === "buffer" ? fs.readFileSync(_abs(path)) : fs.readFileSync(_abs(path), encoding);
   } catch {
+    // missing, a folder, or unreadable
     return undefined;
   }
 }
@@ -749,8 +841,14 @@ function writeJSON(path, data, options = {}) {
 function appendFile(path, data) {
   try {
     const target = _abs(path);
-    fs.mkdirSync(nodePath.dirname(target), { recursive: true });
-    fs.appendFileSync(target, Buffer.isBuffer(data) ? data : String(data));
+    const content = Buffer.isBuffer(data) ? data : String(data);
+    try {
+      fs.appendFileSync(target, content);
+    } catch (error) {
+      if (/** @type {NodeJS.ErrnoException} */ (error).code !== "ENOENT") throw error;
+      fs.mkdirSync(nodePath.dirname(target), { recursive: true });
+      fs.appendFileSync(target, content);
+    }
     return true;
   } catch {
     return false;
@@ -1026,17 +1124,23 @@ function move(source, destination, options = {}) {
   if (!src) return false;
   const dest = _abs(destination);
   try {
-    if (fs.existsSync(dest)) {
-      if (options.overwrite === false) return false;
-      fs.rmSync(dest, { recursive: true, force: true });
-    }
+    if (options.overwrite === false && fs.existsSync(dest)) return false;
     fs.mkdirSync(nodePath.dirname(dest), { recursive: true });
     try {
+      // A rename replaces a file in one step: the destination is never missing, not even for an instant.
       fs.renameSync(src, dest);
     } catch (error) {
-      if (/** @type {NodeJS.ErrnoException} */ (error).code !== "EXDEV") throw error;
-      fs.cpSync(src, dest, { recursive: true });
-      fs.rmSync(src, { recursive: true, force: true });
+      const code = /** @type {NodeJS.ErrnoException} */ (error).code;
+      if (code === "EXDEV") {
+        // another drive: copy, then delete
+        fs.rmSync(dest, { recursive: true, force: true });
+        fs.cpSync(src, dest, { recursive: true });
+        fs.rmSync(src, { recursive: true, force: true });
+      } else {
+        // a folder in the way, or a file where a folder goes
+        fs.rmSync(dest, { recursive: true, force: true });
+        _rename(src, dest);
+      }
     }
     return true;
   } catch {
@@ -1191,8 +1295,8 @@ function moveFilesIn(options) {
   const root = _existing(options.path, "folder");
   if (!root || !options.dest) return undefined;
   const filter = typeof options.filter === "function" ? options.filter : () => true;
-  const files = (getFilesIn(root, options.recursive ?? true) ?? []).filter(filter);
-  const copied = copyFilesIn({ ...options, path: root, filter: (f) => files.includes(f) });
+  const files = new Set((getFilesIn(root, options.recursive ?? true) ?? []).filter(filter));
+  const copied = copyFilesIn({ ...options, path: root, filter: (file) => files.has(file) });
   for (const file of files) fs.rmSync(file, { force: true });
   return copied;
 }
@@ -1270,8 +1374,13 @@ function stat(path) {
  * @returns {number | undefined} `undefined` if it doesn't exist.
  */
 function fileSize(path) {
-  const target = _existing(path, "file");
-  return target ? fs.statSync(target).size : undefined;
+  if (!path) return undefined;
+  try {
+    const stats = fs.statSync(_abs(path));
+    return stats.isFile() ? stats.size : undefined;
+  } catch {
+    return undefined;
+  }
 }
 
 /**
@@ -1355,7 +1464,17 @@ function sanitizeFilename(name, options = {}) {
   let clean = String(name).replace(/[<>:"/\\|?*\u0000-\u001f\u007f]/g, replacement).replace(/[. ]+$/, "");
   if (/^(con|prn|aux|nul|com[0-9]|lpt[0-9])(\..*)?$/i.test(clean)) clean = `_${clean}`;
   if (clean === "." || clean === "..") clean = replacement;
-  while (Buffer.byteLength(clean) > 255) clean = [...clean].slice(0, -1).join("");
+  if (Buffer.byteLength(clean) > 255) {
+    // File systems count bytes, and a character cut in two would be broken.
+    let bytes = 0;
+    let kept = "";
+    for (const char of clean) {
+      bytes += Buffer.byteLength(char);
+      if (bytes > 255) break;
+      kept += char;
+    }
+    clean = kept.replace(/[. ]+$/, "");
+  }
   return clean || "_";
 }
 
@@ -1376,7 +1495,7 @@ function watch(options = {}) {
   if (!target) return undefined;
   let paused = false;
   /** @type {Record<string, Function[]>} */
-  const listeners = { change: [], rename: [], all: [] };
+  const listeners = { change: [], rename: [], all: [], error: [] };
   /** @type {Map<string, NodeJS.Timeout>} */
   const pending = new Map();
 
@@ -1405,7 +1524,9 @@ function watch(options = {}) {
       dispatch(kind, file);
     }, options.debounce));
   });
-  watcher.on("error", () => {});
+  watcher.on("error", (error) => {
+    for (const cb of listeners.error) cb(error);
+  });
 
   /** @type {Watcher} */
   const controller = {
@@ -1443,6 +1564,7 @@ module.exports = {
   getFilesIn,
   glob,
   find,
+  findUp,
   readFile,
   readLines,
   readJSON,

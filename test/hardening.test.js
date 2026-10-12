@@ -1795,3 +1795,149 @@ describe("logger", () => {
     }
   });
 });
+
+describe("fs", () => {
+  const fs = require("node:fs");
+  const path = require("node:path");
+  /** @type {string} */
+  let dir;
+  before(() => {
+    dir = fs.realpathSync(fs.mkdtempSync(path.join(require("node:os").tmpdir(), "nc-fs-")));
+  });
+  after(() => {
+    fs.rmSync(dir, { recursive: true, force: true });
+  });
+  /** @param {string[]} parts */
+  const at = (...parts) => path.join(dir, ...parts);
+
+  it("an atomic write keeps the permissions of the file it replaces", { skip: process.platform === "win32" }, () => {
+    const file = at("secret.txt");
+    fs.writeFileSync(file, "one", { mode: 0o600 });
+    assert.equal(nc.writeFile(file, "two"), true);
+    assert.equal(fs.statSync(file).mode & 0o777, 0o600);
+    assert.equal(nc.writeFile(at("fresh.txt"), "x", { mode: 0o640 }), true);
+    assert.equal(fs.statSync(at("fresh.txt")).mode & 0o777, 0o640);
+  });
+
+  it("writeFile leaves no temporary file behind, with or without fsync", () => {
+    assert.equal(nc.writeFile(at("w", "a.txt"), "a", { fsync: true }), true);
+    assert.equal(nc.writeFile(at("w", "a.txt"), "b"), true);
+    assert.equal(nc.writeFile(at("w", "b.json"), { n: 1 }, { atomic: false, fsync: true }), true);
+    assert.deepEqual(fs.readdirSync(at("w")).sort(), ["a.txt", "b.json"]);
+    assert.equal(nc.readFile(at("w", "a.txt")), "b");
+  });
+
+  it("readFile and fileSize answer undefined for a folder or nothing", () => {
+    assert.equal(nc.readFile(dir), undefined);
+    assert.equal(nc.readFile(at("nope.txt")), undefined);
+    assert.equal(nc.readFile(/** @type {any} */ (undefined)), undefined);
+    assert.equal(nc.fileSize(dir), undefined);
+    assert.equal(nc.fileSize(at("w", "a.txt")), 1);
+    assert.equal(nc.appendFile(at("deep", "er", "log.txt"), "a"), true);
+    assert.equal(nc.appendFile(at("deep", "er", "log.txt"), "b"), true);
+    assert.equal(nc.readFile(at("deep", "er", "log.txt")), "ab");
+  });
+
+  it("files come in the same order as before: a folder's content, then what follows it", () => {
+    for (const file of ["t/a/1.txt", "t/a/b/2.txt", "t/c.txt", "t/z/3.txt"]) nc.writeFile(at(...file.split("/")), "");
+    // what a plain recursive walk gives, in whatever order the system lists a folder
+    /** @type {(folder: string, folders: boolean) => string[]} */
+    const walk = (folder, folders) =>
+      fs.readdirSync(folder, { withFileTypes: true }).flatMap((entry) => {
+        const full = path.join(folder, entry.name);
+        if (!entry.isDirectory()) return folders ? [] : [full];
+        return folders ? [full, ...walk(full, true)] : walk(full, false);
+      });
+    assert.deepEqual(nc.getFilesIn(at("t")), walk(at("t"), false));
+    assert.deepEqual(nc.getFoldersIn(at("t")), walk(at("t"), true));
+    assert.equal(nc.getFilesIn(at("t"))?.length, 4);
+    assert.deepEqual(nc.getFilesIn(at("t"), false)?.map((file) => path.basename(file)), ["c.txt"]);
+  });
+
+  it("glob only reads as deep as the pattern can match", () => {
+    const read = fs.readdirSync;
+    /** @type {string[]} */
+    const visited = [];
+    fs.readdirSync = /** @type {any} */ ((/** @type {any} */ target, /** @type {any} */ options) => {
+      visited.push(path.relative(at("t"), String(target)).replace(/\\/g, "/"));
+      return read(target, options);
+    });
+    try {
+      assert.deepEqual(nc.glob("*.txt", { cwd: at("t") }), ["c.txt"]);
+      assert.deepEqual(visited, [""]);
+      visited.length = 0;
+      assert.deepEqual(nc.glob("a/*.txt", { cwd: at("t") }), ["a/1.txt"]);
+      assert.deepEqual(visited, ["a"]);
+      visited.length = 0;
+      assert.deepEqual(nc.glob("**/*.txt", { cwd: at("t") }), ["a/1.txt", "a/b/2.txt", "c.txt", "z/3.txt"]);
+      assert.equal(visited.length, 4);
+    } finally {
+      fs.readdirSync = read;
+    }
+  });
+
+  it("move replaces a file or a folder, and keeps the destination when asked", () => {
+    nc.writeFile(at("m", "new.txt"), "new");
+    nc.writeFile(at("m", "old.txt"), "old");
+    assert.equal(nc.move(at("m", "new.txt"), at("m", "old.txt")), true);
+    assert.equal(nc.readFile(at("m", "old.txt")), "new");
+    assert.equal(fs.existsSync(at("m", "new.txt")), false);
+
+    nc.writeFile(at("m", "src", "a.txt"), "a");
+    nc.writeFile(at("m", "dst", "stale.txt"), "stale");
+    assert.equal(nc.move(at("m", "src"), at("m", "dst")), true);
+    assert.deepEqual(fs.readdirSync(at("m", "dst")), ["a.txt"]);
+
+    nc.writeFile(at("m", "keep.txt"), "keep");
+    nc.writeFile(at("m", "other.txt"), "other");
+    assert.equal(nc.move(at("m", "other.txt"), at("m", "keep.txt"), { overwrite: false }), false);
+    assert.equal(nc.readFile(at("m", "keep.txt")), "keep");
+    assert.equal(nc.move(at("m", "missing.txt"), at("m", "x.txt")), false);
+  });
+
+  it("moveFilesIn moves many files", () => {
+    fs.mkdirSync(at("many", "in"), { recursive: true });
+    for (let i = 0; i < 300; i++) fs.writeFileSync(at("many", "in", `f${i}.txt`), "");
+    assert.equal(nc.moveFilesIn({ path: at("many", "in"), dest: at("many", "out") }), 300);
+    assert.equal(fs.readdirSync(at("many", "in")).length, 0);
+    assert.equal(fs.readdirSync(at("many", "out")).length, 300);
+  });
+
+  it("findUp looks in the parents", () => {
+    nc.writeFile(at("up", "package.json"), "{}");
+    nc.createFolder(at("up", "a", "b", "c"));
+    nc.createFolder(at("up", ".git"));
+    assert.equal(nc.findUp("package.json", { cwd: at("up", "a", "b", "c") }), at("up", "package.json"));
+    assert.equal(nc.findUp(".git", { cwd: at("up", "a", "b"), type: "folder" }), at("up", ".git"));
+    assert.equal(nc.findUp(".git", { cwd: at("up", "a", "b"), type: "file", stopAt: dir }), undefined);
+    assert.equal(nc.findUp(["yarn.lock", "package.json"], { cwd: at("up", "a") }), at("up", "package.json"));
+    assert.equal(nc.findUp("package.json", { cwd: at("up", "a", "b"), stopAt: at("up", "a") }), undefined);
+    assert.equal(nc.findUp("definitely-not-there-nc.txt", { cwd: at("up") }), undefined);
+    assert.equal(nc.findUp("package.json"), path.join(process.cwd(), "package.json"));
+  });
+
+  it("a path starting with ./ is read from the file that makes the call", () => {
+    assert.equal(nc.createPath("./x.txt"), path.join(__dirname, "x.txt"));
+    assert.equal(nc.createPath("x.txt"), path.join(process.cwd(), "x.txt"));
+  });
+
+  it("sanitizeFilename cuts by bytes without breaking a character", () => {
+    const long = nc.sanitizeFilename(`${"é".repeat(200)}.txt`);
+    assert.ok(Buffer.byteLength(long) <= 255);
+    assert.equal([...long].every((char) => char === "é"), true);
+    assert.equal(nc.sanitizeFilename("a".repeat(300)).length, 255);
+  });
+
+  it("watch reports that it stopped working", async () => {
+    nc.createFolder(at("watched"));
+    const watcher = nc.watch({ path: at("watched") });
+    assert.ok(watcher);
+    /** @type {string[]} */
+    const seen = [];
+    watcher.on("all", (event) => seen.push(event)).on("error", (error) => seen.push(`error:${error instanceof Error}`));
+    nc.writeFile(at("watched", "a.txt"), "x");
+    for (let i = 0; i < 40 && !seen.length; i++) await sleep(25);
+    watcher.stop();
+    assert.ok(seen.length > 0, "the write was seen");
+  });
+});
