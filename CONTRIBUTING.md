@@ -50,7 +50,7 @@ index.js            entry point: lazy namespaces and flat helpers
 src/*.js            one module per namespace (JSDoc is the source of truth for the types)
 src/errors.js       error classes
 types/              generated declarations (npm run build, not committed)
-scripts/            build-types, build-reference, check-types, report-test-failures (for CI)
+scripts/            build-types, build-reference, check-types, and what CI runs: report-test-failures, github-release
 scripts/lib/        the API model read from the types
 test/               node --test suites
 docs/               the documentation website (Astro Starlight), a project of its own
@@ -105,6 +105,16 @@ npm run docs:build     # builds docs/dist, then checks every link and every tran
 - Keep the public API consistent with the existing functions (argument order, options objects, return
   values rather than exceptions for everyday "not found" cases).
 - CI must be green.
+
+## Releasing
+
+For maintainers.
+
+1. Set the version in `package.json` and `docs/package.json`, and give `CHANGELOG.md` its section,
+   in a pull request. Merging it deploys the website.
+2. From `main`, run `npm publish`. It runs `npm run check` first.
+3. Tag the commit (`git tag v2.1.0`, then `git push origin v2.1.0`). The GitHub release is created from the
+   tag, with the section of the changelog as its notes.
 
 ## Reporting a security issue
 

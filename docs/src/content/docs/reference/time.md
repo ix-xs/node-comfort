@@ -263,7 +263,7 @@ time.toISODate(new Date(2024, 0, 5)); // "2024-01-05"
 ## add
 
 ```ts
-add(date: DateInput, amount: string | number, unit?: CalendarUnit, options?: TimeZoneOptions): Date
+add(date: DateInput, amount: string | number, unit?: TimeZoneOptions | CalendarUnit, options?: TimeZoneOptions): Date
 ```
 
 Adds time to a date and returns a new `Date`. Whole days, weeks, months
@@ -275,7 +275,7 @@ the end of February. Hours and smaller units are exact.
 | --- | --- | --- |
 | `date` | [`DateInput`](#dateinput) |  |
 | `amount` | `number \| string` | A number with `unit`, or a duration like `"1h30m"` or `"1 month"`. |
-| `unit?` | [`CalendarUnit`](#calendarunit) | Defaults to `"ms"`. |
+| `unit?` | [`CalendarUnit`](#calendarunit)` \| `[`TimeZoneOptions`](#timezoneoptions) | The unit of a number. With a text amount there is none to give: the options can come here. Defaults to `"ms"`. |
 | `options?` | [`TimeZoneOptions`](#timezoneoptions) | The zone whose calendar is followed. |
 
 **Throws** `TypeError`: If a text amount isn't a duration, or the unit isn't one.
@@ -285,12 +285,13 @@ time.add(new Date(), "2h30m");
 time.add(new Date(), 3, "days");
 time.add(new Date(), "1 month");
 time.add(new Date(2024, 0, 31), 1, "month"); // 2024-02-29
+time.add(date, "1 day", { timeZone: "Europe/Paris" });
 ```
 
 ## subtract
 
 ```ts
-subtract(date: DateInput, amount: string | number, unit?: CalendarUnit, options?: TimeZoneOptions): Date
+subtract(date: DateInput, amount: string | number, unit?: TimeZoneOptions | CalendarUnit, options?: TimeZoneOptions): Date
 ```
 
 Subtracts time from a date and returns a new `Date`.
@@ -299,10 +300,10 @@ Subtracts time from a date and returns a new `Date`.
 | --- | --- | --- |
 | `date` | [`DateInput`](#dateinput) |  |
 | `amount` | `number \| string` |  |
-| `unit?` | [`CalendarUnit`](#calendarunit) | Defaults to `"ms"`. |
+| `unit?` | [`CalendarUnit`](#calendarunit)` \| `[`TimeZoneOptions`](#timezoneoptions) | The unit of a number, or the options when the amount is text. Defaults to `"ms"`. |
 | `options?` | [`TimeZoneOptions`](#timezoneoptions) |  |
 
-**Throws** `TypeError`: If a text amount isn't a duration.
+**Throws** `TypeError`: If a text amount isn't a duration, or the unit isn't one.
 
 ```js
 time.subtract(new Date(), 7, "days");

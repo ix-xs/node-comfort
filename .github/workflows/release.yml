@@ -1,0 +1,33 @@
+name: Release
+
+# Publishes the GitHub release of a version once its tag exists: when the tag
+# is pushed, or at the next push to main if the tag came first.
+on:
+  push:
+    tags: ["v*"]
+    branches: [main]
+
+permissions:
+  contents: write
+
+concurrency:
+  group: release
+  cancel-in-progress: false
+
+jobs:
+  release:
+    name: GitHub release
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+          fetch-tags: true
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 24
+      - name: Create the release of the current version, if it is tagged and has none
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: node scripts/github-release.js
