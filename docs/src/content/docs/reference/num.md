@@ -27,8 +27,8 @@ num.percentile(latencies, 95);
 setLocale(locale: string): typeof nc.num
 ```
 
-Sets the default language of `format`, `currency`, `percent`,
-`abbreviate`, `ordinal` and `formatBytes`.
+Sets the default language of `format`, `currency`, `ordinal` and
+`formatBytes`.
 
 | Parameter | Type | Description |
 | --- | --- | --- |

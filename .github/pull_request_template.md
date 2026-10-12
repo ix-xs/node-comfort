@@ -7,5 +7,6 @@
 - [ ] No new runtime dependency
 - [ ] Every new or changed function has complete JSDoc (description, `@param`, `@returns`, `@example`)
 - [ ] Tests added or updated in `test/`
-- [ ] `npm run check` passes (types, docs site, tests, editor checks) and `docs/API.md` is regenerated
+- [ ] `npm run check` passes (types, reference pages, tests, editor checks)
+- [ ] `npm run docs:build` passes when a guide changed
 - [ ] `CHANGELOG.md` updated

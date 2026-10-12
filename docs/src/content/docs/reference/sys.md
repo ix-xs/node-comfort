@@ -266,8 +266,8 @@ Options for `run()` and `exec()`.
 | `env?` | `Record``<string, string \| undefined>` | Extra environment variables, added to `process.env`. `undefined` removes one. |
 | `extendEnv?` | `boolean` | Set to `false` to pass only `env`, without `process.env`. |
 | `input?` | `string \| ``Buffer``<``ArrayBufferLike``>` | Written to the command's stdin. |
-| `timeout?` | `string \| number` | Kill the command, and everything it started, after this long, like `"30s"`. |
-| `signal?` | `AbortSignal` | Kills the command, and everything it started, when aborted. |
+| `timeout?` | `string \| number` | Kill the command after this long, like `"30s"`. On Windows, what it started is stopped with it. |
+| `signal?` | `AbortSignal` | Kills the command when aborted. On Windows, what it started is stopped with it. |
 | `stdio?` | `"pipe" \| "inherit"` | `"inherit"` shows the output live instead of capturing it. Defaults to `"pipe"`. |
 | `onStdout?` | `((line: string) => void)` | Called for each line of stdout. |
 | `onStderr?` | `((line: string) => void)` | Called for each line of stderr. |

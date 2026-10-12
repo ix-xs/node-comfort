@@ -35,10 +35,12 @@ A few pairs are easy to mix up:
 | `isNumeric` | `42`, `"4.2e3"`, `" 12 "` | `"12px"`, `""` |
 | `isObject` | `{}`, `[]`, `new Date()` | `null` |
 | `isPlainObject` | `{}`, `Object.create(null)` | `[]`, `new Date()`, class instances |
-| `isEmpty` | `""`, `[]`, `{}`, empty Map/Set, `null` | `" "`, `0` |
+| `isEmpty` | `""`, `[]`, `{}`, empty Map/Set, `null` | `" "`, `0`, `new Date()`, `/x/`, `new Error()` |
 | `isBlank` | `null`, `""`, `"  \n"` | `" a "` |
 | `isDate` | any `Date` | strings |
 | `isValidDate` | a `Date` holding a real time | `new Date("nope")` |
+
+`isEmpty` is for `null`, `undefined` and containers: strings, arrays, maps, sets and objects with no keys. Numbers, booleans, functions, dates, regular expressions and errors are never empty.
 
 ## Validating input
 
@@ -59,6 +61,25 @@ nc.isCreditCard("4242 4242 4242 4242");        // Luhn checksum
 nc.isJWT(token);                               // shape only, see crypto.verifyJWT
 nc.isOneOf(role, ["admin", "user"]);
 ```
+
+So are the formats of networks, banks, databases and settings:
+
+```js
+nc.isHostname("api.example.com");              // "localhost" passes too, unless { requireTld: true }
+nc.isMACAddress("00:1B:44:11:3A:B7");
+nc.isE164("+33612345678");                     // phone numbers the way SMS APIs expect them
+nc.isIBAN("FR76 3000 6000 0112 3456 7890 189"); // format and checksum, spaces allowed
+nc.isObjectId("507f1f77bcf86cd799439011");     // MongoDB ids
+nc.isULID(nc.id.ulid());
+nc.isDataURL("data:image/png;base64,iVBORw0KGgo=");
+nc.isMimeType("text/html; charset=utf-8");
+nc.isTimeZone("Europe/Paris");                 // a zone this Node.js knows
+nc.isLocale("pt-BR");                          // "en_US" is rejected, use a dash
+nc.isCron("0 9 * * 1-5");                      // what time.cron() understands
+nc.isASCII("héllo");                           // false
+```
+
+`isHostname` rejects IP addresses: that's the job of `isIP`. The full list is in the [reference](/reference/checker/).
 
 For whole objects with many rules and good error messages, use [`nc.schema`](/data/schema/).
 

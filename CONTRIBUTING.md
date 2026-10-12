@@ -32,8 +32,7 @@ npm run check
 
 | Script | What it does |
 | --- | --- |
-| `npm run build` | Compiles the JSDoc into `types/` (fails on any type error) and regenerates `docs/API.md`. |
-| `npm run build:site` | Builds the documentation website into `site/` and checks every internal link. |
+| `npm run build` | Compiles the JSDoc into `types/` (fails on any type error) and regenerates the reference pages of the website. |
 | `npm test` | Runs every `test/*.test.js` file with the Node.js test runner. |
 | `npm run test:types` | Installs the package in a temporary project and checks the editor experience: hover documentation for every export, completions, auto-imports, and a TypeScript consumer that must compile. |
 
@@ -51,12 +50,14 @@ index.js            entry point: lazy namespaces and flat helpers
 src/*.js            one module per namespace (JSDoc is the source of truth for the types)
 src/errors.js       error classes
 types/              generated declarations (npm run build, not committed)
-docs/API.md         generated API reference (npm run build, committed)
-docs/guide/*.md     the guides, written by hand, published on the website
-scripts/            build-types, build-docs, build-site, check-types, serve-site
-scripts/lib/        the shared API model, the Markdown renderer and the highlighter
-scripts/site/       the website CSS and client script
+scripts/            build-types, build-reference, check-types
+scripts/lib/        the API model read from the types
 test/               node --test suites
+docs/               the documentation website (Astro Starlight), a project of its own
+  src/content/docs/           the guides, written by hand, in English
+  src/content/docs/fr/        their French translation
+  src/content/docs/reference/ generated from the types (npm run build, committed)
+  src/showcase/samples/       the files the landing page runs and shows
 ```
 
 ## Adding a function
@@ -75,19 +76,28 @@ A new namespace also needs:
   plus its name in the `0 && (module.exports = { ... })` list that Node reads to find the named exports;
 - an entry in the `exports` map of `package.json`, so that `@ix-xs/node-comfort/<name>` works;
 - a top-of-file overview JSDoc block, shown when hovering `nc.name`;
-- a page in `docs/guide/`, listed in `GUIDE_SECTIONS` and `API_GROUPS` in `scripts/build-site.js`.
+- a guide in `docs/src/content/docs/`, an entry in the sidebar of `docs/astro.config.mjs`, and its name in
+  `GROUPS` and `GUIDES` in `scripts/build-reference.js`.
 
 ## Working on the documentation
 
-The guides are plain Markdown in `docs/guide/`. The website is generated from them and from the generated
-types, so the API pages are never out of date.
+The website lives in `docs/` and has its own dependencies, which the package itself never needs.
 
 ```bash
-npm run build:site   # writes site/ and checks every link
-npm run site:serve   # http://localhost:4173
+npm run docs:install   # once
+npm run docs:dev       # http://localhost:4321/node-comfort/
+npm run docs:build     # builds docs/dist, then checks every link and every translated page
 ```
 
-Examples in the guides are meant to run: check yours before sending it.
+- The guides are plain Markdown in `docs/src/content/docs/`. Examples are meant to run: check yours
+  before sending it.
+- The reference pages are generated from the types by `npm run build`. Do not edit them: change the
+  JSDoc instead. CI fails when they are out of date.
+- The French pages in `docs/src/content/docs/fr/` mirror the English ones: same headings, same code,
+  same links. `npm run check-translation --prefix docs` says what differs. A page without a
+  translation shows in English.
+- The examples of the landing page are real files in `docs/src/showcase/samples/`. They run against
+  the package at every build, and the page shows what they printed.
 
 ## Pull requests
 

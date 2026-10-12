@@ -30,22 +30,39 @@ color.ansi256(208)("orange");
 color.gradient("Rainbow text", ["#ff5f6d", "#ffc371"]);
 ```
 
-On terminals with fewer colors, truecolor is converted to the closest of 256 or 16 colors.
+You write the color you want once, and it adapts to the terminal. Where millions of colors aren't available, it becomes the closest of 256 or 16 colors, and with colors off the text comes back as it is:
+
+```js
+color.create(3).hex("#ff8800")("orange"); // "\x1b[38;2;255;136;0morange\x1b[39m" (millions)
+color.create(2).hex("#ff8800")("orange"); // "\x1b[38;5;214morange\x1b[39m"       (256)
+color.create(1).hex("#ff8800")("orange"); // "\x1b[93morange\x1b[39m"             (16)
+color.create(0).hex("#ff8800")("orange"); // "orange"
+```
 
 ## When colors appear
 
-Colors are on in a terminal and off when the output goes to a file or a pipe, so logs stay clean. You can override that:
+Colors are on in a terminal and off when the output goes to a file or a pipe, so logs stay clean. CI services that show colors in their logs (GitHub Actions, GitLab CI, CircleCI and a few others) get them too. You can override that:
 
-- `NO_COLOR=1` or `--no-color` turns them off;
+- `NO_COLOR=1` or `--no-color` turns them off, even when `FORCE_COLOR` is set;
 - `FORCE_COLOR=1`, `2` or `3` (16, 256 or millions of colors) or `--color` turns them on;
-- `color.level = 0` turns them off from code.
+- `color.level = 0` turns them off from code, and `color.level = undefined` goes back to what the terminal supports.
 
 `color.detect(stream)` tells you what a stream supports, and `color.create(level)` gives you a separate instance, for example to write colors to a file on purpose.
 
 ## Helpers
 
 ```js
-color.strip("\x1b[31mred\x1b[39m");  // "red"
-color.width("日本 👋");               // 7 columns: wide characters count as 2
-color.link("Docs", "https://example.com"); // clickable in modern terminals
+color.strip("\x1b[31mred\x1b[39m");             // "red"
+color.width("日本 👋");                          // 7 columns: wide characters count as 2
+color.truncate("A very long line of text", 10); // "A very lo…"
+color.link("Docs", "https://example.com");      // clickable in modern terminals, "Docs (https://example.com)" elsewhere
+```
+
+`truncate` cuts text to a number of columns, counted the way `width` counts them. It's safe on colored text: what's left keeps its colors, and they are still closed at the end.
+
+```js
+const line = color.red("A very long line of text");
+color.truncate(line, 10);                       // "A very lo…", still red, and the red ends after the …
+color.truncate(line, process.stdout.columns);   // never wider than the terminal
+color.truncate("A very long line of text", 10, { ellipsis: "..." }); // "A very ..."
 ```

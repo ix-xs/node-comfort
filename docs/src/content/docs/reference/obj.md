@@ -27,8 +27,8 @@ clone<T>(value: T): T
 ```
 
 Deep copy. Unlike `structuredClone`, it keeps functions and class
-instances (with their prototype), and it's several times faster on plain
-data. Shared references and cycles are preserved.
+instances (with their prototype), and it's faster on plain data. Shared
+references and cycles are preserved.
 
 ```js
 const copy = obj.clone({ a: { b: [1, 2] }, when: new Date() });
@@ -417,7 +417,14 @@ obj.size({ a: 1, b: 2 }); // 2
 isEmpty(object: unknown): boolean
 ```
 
-Does the object have no own keys? `null` and `undefined` count as empty.
+Is there nothing in it? No own keys for an object, no entries for a Map
+or a Set. `null` and `undefined` count as empty; a date, a regular
+expression and an error never do.
+
+```js
+obj.isEmpty({});                  // true
+obj.isEmpty(new Map([["a", 1]])); // false
+```
 
 ## deepFreeze
 
@@ -528,5 +535,5 @@ Options for `sortKeys()`.
 
 | Property | Type | Description |
 | --- | --- | --- |
-| `deep?` | `boolean` | Sort nested objects too, arrays included. Defaults to `true`. |
+| `deep?` | `boolean` | Sort nested objects too, arrays included. Defaults to `true`. With `false`, only the first level is copied and sorted: what it holds is shared with the original. |
 | `compare?` | `((a: string, b: string) => number)` | How to order two keys. Defaults to code-unit order, which is stable across machines. |

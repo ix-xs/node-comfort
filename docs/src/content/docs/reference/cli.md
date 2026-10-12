@@ -55,10 +55,10 @@ Draws a box around text.
 
 ```js
 console.log(cli.box("Server ready\nhttp://localhost:3000", { title: "my-app", borderColor: "green" }));
-// ╭─ my-app ──────────────────╮
-// │  Server ready             │
-// │  http://localhost:3000    │
-// ╰───────────────────────────╯
+// ╭─ my-app ────────────────╮
+// │  Server ready           │
+// │  http://localhost:3000  │
+// ╰─────────────────────────╯
 ```
 
 ## tree
@@ -305,7 +305,7 @@ Options for `args()`.
 | `name?` | `string` | Program name in the help. Defaults to the script name. |
 | `description?` | `string` | Shown at the top of the help. |
 | `usage?` | `string` | A usage line, like `"<file> [options]"`. |
-| `commands?` | `Record``<string, string>` | Subcommands and what they do, like `{ build: "Build the project" }`. The first argument must then be one of them, and comes back as `command`. |
+| `commands?` | `Record``<string, string>` | Subcommands and what they do, like `{ build: "Build the project" }`. The first argument, when there is one, must be one of them and comes back as `command`. They share the flags of the program. |
 | `examples?` | `string[]` | Command lines shown at the end of the help. |
 | `help?` | `boolean` | Answer `--help` and `-h` by printing the help and exiting. Defaults to `true`. |
 | `version?` | `string` | Answer `--version` with this version. |

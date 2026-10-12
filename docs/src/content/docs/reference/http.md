@@ -24,7 +24,7 @@ const { data: users } = await api.get("users", { query: { page: 2 } });
 ## request
 
 ```ts
-request<T = any>(url: string | URL, options?: HttpOptions): Promise<HttpResponse<T>>
+request<T = any, S extends ResponseSchema = { parse(data: unknown): T; }>(url: string | URL, options?: HttpOptionsOf<S>): Promise<HttpResponse<ReturnType<S["parse"]>>>
 ```
 
 Sends a request and resolves with the response, body already read.
@@ -34,7 +34,7 @@ slow and an `AbortError` when cancelled.
 | Parameter | Type | Description |
 | --- | --- | --- |
 | `url` | `string \| ``URL` | An absolute URL, or a path when `baseURL` is set. |
-| `options?` | [`HttpOptions`](#httpoptions) |  |
+| `options?` | [`HttpOptionsOf`](#httpoptionsof)`<``S``>` |  |
 
 **Throws** `HttpError | TimeoutError | AbortError`
 
@@ -51,7 +51,7 @@ res.data; // parsed JSON
 ## get
 
 ```ts
-get<T = any>(url: string | URL, options?: HttpOptions): Promise<HttpResponse<T>>
+get<T = any, S extends ResponseSchema = { parse(data: unknown): T; }>(url: string | URL, options?: HttpOptionsOf<S>): Promise<HttpResponse<ReturnType<S["parse"]>>>
 ```
 
 Sends a GET request.
@@ -76,7 +76,7 @@ headers["content-length"];
 ## post
 
 ```ts
-post<T = any>(url: string | URL, data?: unknown, options?: HttpOptions): Promise<HttpResponse<T>>
+post<T = any, S extends ResponseSchema = { parse(data: unknown): T; }>(url: string | URL, data?: unknown, options?: HttpOptionsOf<S>): Promise<HttpResponse<ReturnType<S["parse"]>>>
 ```
 
 Sends a POST request. Objects, arrays, numbers and booleans go as JSON;
@@ -90,7 +90,7 @@ await http.post(uploadUrl, formData);
 ## put
 
 ```ts
-put<T = any>(url: string | URL, data?: unknown, options?: HttpOptions): Promise<HttpResponse<T>>
+put<T = any, S extends ResponseSchema = { parse(data: unknown): T; }>(url: string | URL, data?: unknown, options?: HttpOptionsOf<S>): Promise<HttpResponse<ReturnType<S["parse"]>>>
 ```
 
 Sends a PUT request. The body works like in `post()`.
@@ -98,7 +98,7 @@ Sends a PUT request. The body works like in `post()`.
 ## patch
 
 ```ts
-patch<T = any>(url: string | URL, data?: unknown, options?: HttpOptions): Promise<HttpResponse<T>>
+patch<T = any, S extends ResponseSchema = { parse(data: unknown): T; }>(url: string | URL, data?: unknown, options?: HttpOptionsOf<S>): Promise<HttpResponse<ReturnType<S["parse"]>>>
 ```
 
 Sends a PATCH request. The body works like in `post()`.
@@ -106,7 +106,7 @@ Sends a PATCH request. The body works like in `post()`.
 ## delete
 
 ```ts
-delete<T = any>(url: string | URL, options?: HttpOptions): Promise<HttpResponse<T>>
+delete<T = any, S extends ResponseSchema = { parse(data: unknown): T; }>(url: string | URL, options?: HttpOptionsOf<S>): Promise<HttpResponse<ReturnType<S["parse"]>>>
 ```
 
 Sends a DELETE request.
@@ -184,13 +184,13 @@ A client with its own defaults, from `create()`.
 
 | Property | Type | Description |
 | --- | --- | --- |
-| `request` | `<``T`` = any>(url: string \| ``URL``, options?: `[`HttpOptions`](#httpoptions)`) => ``Promise``<`[`HttpResponse`](#httpresponse)`<``T``>>` | Sends a request. |
-| `get` | `<``T`` = any>(url: string \| ``URL``, options?: `[`HttpOptions`](#httpoptions)`) => ``Promise``<`[`HttpResponse`](#httpresponse)`<``T``>>` | Sends a GET request. |
+| `request` | `<``T`` = any, ``S`` extends `[`ResponseSchema`](#responseschema)` = { parse(data: unknown): ``T``; }>(url: string \| ``URL``, options?: `[`HttpOptionsOf`](#httpoptionsof)`<``S``>) => ``Promise``<`[`HttpResponse`](#httpresponse)`<``ReturnType``<``S``["parse"]>>>` | Sends a request. |
+| `get` | `<``T`` = any, ``S`` extends `[`ResponseSchema`](#responseschema)` = { parse(data: unknown): ``T``; }>(url: string \| ``URL``, options?: `[`HttpOptionsOf`](#httpoptionsof)`<``S``>) => ``Promise``<`[`HttpResponse`](#httpresponse)`<``ReturnType``<``S``["parse"]>>>` | Sends a GET request. |
 | `head` | `<``T`` = any>(url: string \| ``URL``, options?: `[`HttpOptions`](#httpoptions)`) => ``Promise``<`[`HttpResponse`](#httpresponse)`<``T``>>` | Sends a HEAD request. |
-| `delete` | `<``T`` = any>(url: string \| ``URL``, options?: `[`HttpOptions`](#httpoptions)`) => ``Promise``<`[`HttpResponse`](#httpresponse)`<``T``>>` | Sends a DELETE request. |
-| `post` | `<``T`` = any>(url: string \| ``URL``, data?: unknown, options?: `[`HttpOptions`](#httpoptions)`) => ``Promise``<`[`HttpResponse`](#httpresponse)`<``T``>>` | Sends a POST request. Objects and arrays go as JSON. |
-| `put` | `<``T`` = any>(url: string \| ``URL``, data?: unknown, options?: `[`HttpOptions`](#httpoptions)`) => ``Promise``<`[`HttpResponse`](#httpresponse)`<``T``>>` | Sends a PUT request. Objects and arrays go as JSON. |
-| `patch` | `<``T`` = any>(url: string \| ``URL``, data?: unknown, options?: `[`HttpOptions`](#httpoptions)`) => ``Promise``<`[`HttpResponse`](#httpresponse)`<``T``>>` | Sends a PATCH request. Objects and arrays go as JSON. |
+| `delete` | `<``T`` = any, ``S`` extends `[`ResponseSchema`](#responseschema)` = { parse(data: unknown): ``T``; }>(url: string \| ``URL``, options?: `[`HttpOptionsOf`](#httpoptionsof)`<``S``>) => ``Promise``<`[`HttpResponse`](#httpresponse)`<``ReturnType``<``S``["parse"]>>>` | Sends a DELETE request. |
+| `post` | `<``T`` = any, ``S`` extends `[`ResponseSchema`](#responseschema)` = { parse(data: unknown): ``T``; }>(url: string \| ``URL``, data?: unknown, options?: `[`HttpOptionsOf`](#httpoptionsof)`<``S``>) => ``Promise``<`[`HttpResponse`](#httpresponse)`<``ReturnType``<``S``["parse"]>>>` | Sends a POST request. Objects and arrays go as JSON. |
+| `put` | `<``T`` = any, ``S`` extends `[`ResponseSchema`](#responseschema)` = { parse(data: unknown): ``T``; }>(url: string \| ``URL``, data?: unknown, options?: `[`HttpOptionsOf`](#httpoptionsof)`<``S``>) => ``Promise``<`[`HttpResponse`](#httpresponse)`<``ReturnType``<``S``["parse"]>>>` | Sends a PUT request. Objects and arrays go as JSON. |
+| `patch` | `<``T`` = any, ``S`` extends `[`ResponseSchema`](#responseschema)` = { parse(data: unknown): ``T``; }>(url: string \| ``URL``, data?: unknown, options?: `[`HttpOptionsOf`](#httpoptionsof)`<``S``>) => ``Promise``<`[`HttpResponse`](#httpresponse)`<``ReturnType``<``S``["parse"]>>>` | Sends a PATCH request. Objects and arrays go as JSON. |
 | `download` | `(url: string \| ``URL``, destination: string, options?: `[`HttpOptions`](#httpoptions)`) => ``Promise``<{ path: string; size: number; }>` | Saves a response to a file. |
 | `extend` | `(defaults: `[`HttpOptions`](#httpoptions)`) => `[`HttpClient`](#httpclient) | A new client with these defaults added. |
 | `defaults` | `Readonly``<`[`HttpOptions`](#httpoptions)`>` |  |
@@ -239,12 +239,20 @@ Request options.
 | `timeout?` | `string \| number \| false` | Time limit per attempt, like `"10s"`. `false` turns it off. Defaults to 30 seconds. With `responseType: "stream"`, it only covers the wait for the response headers. |
 | `retry?` | `number \| false \| `[`HttpRetryOptions`](#httpretryoptions) | Number of attempts, `false`, or retry settings. A request whose body is a stream is never retried. |
 | `responseType?` | `"json" \| "buffer" \| "auto" \| "text" \| "stream"` | How to read the body. `"auto"` reads JSON or text based on the content type, a Buffer otherwise. |
-| `schema?` | `{ parse(data: unknown): unknown; }` | Checks the body of a 2xx response, and replaces it with the result: pass a `nc.schema` and bad data from an API stops at the door, with a `ValidationError`. |
+| `schema?` | `{ parse(data: unknown): unknown; }` | Checks the body of a 2xx response, and replaces it with the result: pass a `nc.schema` and bad data from an API stops at the door, with a `ValidationError`. `data` takes the type the schema describes. |
 | `throwHttpErrors?` | `boolean` | Throw an `HttpError` when the status isn't 2xx. Defaults to `true`. |
 | `signal?` | `AbortSignal` | Cancels the request. |
 | `hooks?` | [`HttpHooks`](#httphooks) |  |
 | `onDownloadProgress?` | `((progress: { loaded: number; total: number \| undefined; percent: number \| undefined; }) => void)` | Called while the body downloads. |
 | `redirect?` | `"error" \| "follow" \| "manual"` | Defaults to `"follow"`. |
+
+### HttpOptionsOf
+
+Request options, where `schema` gives `response.data` its type.
+
+```ts
+type HttpOptionsOf = Omit<HttpOptions, "schema"> & { schema?: S; }
+```
 
 ### HttpRequestConfig
 
@@ -295,3 +303,12 @@ Query string values. `null` and `undefined` are skipped, arrays repeat the key, 
 ```ts
 type QueryParams = Record<string, string | number | boolean | Date | null | undefined | Array<string | number | boolean | Date>>
 ```
+
+### ResponseSchema
+
+What the `schema` option takes: a `nc.schema`, or anything else with a
+`parse()` method that returns the checked value or throws.
+
+| Property | Type | Description |
+| --- | --- | --- |
+| `parse` | `(data: unknown) => unknown` |  |

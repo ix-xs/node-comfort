@@ -92,7 +92,7 @@ To turn this off, set `NODE_COMFORT_DOTENV=false`. To load other files, call `nc
 | --- | --- |
 | `LOG_LEVEL` | Minimum log level: `trace`, `debug`, `info`, `warn`, `error`, `fatal` or `silent` |
 | `LOG_FORMAT=json` | Logs become one JSON object per line |
-| `DEBUG` | Shows `debug` logs |
+| `DEBUG` | Shows `debug` logs: `DEBUG=1` for all of them, `DEBUG=db,http:*` for the loggers with these scopes |
 | `NO_COLOR` | Turns colors off |
 | `FORCE_COLOR=1\|2\|3` | Forces colors on, with 16, 256 or 16 million colors |
 | `NODE_COMFORT_DOTENV=false` | Don't load `.env` automatically |

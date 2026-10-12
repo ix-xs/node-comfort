@@ -72,3 +72,18 @@ When a relative path didn't exist, 1.x searched the folder tree for a file with 
 ## Security fix
 
 `obj.set()` and `obj.unflatten()` in 1.2.0 could modify `Object.prototype` when given a path like `"__proto__.isAdmin"`. If you pass user-controlled paths or objects to these functions, upgrade.
+
+## From 2.0 to 2.1
+
+Nothing to change in a project that used 2.0 as documented. A few behaviors were corrected, and you may have relied on the old ones:
+
+- **`DEBUG=name` only shows the debug logs of that scope.** It used to show all of them. Use `DEBUG=1` or `LOG_LEVEL=debug` for everything.
+- **Date math follows `time.setTimezone()`.** `startOf()`, `endOf()`, `add()` and `diff()` used the zone of the machine. `time.add(date, "soon")` now throws instead of adding nothing.
+- **`crypto.decrypt()` always fails the same way:** a `NodeComfortError` with the code `ERR_DECRYPT`. Malformed input used to throw a `TypeError`.
+- **Leaving a menu or a password prompt rejects with an `AbortError`.** Test `error.name === "AbortError"` instead of the message.
+- **An `http` call adds to the query and headers of its client.** It used to replace them.
+- **`env.load()` gives priority to the first file** that defines a variable. `override` only decides whether files may replace what the environment already had.
+- **A `CURRENT_TIMESTAMP` default in `createTable()` is the time of the insert.** It used to store that text.
+- **`num.min()` and `num.max()` return `NaN`** when one of the values is `NaN`, and **`isEmpty()` is `false`** for a `Date`, a `RegExp` and an `Error`.
+
+The [changelog](https://github.com/ix-xs/node-comfort/blob/main/CHANGELOG.md) has the complete list.

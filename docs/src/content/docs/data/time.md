@@ -1,6 +1,6 @@
 ---
 title: "Dates and time"
-description: "`nc.time` formats dates in any language and time zone, does calendar math, parses durations and schedules tasks. It uses `Intl`, which Node.js ships with every language."
+description: "`nc.time` formats and parses dates in any language and time zone, does calendar math, reads durations and schedules tasks. It uses `Intl`, which Node.js ships with every language."
 sidebar:
   order: 5
 ---
@@ -24,6 +24,8 @@ time.relative(Date.now() - 3_600_000);         // "il y a 1 heure"
 time.format(new Date(), "dddd D MMMM YYYY");   // "lundi 15 janvier 2024"
 ```
 
+The default zone is used by everything that reads a calendar: `format`, `parse`, `startOf`, `add` with months, `isToday`, `cron` and the others. Without one, the system zone is used.
+
 The rest of this page uses the default English locale.
 
 You can also choose per call, with `{ locale }` and `{ timeZone }`:
@@ -41,6 +43,7 @@ time.relative(date, undefined, { locale: "de" });               // "vor 3 Stunde
 time.format(date);                          // "2024-01-15 14:30:05"
 time.format(date, "DD/MM/YYYY");            // "15/01/2024"
 time.format(date, "h:mm A");                // "2:30 PM"
+time.format(date, "MMMM Do, YYYY");         // "January 15th, 2024"
 time.format(date, "[Week] W, YYYY");        // "Week 3, 2024"
 time.toISODate(date);                       // "2024-01-15"
 ```
@@ -51,12 +54,34 @@ time.toISODate(date);                       // "2024-01-15"
 | `MMMM` `MMM` | January, Jan | `hh` `h` | 09, 9 (12h) |
 | `MM` `M` | 01, 1 | `mm` `m` | 05, 5 |
 | `DD` `D` | 05, 5 | `ss` `s` | 07, 7 |
-| `dddd` `ddd` | Monday, Mon | `SSS` | milliseconds |
-| `d` | weekday, 0 is Sunday | `A` `a` | PM, pm |
-| `Q` | quarter | `Z` `ZZ` | +02:00, +0200 |
+| `Do` | 5th | `SSS` | milliseconds |
+| `dddd` `ddd` | Monday, Mon | `A` `a` | PM, pm |
+| `d` | weekday, 0 is Sunday | `Z` `ZZ` | +02:00, +0200 |
+| `Q` | quarter | `z` | zone name, like EST |
 | `W` `WW` | ISO week | `X` `x` | Unix seconds, ms |
 
-Text in brackets is kept as is.
+Text in brackets is kept as is. `Do` follows the language (`1er` in French). `z` is the short name `Intl` has for the zone in that language, which can be an offset such as `GMT+1`.
+
+## Parsing
+
+`parse()` is the opposite of `format()`, with the same tokens:
+
+```js
+time.parse("15/01/2024 14:30", "DD/MM/YYYY HH:mm");             // a Date
+time.parse("15 janvier 2024", "D MMMM YYYY", { locale: "fr" });
+time.parse("2024-01-15 09:00", "YYYY-MM-DD HH:mm", { timeZone: "Asia/Tokyo" });
+// 2024-01-15T00:00:00.000Z, 9:00 in Tokyo
+time.parse("31/02/2024", "DD/MM/YYYY");                         // undefined, no such day
+```
+
+The text is read in the default zone, or the one you pass, unless it carries its own offset (the `Z` token). You get `undefined` when the text doesn't match the pattern or isn't a real date. A pattern with no date means today, and one with no time means midnight. The week, quarter and zone name tokens (`W`, `Q`, `d`, `z`) can't be read back: a pattern that has one throws a `TypeError`.
+
+For Unix timestamps in seconds, as found in JWTs and many APIs:
+
+```js
+time.fromUnix(1705329000); // 2024-01-15T14:30:00.000Z
+time.unix();               // the current one
+```
 
 ## Relative and calendar dates
 
@@ -77,6 +102,7 @@ time.parseDuration("01:30:00"); // 5400000
 time.parseDuration("PT1H30M"); // 5400000
 
 time.formatDuration(5_400_000);                               // "1h 30m"
+time.formatDuration("90m");                                   // "1h 30m"
 time.formatDuration(90_000, { long: true, locale: "fr" });    // "1 minute 30 secondes"
 time.formatDuration(93_784_000, { units: 2 });                // "1d 2h"
 time.formatDuration(5_405_000, { clock: true });              // "01:30:05"
@@ -89,6 +115,7 @@ Months and years aren't accepted in durations because their length varies; use `
 ```js
 time.add(date, 3, "days");
 time.add(date, "2h30m");
+time.add(date, "1 month");                       // months and years work in text too
 time.subtract(date, 1, "year");
 time.diff("2024-03-15", "2024-01-20", "months"); // 1
 time.startOf(date, "week");                      // Monday 00:00
@@ -96,20 +123,45 @@ time.startOf(date, "week", { weekStartsOn: 0 }); // Sunday 00:00
 time.endOf(date, "month");                       // last day, 23:59:59.999
 ```
 
-Adding months keeps the day in range: January 31 plus one month is the last day of February.
+Adding months keeps the day in range: January 31 plus one month is the last day of February. A text amount that can't be read, like `"soon"`, throws a `TypeError`.
+
+Months, years, `startOf()` and `endOf()` follow the calendar of the default zone, or the one you pass:
+
+```js
+time.startOf("2024-01-15T03:00:00Z", "day", { timeZone: "America/New_York" });
+// 2024-01-14T05:00:00.000Z, midnight in New York
+
+time.add("2024-02-15T12:00:00-05:00", 1, "month", { timeZone: "America/New_York" });
+// 2024-03-15T16:00:00.000Z, still noon in New York after the clock change
+```
+
+Days and weeks are fixed lengths: 24 hours and 7 days.
+
+`range()` lists every date from a start to an end, both included:
+
+```js
+time.range("2024-01-01", "2024-01-07", "day");                         // 7 dates
+time.range("2024-01-31", "2024-04-30", "month", { timeZone: "UTC" });  // Jan 31, Feb 29, Mar 31, Apr 30
+time.range(start, end, "minute", { step: 15 });                        // every quarter of an hour
+```
 
 ## Questions about dates
 
 ```js
 time.isToday(date);
+time.isYesterday(date);
 time.isWeekend(date);
 time.isSameDay(a, b, { timeZone: "Asia/Tokyo" });
+time.isSame(a, b, "month");                         // same month of the same year
+time.isSame(a, b, "week", { weekStartsOn: 0 });
 time.isBetween(order.createdAt, start, end);
 time.isLeapYear(2024);
 time.isValid("2024-02-30");  // false
 time.daysInMonth(2024, 2);   // 29
 time.weekOfYear(date);       // ISO week
 ```
+
+`isSame()` takes the same units as `startOf()`. `isToday()`, `isYesterday()` and `isTomorrow()` compare calendar days, not 24-hour spans, so they stay right on the days when clocks change.
 
 ## Measuring
 
@@ -136,8 +188,11 @@ job.stop();
 ```js
 time.cron("0 9 * * mon-fri", sendReport, { timeZone: "Europe/Paris" });
 time.cron("*/15 * * * *", refreshCache);
-time.cron("@daily", cleanup);
+time.cron("0 18 L * *", closeMonth);                // the last day of each month at 18:00
+time.cron("@daily", cleanup, { immediate: true });  // every midnight, and once right away
 time.nextRun("0 0 1 * *"); // when it would run next
 ```
 
-Expressions have five fields (`minute hour day month weekday`), or six with seconds first. They support lists, ranges, steps, month and day names, and the `@hourly`, `@daily`, `@weekly`, `@monthly` and `@yearly` shortcuts.
+Expressions have five fields (`minute hour day month weekday`), or six with seconds first. They support lists, ranges, steps, month and day names, `L` in the day field for the last day of the month, and the `@hourly`, `@daily`, `@weekly`, `@monthly` and `@yearly` shortcuts.
+
+Both return a task with `stop()`, `next()`, `isRunning()` and `runs()`. Every function is listed in the [reference](/reference/time/).

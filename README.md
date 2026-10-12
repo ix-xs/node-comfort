@@ -15,9 +15,9 @@ One package, zero dependencies, documented right in your editor.
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](./LICENSE)
 
 [Documentation](https://ix-xs.github.io/node-comfort/) •
-[Getting started](https://ix-xs.github.io/node-comfort/guide/getting-started.html) •
-[API reference](https://ix-xs.github.io/node-comfort/api/index.html) •
-[Recipes](https://ix-xs.github.io/node-comfort/guide/recipes.html) •
+[Getting started](https://ix-xs.github.io/node-comfort/start/getting-started/) •
+[API reference](https://ix-xs.github.io/node-comfort/reference/) •
+[Recipes](https://ix-xs.github.io/node-comfort/recipes/) •
 [Changelog](./CHANGELOG.md)
 
 </div>
@@ -66,29 +66,29 @@ Node.js 22.13 or newer. That's the first version where `node:sqlite` works witho
 
 | Namespace | What it's for | Often replaces |
 | --- | --- | --- |
-| [Logger](https://ix-xs.github.io/node-comfort/guide/logger.html) | Colorful logs, levels, JSON output, log files with rotation | `chalk`, `pino`, `winston` |
-| [`fs`](https://ix-xs.github.io/node-comfort/guide/fs.html) | Files and folders without try/catch, atomic writes, glob, watch | `fs-extra`, `glob`, `rimraf` |
-| [`checker`](https://ix-xs.github.io/node-comfort/guide/checker.html) | 60+ type guards and validators, `assert` | `is`, `validator` |
-| [`env`](https://ix-xs.github.io/node-comfort/guide/env.html) | `.env` loading, typed and validated configuration | `dotenv`, `envalid` |
-| [`schema`](https://ix-xs.github.io/node-comfort/guide/schema.html) | Data validation with TypeScript inference | `zod`, `yup`, `joi` |
-| [`http`](https://ix-xs.github.io/node-comfort/guide/http.html) | `fetch` with JSON, retries, timeouts, hooks, downloads | `axios`, `got`, `ky` |
-| [`SQLite`](https://ix-xs.github.io/node-comfort/guide/sqlite.html) | CRUD, filters, JSON columns, transactions, migrations | `better-sqlite3` and helpers |
-| [`time`](https://ix-xs.github.io/node-comfort/guide/time.html) | Formatting in any language and time zone, durations, date math, cron | `dayjs`, `ms`, `node-cron` |
-| [`str`](https://ix-xs.github.io/node-comfort/guide/str.html) | Case conversion, slugs, emoji-safe truncation, fuzzy matching, plurals | `lodash`, `slugify`, `leven` |
-| [`num`](https://ix-xs.github.io/node-comfort/guide/num.html) | Exact rounding, statistics, currencies, bytes | `numeral`, `pretty-bytes` |
-| [`arr`](https://ix-xs.github.io/node-comfort/guide/arr.html) | Chunk, group, multi-key sort, paginate, set operations | `lodash` |
-| [`obj`](https://ix-xs.github.io/node-comfort/guide/obj.html) | Deep clone, merge, equal and diff, typed dot paths | `lodash`, `deepmerge`, `dequal` |
-| [`func`](https://ix-xs.github.io/node-comfort/guide/func.html) | Debounce, throttle, memoize, retry with backoff, timeout | `p-retry`, `p-timeout` |
-| [`async`](https://ix-xs.github.io/node-comfort/guide/async.html) | Concurrency limits, queues, mutex, polling | `p-limit`, `p-map`, `p-queue` |
-| [`Cache`](https://ix-xs.github.io/node-comfort/guide/cache.html) | LRU cache with TTL, loaders and statistics | `lru-cache` |
-| [`Emitter`](https://ix-xs.github.io/node-comfort/guide/emitter.html) | Typed events, `waitFor`, async iteration | `mitt`, `emittery` |
-| [`id`](https://ix-xs.github.io/node-comfort/guide/id.html) | UUID v4 and v7, ULID, nanoid, tokens, Snowflakes | `uuid`, `ulid`, `nanoid` |
-| [`crypto`](https://ix-xs.github.io/node-comfort/guide/crypto.html) | Passwords, encryption, JWT, TOTP two-factor codes | `bcrypt`, `jsonwebtoken`, `otplib` |
-| [`cli`](https://ix-xs.github.io/node-comfort/guide/cli.html) | Typed arguments, prompts, menus, spinners, progress bars, tables | `commander`, `inquirer`, `ora` |
-| [`color`](https://ix-xs.github.io/node-comfort/guide/color.html) | Chainable terminal colors, truecolor, gradients, links | `chalk`, `picocolors` |
-| [`sys`](https://ix-xs.github.io/node-comfort/guide/sys.html) | Run commands, `which`, graceful shutdown, platform detection | `execa`, `which` |
-| [`utils`](https://ix-xs.github.io/node-comfort/guide/utils.html) | `wait`, safe JSON, crash guard | |
-| [`errors`](https://ix-xs.github.io/node-comfort/guide/errors.html) | Error classes with stable codes | |
+| [Logger](https://ix-xs.github.io/node-comfort/essentials/logger/) | Colorful logs, levels, JSON output, log files with rotation | `chalk`, `pino`, `winston` |
+| [`fs`](https://ix-xs.github.io/node-comfort/essentials/fs/) | Files and folders without try/catch, atomic writes, glob, watch | `fs-extra`, `glob`, `rimraf` |
+| [`checker`](https://ix-xs.github.io/node-comfort/essentials/checker/) | 70+ type guards and validators, `assert` | `is`, `validator` |
+| [`env`](https://ix-xs.github.io/node-comfort/essentials/env/) | `.env` loading, typed and validated configuration | `dotenv`, `envalid` |
+| [`schema`](https://ix-xs.github.io/node-comfort/data/schema/) | Data validation with TypeScript inference | `zod`, `yup`, `joi` |
+| [`http`](https://ix-xs.github.io/node-comfort/system/http/) | `fetch` with JSON, retries, timeouts, validated responses, hooks, downloads | `axios`, `got`, `ky` |
+| [`SQLite`](https://ix-xs.github.io/node-comfort/system/sqlite/) | CRUD, filters, JSON columns, pagination, transactions, migrations | `better-sqlite3` and helpers |
+| [`time`](https://ix-xs.github.io/node-comfort/data/time/) | Formatting in any language and time zone, durations, date math, cron | `dayjs`, `ms`, `node-cron` |
+| [`str`](https://ix-xs.github.io/node-comfort/data/str/) | Case conversion, slugs, emoji-safe truncation, fuzzy matching, plurals | `lodash`, `slugify`, `leven` |
+| [`num`](https://ix-xs.github.io/node-comfort/data/num/) | Exact rounding, statistics, currencies, bytes | `numeral`, `pretty-bytes` |
+| [`arr`](https://ix-xs.github.io/node-comfort/data/arr/) | Chunk, group, multi-key sort, paginate, set operations | `lodash` |
+| [`obj`](https://ix-xs.github.io/node-comfort/data/obj/) | Deep clone, merge, equal and diff, typed dot paths | `lodash`, `deepmerge`, `dequal` |
+| [`func`](https://ix-xs.github.io/node-comfort/flow/func/) | Debounce, throttle, memoize, retry with backoff, timeout | `p-retry`, `p-timeout` |
+| [`async`](https://ix-xs.github.io/node-comfort/flow/async/) | Concurrency limits, queues, mutex, polling | `p-limit`, `p-map`, `p-queue` |
+| [`Cache`](https://ix-xs.github.io/node-comfort/flow/cache/) | LRU cache with TTL, loaders and statistics | `lru-cache` |
+| [`Emitter`](https://ix-xs.github.io/node-comfort/flow/emitter/) | Typed events, `waitFor`, async iteration | `mitt`, `emittery` |
+| [`id`](https://ix-xs.github.io/node-comfort/data/id/) | UUID v4, v5 and v7, ULID, nanoid, ObjectId, tokens, Snowflakes | `uuid`, `ulid`, `nanoid` |
+| [`crypto`](https://ix-xs.github.io/node-comfort/system/crypto/) | Passwords, encryption, JWT, TOTP two-factor codes | `bcrypt`, `jsonwebtoken`, `otplib` |
+| [`cli`](https://ix-xs.github.io/node-comfort/system/cli/) | Typed arguments and subcommands, prompts, menus, spinners, progress bars, tables, trees | `commander`, `inquirer`, `ora` |
+| [`color`](https://ix-xs.github.io/node-comfort/system/color/) | Chainable terminal colors, truecolor, gradients, links | `chalk`, `picocolors` |
+| [`sys`](https://ix-xs.github.io/node-comfort/system/sys/) | Run commands, `which`, graceful shutdown, platform detection | `execa`, `which` |
+| [`utils`](https://ix-xs.github.io/node-comfort/essentials/utils/) | `wait`, safe JSON, crash guard | |
+| [`errors`](https://ix-xs.github.io/node-comfort/essentials/errors/) | Error classes with stable codes | |
 
 The logger, `fs`, `checker` and `utils` helpers are also available at the top level: `nc.info()`, `nc.readJSON()`, `nc.isEmail()`, `nc.wait()`.
 
@@ -104,7 +104,7 @@ import nc from "@ix-xs/node-comfort";
 import { slugify } from "@ix-xs/node-comfort/str";   // loads only what it needs
 ```
 
-Every namespace has its own entry point (`@ix-xs/node-comfort/http`, `/sqlite`, `/schema`...). In an ES module, importing from these keeps startup lean. See [Performance](https://ix-xs.github.io/node-comfort/guide/performance.html).
+Every namespace has its own entry point (`@ix-xs/node-comfort/http`, `/sqlite`, `/schema`...). In an ES module, importing from these keeps startup lean. See [Performance](https://ix-xs.github.io/node-comfort/start/performance/).
 
 TypeScript needs no setup: the types ship with the package.
 
@@ -188,7 +188,7 @@ const spinner = nc.cli.spinner(`Deploying to ${env}`).start();
 spinner.succeed("Deployed");
 ```
 
-That's a small part of it. The [guide](https://ix-xs.github.io/node-comfort/guide/introduction.html) walks through every namespace, and the [recipes](https://ix-xs.github.io/node-comfort/guide/recipes.html) show them working together: a small API server, a CLI, a scheduled job.
+That's a small part of it. The [guide](https://ix-xs.github.io/node-comfort/start/introduction/) walks through every namespace, and the [recipes](https://ix-xs.github.io/node-comfort/recipes/) show them working together: a small API server, a CLI, a scheduled job.
 
 ## Coming from 1.x
 
@@ -199,7 +199,9 @@ That's a small part of it. The [guide](https://ix-xs.github.io/node-comfort/guid
 - `warn` and `error` write to stderr.
 - Deep imports (`@ix-xs/node-comfort/src/...`) are replaced by official entry points (`@ix-xs/node-comfort/str`).
 
-The [migration guide](https://ix-xs.github.io/node-comfort/guide/migration.html) lists every change with before and after examples.
+The [migration guide](https://ix-xs.github.io/node-comfort/start/migration/) lists every change with before and after examples.
+
+Coming from 2.0, there is nothing to change: 2.1 adds functions, makes the existing ones faster and corrects edge cases. The [changelog](./CHANGELOG.md) has the details.
 
 ## Contributing
 

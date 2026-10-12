@@ -41,6 +41,14 @@ nc.writeJSON("./data/users.json", users, { spaces: 2 });
 nc.appendFile("./logs/audit.log", `${new Date().toISOString()} login ${user}\n`);
 ```
 
+A file that already exists keeps its permissions when it's replaced: the token above stays readable by its owner only, even if a later write doesn't repeat `mode`.
+
+For a file that must survive a power cut, `fsync` makes `writeFile()` wait until the data is on the disk before it returns. It's slower, so keep it for the files that need it:
+
+```js
+nc.writeFile("./data/ledger.json", ledger, { fsync: true }); // objects are written as JSON
+```
+
 `readJSON()` can read files with comments and trailing commas, like `tsconfig.json`:
 
 ```js
@@ -55,6 +63,7 @@ nc.glob("**/*.test.js", { ignore: ["**/fixtures/**"] });
 nc.glob("packages/*", { type: "folders", absolute: true });
 
 nc.find("package.json");                             // the closest one, searching down
+nc.findUp("package.json");                           // the closest one, searching up
 nc.getFilesIn("./src");                              // every file, absolute paths
 nc.readLines("./urls.txt");                          // ["https://a.com", "https://b.com"]
 ```
@@ -65,6 +74,16 @@ Globs understand `*`, `**`, `?`, `[abc]` and `{a,b}`. `node_modules` and `.git` 
 nc.glob(`${nc.tempFolder("build-")}/**/*.json`);
 nc.glob("/var/log/**/*.log");
 ```
+
+`findUp()` looks in a folder, then in its parent, and so on up to the root of the disk. It's how you find the `package.json` or the `.git` a file belongs to. You get an absolute path, or `undefined`:
+
+```js
+nc.findUp(".git", { type: "folder", cwd: __dirname });
+nc.findUp(["pnpm-lock.yaml", "yarn.lock", "package-lock.json"]); // the first one found in each folder
+nc.findUp(".editorconfig", { cwd: __dirname, stopAt: repoRoot }); // never looks above repoRoot
+```
+
+It starts from the working directory unless you pass `cwd`, and it finds files and folders alike unless you pass `type`.
 
 ## Copying, moving, deleting
 
@@ -90,12 +109,17 @@ nc.stat("./video.mp4")?.mtime;
 ## Watching
 
 ```js
-nc.watch({ path: "./src", recursive: true, debounce: 100 })
+const watcher = nc.watch({ path: "./src", recursive: true, debounce: 100 })
   .on("change", (file) => rebuild(file))
-  .on("rename", (file) => nc.info(`Added or removed: ${file}`));
+  .on("rename", (file) => nc.info(`Added or removed: ${file}`))
+  .on("error", (error) => nc.warn("The watch broke:", error.message));
+
+watcher.stop();
 ```
 
-`debounce` merges the bursts of events editors produce when they save.
+`debounce` merges the bursts of events editors produce when they save. It takes milliseconds or text like `"100ms"`.
+
+`"error"` tells you that the watch itself failed, so you can stop it or start a new one. Without a listener, such an error is dropped. `watch()` returns `undefined` when the path doesn't exist.
 
 ## Odds and ends
 
@@ -108,4 +132,4 @@ nc.touch("./.last-run");
 
 `sanitizeFilename()` produces names that work on Windows, macOS and Linux: forbidden characters are replaced and reserved names like `CON` are prefixed.
 
-The 1.x helpers (`getFile`, `getFolder`, `createFile`, `deleteFolder`, `copyFilesIn`, `moveFile` and the rest) are still here, with the same behavior.
+The 1.x helpers (`getFile`, `getFolder`, `createFile`, `deleteFolder`, `copyFilesIn`, `moveFile` and the rest) are still here, with the same behavior. Every function is listed in the [reference](/reference/fs/).

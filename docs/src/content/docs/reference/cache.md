@@ -55,7 +55,8 @@ set(key: K, value: V, options?: CacheSetOptions): Cache<K, V>
 ```
 
 Stores a value. When the cache is full, the least recently used entry
-goes.
+goes. A value being loaded for this key by `getOrSet()` is not stored
+when it arrives: the one you set stays.
 
 ```js
 cache.set("token", token, { ttl: "15m" });
