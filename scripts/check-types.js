@@ -264,6 +264,60 @@ const point: nc.schema.Infer<typeof Point> = { x: 1, y: 2 };
 const badPoint: nc.schema.Infer<typeof Point> = { x: 1 };
 void point; void badPoint;
 
+// one of several shapes
+const Shape = s.discriminatedUnion("kind", [
+  s.object({ kind: s.literal("circle"), radius: s.number() }),
+  s.object({ kind: s.literal("square"), side: s.number() }),
+]);
+const shape = Shape.parse({});
+if (shape.kind === "circle") { const radius: number = shape.radius; void radius; }
+// @ts-expect-error a square has no radius
+if (shape.kind === "square") void shape.radius;
+const SortBy = UserSchema.keyof();
+const sortBy: "email" | "age" | "role" = SortBy.parse("email");
+const jsonSchema: nc.schema.JSONSchema = UserSchema.toJSONSchema();
+void sortBy; void jsonSchema;
+
+// a schema gives an http response its type
+async function calls() {
+  const typed = await nc.http.get("https://example.com/user", { schema: UserSchema, params: { id: 1 } });
+  const email: string = typed.data.email;
+  // @ts-expect-error data follows the schema
+  const notThere: string = typed.data.nope;
+  const explicit = await nc.http.get<{ id: number }>("https://example.com/user");
+  const id: number = explicit.data.id;
+  const client = nc.http.create({ baseURL: "https://example.com" });
+  const posted = await client.post("users", { email: "a@x.io" }, { schema: UserSchema });
+  const posteRole: "admin" | "user" = posted.data.role;
+  // @ts-expect-error unknown option
+  await nc.http.get("https://example.com", { timout: 5 });
+  const cookies: string[] = typed.cookies;
+  void email; void notThere; void id; void posteRole; void cookies;
+
+  // new helpers
+  const page = db.paginate("users", { active: true }, { page: 2 });
+  const items: Row[] = page.items;
+  db.increment("users", { id: 1 }, { email: "a@x.io" });
+  const loadUser = nc.func.batch(async (ids: number[]) => ids.map((n) => ({ id: n })));
+  const loaded: { id: number } = await loadUser(1);
+  const shared = nc.func.dedupe(async (key: string) => key.length);
+  const length: number = await shared("a");
+  const all: number[] = await nc.async.parallel([() => 1, async () => 2], { concurrency: 2 });
+  const aborted: string = await nc.async.abortable(Promise.resolve("x"), AbortSignal.timeout(10));
+  const when: Date | undefined = nc.time.parse("2024-01-15", "YYYY-MM-DD");
+  const days: Date[] = nc.time.range("2024-01-01", "2024-01-07", "day");
+  const pair = await nc.crypto.generateKeyPair("ES256");
+  const token: string = nc.crypto.signJWT({ sub: "1" }, pair.privateKey);
+  const valid: boolean = nc.crypto.verifyHmac("body", "sha256=abc", "secret");
+  const found: string | undefined = nc.findUp("package.json");
+  const port: number = await nc.sys.freePort();
+  const sentence: string = nc.arr.toSentence(["a", "b"]);
+  const fresh = await cache.getOrSet("a", () => 1, { staleWhileRevalidate: "1m" });
+  events.on("ready", () => {}, { signal: AbortSignal.timeout(10) });
+  void items; void loaded; void length; void all; void aborted; void when; void days; void token; void valid; void found; void port; void sentence; void fresh;
+}
+void calls;
+
 // errors
 try { nc.assert(false, "nope"); } catch (error) {
   if (error instanceof errors.ValidationError) error.flatten();

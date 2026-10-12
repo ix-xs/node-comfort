@@ -366,9 +366,13 @@ const _convert = (kind, value) => {
   }
   if (kind === BOOLEAN_KIND) return typeof value === "number" || typeof value === "bigint" ? Number(value) !== 0 : value;
   if (typeof value !== "string" && typeof value !== "number") return value;
-  const date = new Date(value);
+  // SQLite writes its own dates (CURRENT_TIMESTAMP, datetime('now')) in UTC and
+  // without saying so; read as they are, JavaScript would take them for local time.
+  const date = new Date(typeof value === "string" && SQLITE_DATETIME.test(value) ? `${value.replace(" ", "T")}Z` : value);
   return Number.isNaN(date.getTime()) ? value : date;
 };
+
+const SQLITE_DATETIME = /^\d{4}-\d{2}-\d{2} \d{2}:\d{2}(?::\d{2}(?:\.\d+)?)?$/;
 
 /** @type {Map<string, string>} */
 const _columns = new Map();

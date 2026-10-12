@@ -39,13 +39,13 @@ const { toMs, setLongTimeout, sleep } = require("./internal/shared.js");
 /**
  * Retry settings.
  * @typedef {object} HttpRetryOptions
- * @property {number} [attempts] Total attempts, the first included. Defaults to `3` for methods that are safe to repeat, `1` for the others.
+ * @property {number} [attempts] Total attempts, the first included. Defaults to `3` for methods that are safe to repeat, `1` for the others. A number you give applies to every method, POST included.
  * @property {number | string} [delay] Wait before the first retry, in ms or like `"1s"`. Defaults to `300`.
  * @property {number} [backoff] Multiplies the wait after each attempt. Defaults to `2`.
  * @property {number | string} [maxDelay] Longest wait, `Retry-After` included. Defaults to 30 seconds.
  * @property {boolean} [jitter] Shorten each wait by a random amount, up to half of it, so many clients don't all come back at the same instant.
  * @property {number[]} [statuses] Statuses worth retrying. Defaults to 408, 413, 429, 500, 502, 503 and 504.
- * @property {HttpMethod[]} [methods] Methods allowed to retry. POST and PATCH aren't, by default, so nothing gets created twice.
+ * @property {HttpMethod[]} [methods] Methods retried when you give no number of attempts. POST and PATCH aren't, by default, so nothing gets created twice.
  */
 
 /**
@@ -657,7 +657,11 @@ async function download(url, destination, options = {}) {
   } catch (error) {
     fs.rmSync(partial, { force: true });
     if (options.signal?.aborted) throw new AbortError(`Download aborted: ${String(url)}`, { cause: error });
-    throw error;
+    /** @type {any} */
+    const cause = error;
+    // What went wrong on the disk stays as it is; the rest is the connection.
+    if (typeof cause?.path === "string" || typeof cause?.syscall === "string") throw error;
+    throw new HttpError(`Download interrupted (${cause?.cause?.code ?? cause?.code ?? cause?.message ?? String(error)}): ${res.url}`, { status: 0, url: res.url, method: "GET", code: "ERR_NETWORK", cause: error });
   }
   return { path: target, size };
 }

@@ -7,7 +7,8 @@
  *
  * The `.env` file in the working directory is loaded when the package is
  * required; variables that are already set are never overwritten. Set
- * `NODE_COMFORT_DOTENV=false` to turn that off.
+ * `NODE_COMFORT_DOTENV=false` to turn that off. What it loaded has the
+ * lowest priority: a file you load yourself afterwards wins over it.
  *
  * @example
  * const config = env.validate({
@@ -209,6 +210,16 @@ const _ESCAPED = { n: "\n", r: "\r", t: "\t" };
  * @returns {Record<string, string>}
  */
 function parse(content, options = {}) {
+  return _parse(content, options);
+}
+
+/**
+ * @param {string} content
+ * @param {EnvParseOptions} options
+ * @param {(name: string) => string | undefined} [wins] Values that a reference takes before the file's own: what the variable will really be once loaded.
+ * @returns {Record<string, string>}
+ */
+function _parse(content, options, wins) {
   // A Map, so that a variable called __proto__ or toString is a variable like any other.
   /** @type {Map<string, string>} */
   const out = new Map();
@@ -238,6 +249,8 @@ function parse(content, options = {}) {
      */
     const resolve = (name, seen) => {
       if (seen.includes(name)) return "";
+      const winner = wins?.(name);
+      if (winner !== undefined) return winner;
       const own = out.get(name);
       return own !== undefined ? expand(own, [...seen, name], name) : _raw(base, name) ?? "";
     };
@@ -261,6 +274,15 @@ function parse(content, options = {}) {
 }
 
 /**
+ * What the automatic load of `.env` put in `process.env`. A later `load()`
+ * may replace these values, as long as nobody changed them in between: they
+ * came from a file, not from the real environment.
+ * @type {Map<string, string>}
+ */
+const _automatic = new Map();
+let _loadingAutomatically = false;
+
+/**
  * The files that go with a `.env` file, most specific first.
  * @param {string} file
  * @param {string} mode
@@ -271,7 +293,8 @@ const _cascade = (file, mode) => [`${file}.${mode}.local`, ...(mode === "test" ?
 /**
  * Loads `.env` files into `process.env`. The first file to set a variable
  * wins, and variables that are already set are kept, unless you pass
- * `override`.
+ * `override`. The `.env` loaded by itself at startup doesn't count as
+ * already set: `.env.local` wins over it, as you'd expect.
  *
  * @example
  * env.load();                                // ./.env
@@ -288,8 +311,22 @@ function load(files = ".env", options = {}) {
   const target = options.target ?? process.env;
   const given = Array.isArray(files) ? files : [files];
   const cascade = options.cascade === true ? mode() : options.cascade;
+  const own = target === process.env;
   /** @type {Map<string, string>} */
   const loaded = new Map();
+  /**
+   * The value a variable already has and keeps, whatever the files say.
+   * @param {string} key
+   * @returns {string | undefined}
+   */
+  const kept = (key) => {
+    if (options.override) return undefined;
+    const current = _raw(target, key);
+    return current !== undefined && !(own && _automatic.get(key) === current) ? current : undefined;
+  };
+  // A reference such as ${HOST} takes the value HOST ends up with, not the
+  // one of a file that lost.
+  const wins = (/** @type {string} */ key) => loaded.get(key) ?? kept(key);
   for (const name of given) {
     for (const file of cascade ? _cascade(name, cascade) : [name]) {
       const full = nodePath.resolve(process.cwd(), file);
@@ -301,14 +338,18 @@ function load(files = ".env", options = {}) {
         if (options.required && file === name) throw new Error(`Environment file not found: ${full}`, { cause: error });
         continue;
       }
-      const values = parse(content, { expand: options.expand, env: { ...target, ...Object.fromEntries(loaded) } });
+      const values = _parse(content, { expand: options.expand, env: target }, wins);
       for (const [key, value] of Object.entries(values)) {
         if (!loaded.has(key)) loaded.set(key, value);
       }
     }
   }
   for (const [key, value] of loaded) {
-    if (options.override || _raw(target, key) === undefined) target[key] = value;
+    if (kept(key) !== undefined) continue;
+    target[key] = value;
+    if (!own) continue;
+    if (_loadingAutomatically) _automatic.set(key, value);
+    else _automatic.delete(key);
   }
   return Object.fromEntries(loaded);
 }
@@ -614,11 +655,13 @@ function isTest() {
 }
 
 if (String(process.env.NODE_COMFORT_DOTENV).toLowerCase() !== "false") {
+  _loadingAutomatically = true;
   try {
     load(".env");
   } catch {
     // A broken .env file must never prevent the application from starting.
   }
+  _loadingAutomatically = false;
 }
 
 module.exports = {

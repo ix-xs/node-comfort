@@ -2018,3 +2018,142 @@ describe("found while rereading the guides", () => {
     assert.equal(str.unescapeHTML("&#65;"), "A");
   });
 });
+
+describe("found while rereading the guides, second round", () => {
+  const fs = require("node:fs");
+  const os = require("node:os");
+  const path = require("node:path");
+  const { sys } = nc;
+  /** @type {string} */
+  let dir;
+  before(() => {
+    dir = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), "nc-late-")));
+  });
+  after(() => fs.rmSync(dir, { recursive: true, force: true }));
+
+  it("a file loaded on purpose wins over the .env loaded at startup", async () => {
+    const cwd = path.join(dir, "env");
+    fs.mkdirSync(cwd);
+    fs.writeFileSync(path.join(cwd, ".env"), "A=base\nB=base\nREAL=file\nURL=http://${A}\nWHERE=${REAL}");
+    fs.writeFileSync(path.join(cwd, ".env.local"), "A=local");
+    fs.writeFileSync(path.join(cwd, ".env.other"), "B=other\nA=other");
+    const script = `
+      const nc = require(${JSON.stringify(require.resolve(".."))});
+      const first = [process.env.A, process.env.B, process.env.REAL, process.env.URL, process.env.WHERE];
+      nc.env.load(".env", { cascade: "development" });
+      const second = [process.env.A, process.env.B, process.env.REAL, process.env.URL, process.env.WHERE];
+      // Everything now comes from files loaded on purpose: the next one replaces nothing.
+      nc.env.load(".env.other");
+      console.log(JSON.stringify([first, second, [process.env.A, process.env.B]]));
+    `;
+    const env = { ...process.env, REAL: "environment" };
+    delete env.NODE_COMFORT_DOTENV;
+    for (const name of ["A", "B", "URL", "WHERE"]) delete env[name];
+    const result = await sys.run(process.execPath, ["-e", script], { cwd, env });
+    assert.deepEqual(JSON.parse(result.stdout), [
+      ["base", "base", "environment", "http://base", "environment"],
+      ["local", "base", "environment", "http://local", "environment"],
+      ["local", "base"],
+    ]);
+  });
+
+  it("a variable changed by hand after startup is no longer the file's to replace", async () => {
+    const cwd = path.join(dir, "env2");
+    fs.mkdirSync(cwd);
+    fs.writeFileSync(path.join(cwd, ".env"), "A=base");
+    fs.writeFileSync(path.join(cwd, ".env.local"), "A=local");
+    const script = `
+      const nc = require(${JSON.stringify(require.resolve(".."))});
+      process.env.A = "by hand";
+      nc.env.load(".env.local");
+      console.log(process.env.A);
+    `;
+    const env = { ...process.env };
+    delete env.NODE_COMFORT_DOTENV;
+    delete env.A;
+    const result = await sys.run(process.execPath, ["-e", script], { cwd, env });
+    assert.equal(result.stdout, "by hand");
+  });
+
+  it("an async onLog that fails does not take the process down", async () => {
+    const script = `
+      const nc = require(${JSON.stringify(require.resolve(".."))});
+      const log = nc.createLogger({ stdout: { write() {} }, onLog: async () => { throw new Error("collector down"); } });
+      log.info("hello");
+      setTimeout(() => console.log("still here"), 50);
+    `;
+    const result = await sys.run(process.execPath, ["-e", script], { reject: false, env: { ...process.env, NODE_COMFORT_DOTENV: "false" } });
+    assert.equal(result.exitCode, 0);
+    assert.equal(result.stdout, "still here");
+  });
+
+  it("deleting a watched folder is reported once, not as an endless stream of events", async () => {
+    const watched = path.join(dir, "watched");
+    fs.mkdirSync(watched);
+    const watcher = nc.watch({ path: watched });
+    assert.ok(watcher);
+    let events = 0;
+    /** @type {any[]} */
+    const failures = [];
+    watcher.on("all", () => events++).on("error", (error) => failures.push(error));
+    await sleep(50);
+    fs.rmSync(watched, { recursive: true, force: true });
+    for (let i = 0; i < 40 && failures.length === 0; i++) await sleep(25);
+    await sleep(150);
+    watcher.stop();
+    assert.ok(events < 100, `${events} events after the folder was deleted`);
+    assert.ok(failures.length <= 1);
+    if (process.platform === "win32") {
+      assert.equal(failures.length, 1);
+      assert.equal(failures[0].code, "ENOENT");
+    }
+  });
+
+  it("writeJSON takes fsync and mode like writeFile", () => {
+    const file = path.join(dir, "data", "state.json");
+    assert.equal(nc.writeJSON(file, { a: 1 }, { fsync: true, mode: 0o600 }), true);
+    assert.deepEqual(nc.readJSON(file), { a: 1 });
+    if (process.platform !== "win32") assert.equal(fs.statSync(file).mode & 0o777, 0o600);
+  });
+
+  it("a date written by SQLite itself is read as UTC", () => {
+    const db = new nc.SQLite(":memory:", { dates: true });
+    try {
+      db.createTable({ name: "events", columns: { id: { type: "INTEGER", primaryKey: true }, at: { type: "DATETIME", defaultValue: "CURRENT_TIMESTAMP" }, day: { type: "DATE" } } });
+      db.insert("events", { id: 1 });
+      const row = /** @type {{ at: Date }} */ (db.get("events", { id: 1 }));
+      assert.ok(row.at instanceof Date);
+      assert.ok(Math.abs(row.at.getTime() - Date.now()) < 5000, `read ${row.at.toISOString()}`);
+      db.exec("INSERT INTO events (id, at, day) VALUES (2, '2024-01-15 10:00:00', '2024-01-15'), (3, '2024-01-15 10:00:00.250', NULL), (4, '2024-01-15T10:00:00.000Z', NULL)");
+      const rows = /** @type {Array<{ at: Date, day: Date | null }>} */ (db.getAll("events", { id: { gte: 2 } }, { orderBy: "id" }));
+      assert.equal(rows[0].at.toISOString(), "2024-01-15T10:00:00.000Z");
+      assert.equal(/** @type {Date} */ (rows[0].day).toISOString(), "2024-01-15T00:00:00.000Z");
+      assert.equal(rows[1].at.toISOString(), "2024-01-15T10:00:00.250Z");
+      assert.equal(rows[2].at.toISOString(), "2024-01-15T10:00:00.000Z");
+    } finally {
+      db.close();
+    }
+  });
+
+  it("a download cut by the server fails as a network error", async () => {
+    const server = require("node:http").createServer((req, res) => {
+      res.writeHead(200, { "content-length": "1000", "content-type": "application/octet-stream" });
+      res.write("partial");
+      setTimeout(() => res.destroy(), 30);
+    });
+    await new Promise((resolve) => server.listen(0, "127.0.0.1", () => resolve(undefined)));
+    const url = `http://127.0.0.1:${/** @type {import("node:net").AddressInfo} */ (server.address()).port}/big`;
+    try {
+      await assert.rejects(nc.http.download(url, path.join(dir, "big.bin"), { retry: false }), (error) => {
+        assert.ok(error instanceof nc.errors.HttpError);
+        assert.equal(error.code, "ERR_NETWORK");
+        assert.equal(error.status, 0);
+        return true;
+      });
+      assert.equal(fs.existsSync(path.join(dir, "big.bin")), false);
+    } finally {
+      server.close();
+      server.closeAllConnections();
+    }
+  });
+});
