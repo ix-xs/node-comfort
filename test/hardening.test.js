@@ -5,6 +5,9 @@
 
 const { describe, it, before, after, afterEach } = require("node:test");
 const assert = require("node:assert/strict");
+// These tests describe the defaults: what the shell sets must not change them.
+for (const name of ["LOG_LEVEL", "LOG_FORMAT", "DEBUG"]) delete process.env[name];
+
 const nc = require("..");
 
 const { str, num, arr, obj, errors, func, time } = nc;
@@ -1172,7 +1175,7 @@ describe("sys", () => {
   it("env replaces a variable whatever its case on Windows, and undefined removes it", async () => {
     process.env.NC_HARDENING_GONE = "here";
     try {
-      const { stdout } = await sys.run(node, ["-e", "console.log(String(process.env.NC_HARDENING_GONE), Object.keys(process.env).filter((k) => k.toUpperCase() === 'PATH').length)"], {
+      const { stdout } = await sys.run(node, ["-e", "console.log(String(process.env.NC_HARDENING_GONE) + ' ' + Object.keys(process.env).filter((k) => k.toUpperCase() === 'PATH').length)"], {
         env: { NC_HARDENING_GONE: undefined, PATH: process.env.PATH },
       });
       assert.equal(stdout, "undefined 1");
@@ -1684,6 +1687,111 @@ describe("sqlite", () => {
       assert.deepEqual(old.queryOne("SELECT id, active FROM users WHERE id = ?", 3), { id: 3, active: false });
     } finally {
       proto.setReturnArrays = saved;
+    }
+  });
+});
+
+describe("logger", () => {
+  const collect = () => {
+    /** @type {string[]} */
+    const lines = [];
+    return { lines, stream: { write: (/** @type {string} */ text) => void lines.push(text.replace(/\n$/, "")) } };
+  };
+
+  it("redact masks secrets wherever they are", () => {
+    const out = collect();
+    const log = nc.createLogger({ timestamp: false, colors: false, stdout: out.stream, redact: ["password", "Authorization"] });
+    log.info({ user: "ada", password: "hunter2", nested: { authorization: "Bearer x", list: [{ PASSWORD: 1 }] } });
+    assert.ok(!out.lines[0].includes("hunter2") && !out.lines[0].includes("Bearer"));
+    assert.equal((out.lines[0].match(/\[redacted\]/g) ?? []).length, 3);
+
+    class Session {
+      user = "ada";
+      password = "hunter2";
+      /** @type {unknown} */
+      self = this;
+    }
+    log.info(new Session());
+    assert.match(out.lines[1], /Session \{ user: 'ada', password: '\[redacted\]'/);
+
+    const json = collect();
+    nc.createLogger({ format: "json", stdout: json.stream, redact: ["token"] }).info("paid", { token: "secret", deep: { token: "x" }, amount: 3 });
+    const record = JSON.parse(json.lines[0]);
+    assert.deepEqual([record.token, record.deep.token, record.amount], ["[redacted]", "[redacted]", 3]);
+  });
+
+  it("onLog gets every message that passes the level, and can't break logging", () => {
+    /** @type {import("..").LogEntry[]} */
+    const entries = [];
+    const out = collect();
+    const log = nc.createLogger({ level: "info", colors: true, stdout: out.stream, stderr: out.stream, scope: "jobs", onLog: (entry) => entries.push(entry) });
+    log.info("<% green done %>", 3).debug("too quiet").error("failed");
+    assert.deepEqual(entries.map((entry) => [entry.level, entry.kind, entry.scope, entry.message, entry.args.length]), [
+      ["info", "info", "jobs", "[jobs] ℹ INFO done  3", 2],
+      ["error", "error", "jobs", "[jobs] ✖ ERROR failed", 1],
+    ]);
+    assert.ok(entries[0].time instanceof Date);
+    const broken = nc.createLogger({ timestamp: false, colors: false, stdout: out.stream, onLog: () => {
+      throw new Error("hook");
+    } });
+    broken.info("still written");
+    assert.equal(out.lines.at(-1), "ℹ INFO still written");
+  });
+
+  it("DEBUG can name the scopes whose debug messages show", () => {
+    const saved = { debug: process.env.DEBUG, level: process.env.LOG_LEVEL };
+    delete process.env.LOG_LEVEL;
+    const out = collect();
+    /** @param {string | undefined} scope */
+    const make = (scope) => nc.createLogger({ timestamp: false, colors: false, stdout: out.stream, scope });
+    try {
+      process.env.DEBUG = "db,http:*,-http:static";
+      for (const scope of [undefined, "db", "db:pool", "http:router", "http:static", "cache"]) make(scope).debug("x");
+      assert.deepEqual(out.lines, ["[db] ● DEBUG x", "[http:router] ● DEBUG x"]);
+      assert.equal(make("db").isLevelEnabled("debug"), true);
+      assert.equal(make("cache").isLevelEnabled("debug"), false);
+      assert.equal(make("db").setLevel("silent").isLevelEnabled("debug"), false);
+      process.env.DEBUG = "*";
+      assert.equal(make(undefined).getLevel(), "debug");
+      process.env.DEBUG = "express:*";
+      assert.equal(make(undefined).getLevel(), "info", "a DEBUG meant for another library doesn't open the floodgates");
+    } finally {
+      if (saved.debug === undefined) delete process.env.DEBUG;
+      else process.env.DEBUG = saved.debug;
+      if (saved.level !== undefined) process.env.LOG_LEVEL = saved.level;
+    }
+  });
+
+  it("the timestamp follows time.setTimezone() and custom patterns", () => {
+    const out = collect();
+    time.setTimezone("Asia/Tokyo");
+    try {
+      nc.createLogger({ colors: false, stdout: out.stream }).info("x");
+      assert.equal(out.lines[0].slice(1, 3), time.format(new Date(), "HH", { timeZone: "Asia/Tokyo" }));
+    } finally {
+      time.setTimezone(undefined);
+    }
+    nc.createLogger({ colors: false, stdout: out.stream, timestamp: "YYYY" }).info("a\nb");
+    assert.equal(out.lines[1], `[${new Date().getFullYear()}] ℹ INFO a\n       b`);
+    nc.createLogger({ colors: false, stdout: out.stream }).info("plain");
+    assert.match(out.lines[2], /^\[\d\d:\d\d:\d\d\] ℹ INFO plain$/);
+  });
+
+  it("the log file comes back if its folder is removed", () => {
+    const fs = require("node:fs");
+    const path = require("node:path");
+    const dir = fs.mkdtempSync(path.join(require("node:os").tmpdir(), "nc-log-"));
+    try {
+      const file = path.join(dir, "logs", "app.log");
+      const log = nc.createLogger({ timestamp: false, colors: true, stdout: { write() {} }, file: { path: file, maxSize: 60, maxFiles: 2 } });
+      for (let i = 0; i < 10; i++) log.info(`line number ${i}`);
+      assert.deepEqual(fs.readdirSync(path.dirname(file)).sort(), ["app.log", "app.log.1", "app.log.2"]);
+      assert.equal(fs.readFileSync(file, "utf8"), "ℹ INFO line number 8\nℹ INFO line number 9\n");
+      fs.rmSync(path.dirname(file), { recursive: true, force: true });
+      log.info("back");
+      assert.equal(fs.readFileSync(file, "utf8"), "ℹ INFO back\n");
+    } finally {
+      fs.rmSync(dir, { recursive: true, force: true });
     }
   });
 });

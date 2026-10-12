@@ -20,6 +20,13 @@ const isPlainObject = (value) => {
 
 const MS = { ms: 1, s: 1000, m: 60_000, h: 3_600_000, d: 86_400_000, w: 604_800_000 };
 
+/**
+ * The defaults set with `time.setLocale()` and `time.setTimezone()`. English
+ * by default, so output never depends on the machine.
+ * @type {{ locale: string, timeZone: string | undefined }}
+ */
+const timeConfig = { locale: "en", timeZone: undefined };
+
 /** @type {Record<string, keyof typeof MS | "M" | "y">} */
 const UNIT_ALIASES = {
   ms: "ms", msec: "ms", milli: "ms", millis: "ms", millisecond: "ms", milliseconds: "ms",
@@ -389,6 +396,7 @@ const sleepSync = (ms) => {
 module.exports = {
   UNSAFE_KEYS,
   MS,
+  timeConfig,
   ASCII,
   isPlainObject,
   unitOf,

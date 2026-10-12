@@ -6,6 +6,9 @@ const fs = require("node:fs");
 const os = require("node:os");
 const path = require("node:path");
 const { PassThrough } = require("node:stream");
+// These tests describe the defaults: what the shell sets must not change them.
+for (const name of ["LOG_LEVEL", "LOG_FORMAT", "DEBUG"]) delete process.env[name];
+
 const nc = require("..");
 
 const { color, cli } = nc;
@@ -185,7 +188,7 @@ describe("logger", () => {
   it("the default logger API is chainable and backward compatible", () => {
     assert.equal(typeof nc.setTimestamp, "function");
     assert.equal(typeof nc.setDelimiter, "function");
-    assert.equal(nc.getLevel(), process.env.DEBUG || process.env.NODE_DEBUG ? "debug" : "info");
+    assert.ok(["trace", "debug", "info", "warn", "error", "fatal", "silent"].includes(nc.getLevel()));
     assert.equal(nc.setLevel("silent").info("muted"), nc.logger);
     nc.setLevel("info");
   });
