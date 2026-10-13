@@ -1,6 +1,9 @@
 // The examples of the landing page. Each variant is a real file in
 // `samples/<scene>/<variant>.js`: `scripts/showcase.mjs` runs it against the
 // package before every build and keeps what it printed.
+//
+// A label is one word for every language, or `{ en, fr }` when it is a word of
+// the language rather than a name from the code.
 
 export const SCENES = [
   {
@@ -31,7 +34,7 @@ export const SCENES = [
   },
   {
     id: "schema",
-    label: "Schema",
+    label: { en: "Schema", fr: "Schéma" },
     about: {
       en: "Describe your data once: a runtime check, clear messages, and the TypeScript type.",
       fr: "Décrivez vos données une fois : une vérification à l'exécution, des messages clairs, et le type TypeScript.",
@@ -63,13 +66,13 @@ export const SCENES = [
       fr: "La base de données intégrée à Node, des objets en entrée comme en sortie.",
     },
     variants: [
-      { id: "query", label: "filters" },
+      { id: "query", label: { en: "filters", fr: "filtres" } },
       { id: "paginate", label: "paginate" },
     ],
   },
   {
     id: "helpers",
-    label: "Helpers",
+    label: { en: "Helpers", fr: "Utilitaires" },
     about: {
       en: "The small functions you rewrite in every project, with the edge cases handled.",
       fr: "Les petites fonctions que l'on réécrit dans chaque projet, cas limites compris.",
@@ -94,15 +97,30 @@ export const SCENES = [
   },
   {
     id: "ids",
-    label: "Ids and crypto",
+    label: { en: "Ids and crypto", fr: "Identifiants et chiffrement" },
     about: {
       en: "Ids that sort by time, tokens signed with a key pair, passwords hashed the safe way.",
       fr: "Des identifiants triés par date, des jetons signés par une paire de clés, des mots de passe hachés proprement.",
     },
     variants: [
-      { id: "ids", label: "ids" },
+      { id: "ids", label: { en: "ids", fr: "identifiants" } },
       { id: "jwt", label: "JWT" },
-      { id: "password", label: "passwords" },
+      { id: "password", label: { en: "passwords", fr: "mots de passe" } },
     ],
   },
 ];
+
+/**
+ * The comments of the samples in other languages. The files stay as they are,
+ * since they are what runs: only what the page shows changes.
+ */
+export const COMMENTS = {
+  fr: {
+    "The .env.example that goes with your checks, so they never drift apart.": "Le .env.example qui va avec vos vérifications, pour qu'ils ne divergent jamais.",
+    "The auth service signs with the private key; everyone else verifies with the public one.": "Le service d'authentification signe avec la clé privée ; tous les autres vérifient avec la clé publique.",
+    "One object per line, for a log collector. LOG_FORMAT=json does the same.": "Un objet par ligne, pour un collecteur de logs. LOG_FORMAT=json fait la même chose.",
+    "For an OpenAPI document, a form, or a tool you give to a language model.": "Pour un document OpenAPI, un formulaire, ou un outil confié à un modèle de langage.",
+    "Two requests at the same moment both count.": "Deux requêtes au même instant comptent toutes les deux.",
+    "Filter on a key inside the JSON column, and get objects and booleans back.": "Filtrez sur une clé de la colonne JSON, et récupérez des objets et des booléens.",
+  },
+};

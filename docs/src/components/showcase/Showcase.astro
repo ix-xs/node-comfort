@@ -5,7 +5,7 @@
 // decides what is shown, and plays the output again.
 import { Code } from "@astrojs/starlight/components";
 import { useT } from "../../i18n";
-import { SCENES } from "../../showcase/scenes.mjs";
+import { COMMENTS, SCENES } from "../../showcase/scenes.mjs";
 import output from "../../showcase/output.json";
 import "../../styles/showcase.css";
 
@@ -16,13 +16,18 @@ const { locale } = Astro.locals.starlightRoute;
 const t = useT(locale);
 const language = locale === "fr" ? "fr" : "en";
 const two = (n: number) => String(n).padStart(2, "0");
+/** A label in the language of the page. */
+const word = (label: string | Record<string, string>) => (typeof label === "string" ? label : label[language] ?? label.en);
+/** The file as the page shows it: its comments in the language of the page. */
+const comments: Record<string, string> = (COMMENTS as Record<string, Record<string, string>>)[language] ?? {};
+const shown = (code: string) => code.replace(/\/\/ (.+)$/gm, (line, text: string) => (comments[text] ? `// ${comments[text]}` : line));
 ---
 
 <nc-showcase class="nc-show" aria-label={t("showcase.label")}>
   <div class="nc-show-rail" role="tablist" aria-label={t("showcase.scenes")}>
     {SCENES.map((scene, index) => (
       <button type="button" role="tab" id={`nc-tab-${scene.id}`} aria-controls={`nc-panel-${scene.id}`} aria-selected={index === 0 ? "true" : "false"} tabindex={index === 0 ? 0 : -1}>
-        <span aria-hidden="true">{two(index + 1)}</span>{scene.label}
+        <span aria-hidden="true">{two(index + 1)}</span>{word(scene.label)}
       </button>
     ))}
     <span class="nc-show-mark" aria-hidden="true"></span>
@@ -34,7 +39,7 @@ const two = (n: number) => String(n).padStart(2, "0");
         <p>{scene.about[language]}</p>
         <div class="nc-show-variants" role="group" aria-label={t("showcase.variants")}>
           {scene.variants.map((variant, at) => (
-            <button class="nc-press" type="button" data-variant={variant.id} aria-pressed={at === 0 ? "true" : "false"}>{variant.label}</button>
+            <button class="nc-press" type="button" data-variant={variant.id} aria-pressed={at === 0 ? "true" : "false"}>{word(variant.label)}</button>
           ))}
         </div>
       </div>
@@ -43,7 +48,7 @@ const two = (n: number) => String(n).padStart(2, "0");
         return (
           <div class="nc-show-run" data-variant={variant.id} hidden={at !== 0}>
             <div class="nc-show-code">
-              <Code code={run.code} lang="js" title={`${variant.id}.js`} />
+              <Code code={shown(run.code)} lang="js" title={`${variant.id}.js`} locale={language} />
             </div>
             <div class="nc-term">
               <header>
