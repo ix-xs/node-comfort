@@ -529,7 +529,7 @@ Function helpers: debounce, throttle, memoize, retry with backoff, timeouts, err
 | Name | What it does |
 | --- | --- |
 | [`debounce()`](/reference/func/#debounce) | Waits for a pause of `wait` ms between calls, then runs once with the latest arguments. |
-| [`throttle()`](/reference/func/#throttle) | Runs at most once every `wait` ms, however often it's called. |
+| [`throttle()`](/reference/func/#throttle) | Runs at most once every `interval` ms, however often it's called. |
 | [`once()`](/reference/func/#once) | Runs `fn` the first time only; later calls return the same result. |
 | [`memoize()`](/reference/func/#memoize) | Caches results by arguments. |
 | [`retry()`](/reference/func/#retry) | Calls `fn` until it succeeds, waiting between attempts. |

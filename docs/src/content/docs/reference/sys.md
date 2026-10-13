@@ -271,7 +271,7 @@ Options for `run()` and `exec()`.
 | `stdio?` | `"pipe" \| "inherit"` | `"inherit"` shows the output live instead of capturing it. Defaults to `"pipe"`. |
 | `onStdout?` | `((line: string) => void)` | Called for each line of stdout. |
 | `onStderr?` | `((line: string) => void)` | Called for each line of stderr. |
-| `reject?` | `boolean` | Throw when the exit code isn't 0. Defaults to `true`. |
+| `reject?` | `boolean` | Reject when the exit code isn't 0. Defaults to `true`. |
 | `trim?` | `boolean` | Drop the final newline of the output. Defaults to `true`. |
 
 ### RunResult

@@ -48,7 +48,7 @@ const save = func.debounce(persist, 1000, { maxWait: 5000 }); // saves at least 
 throttle<F extends (...args: any[]) => any>(fn: F, interval: string | number, options?: ThrottleOptions): ThrottledFunction<F>
 ```
 
-Runs at most once every `wait` ms, however often it's called. For scroll
+Runs at most once every `interval` ms, however often it's called. For scroll
 handlers, progress reports, rate-limited APIs...
 
 | Parameter | Type | Description |

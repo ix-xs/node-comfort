@@ -723,7 +723,7 @@ Options for `new SQLite()`.
 | --- | --- | --- |
 | `json?` | `boolean` | Parse `JSON` columns. Defaults to `true`. |
 | `booleans?` | `boolean` | Return `BOOLEAN` columns as `true`/`false`. Defaults to `true`. |
-| `dates?` | `boolean` | Return `DATE`, `DATETIME` and `TIMESTAMP` columns as `Date`s. |
+| `dates?` | `boolean` | Return `DATE`, `DATETIME` and `TIMESTAMP` columns as `Date`s. Defaults to `false`. |
 | `wal?` | `boolean` | Write-ahead logging: faster, and reads don't wait for writes. Defaults to `true`. |
 | `foreignKeys?` | `boolean` | Enforce foreign keys. Defaults to `true`. |
 | `busyTimeout?` | `string \| number` | How long to wait for a lock held by another connection, in ms or like `"5s"`. Defaults to 5 seconds. |

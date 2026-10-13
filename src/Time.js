@@ -891,7 +891,7 @@ function toISODate(date, options = {}) {
  *
  * @param {DateInput} date
  * @param {number | string} amount A number with `unit`, or a duration like `"1h30m"` or `"1 month"`.
- * @param {CalendarUnit | TimeZoneOptions} [unit="ms"] The unit of a number. With a text amount there is none to give: the options can come here.
+ * @param {CalendarUnit | TimeZoneOptions} [unit="ms"] The unit of a number. A text amount carries its own units, so the options can come here instead.
  * @param {TimeZoneOptions} [options] The zone whose calendar is followed.
  * @returns {Date}
  * @throws {TypeError} If a text amount isn't a duration, or the unit isn't one.
@@ -939,7 +939,7 @@ function subtract(date, amount, unit = "ms", options = {}) {
  * @param {DateInput} a
  * @param {DateInput} b
  * @param {CalendarUnit} [unit="ms"]
- * @param {TimeZoneOptions} [options] The zone whose calendar months and years follow.
+ * @param {TimeZoneOptions} [options] The zone whose calendar is followed for months and years.
  * @returns {number}
  * @throws {TypeError} If the unit isn't one.
  */

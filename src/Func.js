@@ -168,7 +168,7 @@ function debounce(fn, wait, options = {}) {
 }
 
 /**
- * Runs at most once every `wait` ms, however often it's called. For scroll
+ * Runs at most once every `interval` ms, however often it's called. For scroll
  * handlers, progress reports, rate-limited APIs...
  *
  * @example

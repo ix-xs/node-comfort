@@ -1118,7 +1118,7 @@ function copy(source, destination, options = {}) {
  *
  * @param {string} source
  * @param {string} destination
- * @param {{ overwrite?: boolean }} [options] Replace an existing destination. Defaults to `true`.
+ * @param {{ overwrite?: boolean }} [options] `overwrite` replaces an existing destination. Defaults to `true`.
  * @returns {boolean}
  */
 function move(source, destination, options = {}) {
@@ -1413,7 +1413,7 @@ function folderSize(path) {
  * nc.hashFile("./release.zip", { algorithm: "md5" });
  *
  * @param {string} path
- * @param {{ algorithm?: string, encoding?: "hex" | "base64" | "base64url" }} [options] Defaults to sha256 in hex.
+ * @param {{ algorithm?: string, encoding?: "hex" | "base64" | "base64url" }} [options] The algorithm and how the hash is written. Defaults to sha256 in hex.
  * @returns {string | undefined} `undefined` if it can't be read.
  */
 function hashFile(path, options = {}) {
@@ -1458,7 +1458,7 @@ function tempFolder(prefix = "nc-") {
  * nc.sanitizeFilename("CON.txt");                    // "_CON.txt"
  *
  * @param {string} name
- * @param {{ replacement?: string }} [options] Defaults to `"_"`.
+ * @param {{ replacement?: string }} [options] `replacement` takes the place of each character that is removed. Defaults to `"_"`.
  * @returns {string}
  */
 function sanitizeFilename(name, options = {}) {

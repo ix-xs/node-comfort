@@ -54,7 +54,7 @@ const _config = { locale: "en" };
  * @typedef {object} CurrencyOptions
  * @property {string} [locale] Language. Defaults to the one set with `setLocale()`, or `"en"`.
  * @property {number} [decimals] Defaults to the currency's usual decimals (2 for EUR, 0 for JPY).
- * @property {"symbol"|"narrowSymbol"|"code"|"name"} [display] `€`, `€`, `EUR` or `euros`. Defaults to `"symbol"`.
+ * @property {"symbol"|"narrowSymbol"|"code"|"name"} [display] How the currency is written. For US dollars in Canada: `US$`, `$`, `USD` or `US dollars`. Defaults to `"symbol"`.
  * @property {boolean} [accounting] Show negative amounts in parentheses, like `($5.00)`.
  */
 
