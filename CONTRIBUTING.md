@@ -92,7 +92,9 @@ npm run docs:build     # builds docs/dist, then checks every link and every tran
 - The guides are plain Markdown in `docs/src/content/docs/`. Examples are meant to run: check yours
   before sending it.
 - The reference pages are generated from the types by `npm run build`. Do not edit them: change the
-  JSDoc instead. CI fails when they are out of date.
+  JSDoc instead. CI fails when they are out of date. Their French version is generated the same way,
+  from the sentences in `docs/src/reference-i18n/fr/`: a sentence that changed stays in English until
+  its translation is updated (`node scripts/build-reference.js --missing` lists them).
 - The French pages in `docs/src/content/docs/fr/` mirror the English ones: same headings, same code,
   same links. `npm run check-translation --prefix docs` says what differs. A page without a
   translation shows in English.
