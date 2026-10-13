@@ -32,6 +32,8 @@ src/content/docs/            the pages, in English
   start/ essentials/ data/ flow/ system/ recipes.md     written by hand
   reference/                 generated from the types, never edited by hand
   fr/                        the French translation, same paths
+  fr/reference/              generated too, from the same types and the catalogs below
+src/reference-i18n/fr/       the French of the reference: one file per namespace, English sentence to French sentence
 src/components/              the header, the hero, the search extras, the showcase
 src/showcase/                the examples of the landing page
   samples/<subject>/*.js     real files, run against the package at every build
@@ -61,6 +63,16 @@ scripts/
 A French page lives at the same path under `src/content/docs/fr/`. It keeps the headings in the same
 order, the code blocks untouched (comments may be translated) and the same links. A page that has no
 translation is shown in English, so the site is never broken while a translation catches up.
+
+The reference is translated sentence by sentence. `src/reference-i18n/fr/<namespace>.json` maps each
+English sentence of the JSDoc to its French one, and `npm run build` writes the French pages from them.
+When a sentence of the JSDoc changes, its translation no longer applies: the page shows the English
+sentence until the catalog is updated. This lists what is waiting, and the entries that are no longer
+used:
+
+```bash
+node scripts/build-reference.js --missing
+```
 
 ## The showcase
 

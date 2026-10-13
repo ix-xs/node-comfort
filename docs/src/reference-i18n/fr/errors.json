@@ -1,0 +1,22 @@
+{
+  "The errors node-comfort throws when something goes wrong at run time: a request fails, data is invalid, a command exits badly. They all extend `NodeComfortError` (itself a regular `Error`) and carry a stable `code`, so you can branch on the kind of failure without parsing messages.": "Les erreurs que node-comfort lève quand quelque chose se passe mal à l'exécution : une requête échoue, des données sont invalides, une commande se termine mal. Elles étendent toutes `NodeComfortError` (elle-même une `Error` ordinaire) et portent un `code` stable, vous pouvez donc réagir selon le type d'échec sans analyser les messages.",
+  "A mistake in your own code, like a wrong argument, still throws a plain `TypeError` or `RangeError`, as it does everywhere in JavaScript.": "Une erreur dans votre propre code, comme un mauvais argument, continue de lever une simple `TypeError` ou `RangeError`, comme partout en JavaScript.",
+  "Base class of every node-comfort error. `name` is the class name and `code` a stable identifier.": "Classe de base de toutes les erreurs de node-comfort. `name` est le nom de la classe et `code` un identifiant stable.",
+  "Thrown by `nc.assert()` and `nc.assertType()`.": "Levée par `nc.assert()` et `nc.assertType()`.",
+  "Thrown when something takes too long: `func.timeout`, `async.poll`, HTTP requests, `emitter.waitFor`...": "Levée quand quelque chose prend trop de temps : `func.timeout`, `async.poll`, les requêtes HTTP, `emitter.waitFor`...",
+  "Thrown when an operation is cancelled with an `AbortSignal`. Its name is `\"AbortError\"`, like native abort errors, so existing checks keep working.": "Levée quand une opération est annulée avec un `AbortSignal`. Son nom est `\"AbortError\"`, comme les erreurs d'annulation natives, les vérifications existantes continuent donc de fonctionner.",
+  "Thrown when data doesn't match a schema or when environment variables are invalid. `issues` lists every problem, not just the first one.": "Levée quand des données ne correspondent pas à un schéma ou quand des variables d'environnement sont invalides. `issues` liste tous les problèmes, pas seulement le premier.",
+  "Thrown by `nc.http` when the response status isn't 2xx (unless you pass `throwHttpErrors: false`), and for network failures (`status` 0).": "Levée par `nc.http` quand le statut de la réponse n'est pas 2xx (sauf si vous passez `throwHttpErrors: false`), et pour les échecs réseau (`status` 0).",
+  "Thrown by `nc.crypto.verifyJWT()`. The `code` tells you why: `ERR_JWT_MALFORMED`, `ERR_JWT_ALGORITHM`, `ERR_JWT_SIGNATURE`, `ERR_JWT_EXPIRED`, `ERR_JWT_NOT_BEFORE` or `ERR_JWT_CLAIM`.": "Levée par `nc.crypto.verifyJWT()`. Le `code` vous dit pourquoi : `ERR_JWT_MALFORMED`, `ERR_JWT_ALGORITHM`, `ERR_JWT_SIGNATURE`, `ERR_JWT_EXPIRED`, `ERR_JWT_NOT_BEFORE` ou `ERR_JWT_CLAIM`.",
+  "Thrown by `nc.sys.run()` and `nc.sys.exec()` when a command fails, is killed or times out. Its output is kept on the error.": "Levée par `nc.sys.run()` et `nc.sys.exec()` quand une commande échoue, est tuée ou dépasse son délai. Sa sortie est conservée sur l'erreur.",
+  "Thrown by `nc.SQLite` when a statement fails. Check `sqliteCode` to handle specific cases like a duplicate value.": "Levée par `nc.SQLite` quand une instruction échoue. Consultez `sqliteCode` pour traiter des cas précis comme une valeur en double.",
+  "Options shared by every error constructor.": "Options communes à tous les constructeurs d'erreur.",
+  "Machine-readable code, like `\"ETIMEDOUT\"`.": "Code lisible par une machine, comme `\"ETIMEDOUT\"`.",
+  "The error that caused this one, kept as `error.cause`.": "L'erreur qui a causé celle-ci, conservée dans `error.cause`.",
+  "One problem found while validating data.": "Un problème trouvé lors de la validation de données.",
+  "Where the problem is, like `[\"user\", \"emails\", 0]`. Empty for the root value.": "Où se trouve le problème, par exemple `[\"user\", \"emails\", 0]`. Vide pour la valeur racine.",
+  "What went wrong: `\"invalid_type\"`, `\"too_small\"`, `\"invalid_string\"`, `\"custom\"`...": "Ce qui n'a pas fonctionné : `\"invalid_type\"`, `\"too_small\"`, `\"invalid_string\"`, `\"custom\"`...",
+  "A message you can show to users.": "Un message que vous pouvez montrer aux utilisateurs.",
+  "The expected type, for type errors.": "Le type attendu, pour les erreurs de type.",
+  "The received type, for type errors.": "Le type reçu, pour les erreurs de type."
+}
