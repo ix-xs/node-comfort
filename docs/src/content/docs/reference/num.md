@@ -676,7 +676,7 @@ Options for `currency()`.
 | --- | --- | --- |
 | `locale?` | `string` | Language. Defaults to the one set with `setLocale()`, or `"en"`. |
 | `decimals?` | `number` | Defaults to the currency's usual decimals (2 for EUR, 0 for JPY). |
-| `display?` | `"symbol" \| "name" \| "code" \| "narrowSymbol"` | `€`, `€`, `EUR` or `euros`. Defaults to `"symbol"`. |
+| `display?` | `"symbol" \| "name" \| "code" \| "narrowSymbol"` | How the currency is written. For US dollars in Canada: `US$`, `$`, `USD` or `US dollars`. Defaults to `"symbol"`. |
 | `accounting?` | `boolean` | Show negative amounts in parentheses, like `($5.00)`. |
 
 ### FormatBytesOptions

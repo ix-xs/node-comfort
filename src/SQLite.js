@@ -138,7 +138,7 @@ const { toMs } = require("./internal/shared.js");
  * @typedef {object} SQLiteOptions
  * @property {boolean} [json] Parse `JSON` columns. Defaults to `true`.
  * @property {boolean} [booleans] Return `BOOLEAN` columns as `true`/`false`. Defaults to `true`.
- * @property {boolean} [dates] Return `DATE`, `DATETIME` and `TIMESTAMP` columns as `Date`s.
+ * @property {boolean} [dates] Return `DATE`, `DATETIME` and `TIMESTAMP` columns as `Date`s. Defaults to `false`.
  * @property {boolean} [wal] Write-ahead logging: faster, and reads don't wait for writes. Defaults to `true`.
  * @property {boolean} [foreignKeys] Enforce foreign keys. Defaults to `true`.
  * @property {number | string} [busyTimeout] How long to wait for a lock held by another connection, in ms or like `"5s"`. Defaults to 5 seconds.

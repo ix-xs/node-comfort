@@ -275,7 +275,7 @@ the end of February. Hours and smaller units are exact.
 | --- | --- | --- |
 | `date` | [`DateInput`](#dateinput) |  |
 | `amount` | `number \| string` | A number with `unit`, or a duration like `"1h30m"` or `"1 month"`. |
-| `unit?` | [`CalendarUnit`](#calendarunit)` \| `[`TimeZoneOptions`](#timezoneoptions) | The unit of a number. With a text amount there is none to give: the options can come here. Defaults to `"ms"`. |
+| `unit?` | [`CalendarUnit`](#calendarunit)` \| `[`TimeZoneOptions`](#timezoneoptions) | The unit of a number. A text amount carries its own units, so the options can come here instead. Defaults to `"ms"`. |
 | `options?` | [`TimeZoneOptions`](#timezoneoptions) | The zone whose calendar is followed. |
 
 **Throws** `TypeError`: If a text amount isn't a duration, or the unit isn't one.
@@ -324,7 +324,7 @@ whole calendar months and years.
 | `a` | [`DateInput`](#dateinput) |  |
 | `b` | [`DateInput`](#dateinput) |  |
 | `unit?` | [`CalendarUnit`](#calendarunit) | Defaults to `"ms"`. |
-| `options?` | [`TimeZoneOptions`](#timezoneoptions) | The zone whose calendar months and years follow. |
+| `options?` | [`TimeZoneOptions`](#timezoneoptions) | The zone whose calendar is followed for months and years. |
 
 **Throws** `TypeError`: If the unit isn't one.
 
@@ -650,7 +650,7 @@ The next date matching a cron expression, without scheduling anything.
 
 Expressions have 5 fields (`minute hour day month weekday`), or 6 with
 seconds first. You can use `*`, lists (`1,15`), ranges (`1-5`), steps
-(`*\/15`), names (`jan`, `mon-fri`), `L` for the last day of the month,
+(`*/15`), names (`jan`, `mon-fri`), `L` for the last day of the month,
 and `@daily`, `@hourly`, `@weekly`, `@monthly`, `@yearly`. As in classic
 cron, when both the day and the weekday are set, either one matching is
 enough.
@@ -684,7 +684,7 @@ are handled: a skipped time is skipped, a repeated one runs once. See
 
 ```js
 const job = time.cron("0 9 * * 1-5", sendDailyReport, { timeZone: "Europe/Paris" });
-time.cron("*\/15 * * * *", refreshCache, { onError: nc.error });
+time.cron("*/15 * * * *", refreshCache, { onError: nc.error });
 job.stop();
 ```
 

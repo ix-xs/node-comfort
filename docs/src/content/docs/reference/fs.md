@@ -27,7 +27,7 @@ This page lists everything `nc.fs` has, as your editor shows it. For explanation
 ```js
 nc.writeJSON("./data/settings.json", { theme: "dark" });
 const settings = nc.readJSON("./data/settings.json", {});
-const sources = nc.glob("src/**\/*.{js,ts}");
+const sources = nc.glob("src/**/*.{js,ts}");
 ```
 
 ## getEnv
@@ -144,10 +144,10 @@ results are absolute.
 **Returns** `string[]`: Sorted, relative to `cwd` with `/` separators, unless the pattern is absolute or `absolute` is set.
 
 ```js
-nc.glob("src/**\/*.js");                           // ["src/index.js", "src/lib/a.js"]
-nc.glob("**\/*.{png,jpg}", { cwd: "./assets", absolute: true });
+nc.glob("src/**/*.js");                           // ["src/index.js", "src/lib/a.js"]
+nc.glob("**/*.{png,jpg}", { cwd: "./assets", absolute: true });
 nc.glob("packages/*", { type: "folders" });
-nc.glob(`${folder}/**\/*.json`);                   // absolute pattern, absolute results
+nc.glob(`${folder}/**/*.json`);                   // absolute pattern, absolute results
 ```
 
 ## find
@@ -466,7 +466,7 @@ Moves or renames a file or folder, across drives too.
 | --- | --- | --- |
 | `source` | `string` |  |
 | `destination` | `string` |  |
-| `options?` | `{ overwrite?: boolean }` | Replace an existing destination. Defaults to `true`. |
+| `options?` | `{ overwrite?: boolean }` | `overwrite` replaces an existing destination. Defaults to `true`. |
 
 ```js
 nc.move("./report.pdf", "./archive/2024/report.pdf");
@@ -632,7 +632,7 @@ Hashes a file in chunks, so huge files are fine.
 | Parameter | Type | Description |
 | --- | --- | --- |
 | `path` | `string` |  |
-| `options?` | `{ algorithm?: string, encoding?: "hex" \| "base64" \| "base64url" }` | Defaults to sha256 in hex. |
+| `options?` | `{ algorithm?: string, encoding?: "hex" \| "base64" \| "base64url" }` | The algorithm and how the hash is written. Defaults to sha256 in hex. |
 
 **Returns** `string | undefined`: `undefined` if it can't be read.
 
@@ -671,7 +671,7 @@ prefixed, and the length is capped.
 | Parameter | Type | Description |
 | --- | --- | --- |
 | `name` | `string` |  |
-| `options?` | `{ replacement?: string }` | Defaults to `"_"`. |
+| `options?` | `{ replacement?: string }` | `replacement` takes the place of each character that is removed. Defaults to `"_"`. |
 
 ```js
 nc.sanitizeFilename('Report: Q1/Q2 "final"?.pdf'); // "Report_ Q1_Q2 _final__.pdf"

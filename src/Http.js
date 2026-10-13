@@ -123,9 +123,9 @@ const { toMs, setLongTimeout, sleep } = require("./internal/shared.js");
  * @property {<T = any, S extends ResponseSchema = { parse(data: unknown): T }>(url: string | URL, options?: HttpOptionsOf<S>) => Promise<HttpResponse<ReturnType<S["parse"]>>>} get Sends a GET request.
  * @property {<T = any>(url: string | URL, options?: HttpOptions) => Promise<HttpResponse<T>>} head Sends a HEAD request.
  * @property {<T = any, S extends ResponseSchema = { parse(data: unknown): T }>(url: string | URL, options?: HttpOptionsOf<S>) => Promise<HttpResponse<ReturnType<S["parse"]>>>} delete Sends a DELETE request.
- * @property {<T = any, S extends ResponseSchema = { parse(data: unknown): T }>(url: string | URL, data?: unknown, options?: HttpOptionsOf<S>) => Promise<HttpResponse<ReturnType<S["parse"]>>>} post Sends a POST request. Objects and arrays go as JSON.
- * @property {<T = any, S extends ResponseSchema = { parse(data: unknown): T }>(url: string | URL, data?: unknown, options?: HttpOptionsOf<S>) => Promise<HttpResponse<ReturnType<S["parse"]>>>} put Sends a PUT request. Objects and arrays go as JSON.
- * @property {<T = any, S extends ResponseSchema = { parse(data: unknown): T }>(url: string | URL, data?: unknown, options?: HttpOptionsOf<S>) => Promise<HttpResponse<ReturnType<S["parse"]>>>} patch Sends a PATCH request. Objects and arrays go as JSON.
+ * @property {<T = any, S extends ResponseSchema = { parse(data: unknown): T }>(url: string | URL, data?: unknown, options?: HttpOptionsOf<S>) => Promise<HttpResponse<ReturnType<S["parse"]>>>} post Sends a POST request. Objects, arrays, numbers and booleans go as JSON.
+ * @property {<T = any, S extends ResponseSchema = { parse(data: unknown): T }>(url: string | URL, data?: unknown, options?: HttpOptionsOf<S>) => Promise<HttpResponse<ReturnType<S["parse"]>>>} put Sends a PUT request. Objects, arrays, numbers and booleans go as JSON.
+ * @property {<T = any, S extends ResponseSchema = { parse(data: unknown): T }>(url: string | URL, data?: unknown, options?: HttpOptionsOf<S>) => Promise<HttpResponse<ReturnType<S["parse"]>>>} patch Sends a PATCH request. Objects, arrays, numbers and booleans go as JSON.
  * @property {(url: string | URL, destination: string, options?: HttpOptions) => Promise<{ path: string, size: number }>} download Saves a response to a file.
  * @property {(defaults: HttpOptions) => HttpClient} extend A new client with these defaults added.
  * @property {Readonly<HttpOptions>} defaults

@@ -37,7 +37,7 @@ const _cp = () => (_childProcess ??= require("node:child_process"));
  * @property {"pipe" | "inherit"} [stdio] `"inherit"` shows the output live instead of capturing it. Defaults to `"pipe"`.
  * @property {(line: string) => void} [onStdout] Called for each line of stdout.
  * @property {(line: string) => void} [onStderr] Called for each line of stderr.
- * @property {boolean} [reject] Throw when the exit code isn't 0. Defaults to `true`.
+ * @property {boolean} [reject] Reject when the exit code isn't 0. Defaults to `true`.
  * @property {boolean} [trim] Drop the final newline of the output. Defaults to `true`.
  */
 

@@ -90,10 +90,17 @@ const parseJSDoc = (comment) => {
 };
 
 /**
+ * A comment cannot hold the two characters that end it, so the source writes
+ * them with a backslash in between. Readers get them as they are meant.
+ * @param {string} text
+ */
+const plain = (text) => text.split(`*${"\\"}/`).join("*/");
+
+/**
  * Renders `{@link X}` as inline code.
  * @param {string} text
  */
-const links = (text) => text.replace(/\{@link\s+([^}\s|]+)(?:\s*\|?\s*([^}]*))?\}/g, (_, target, label) => `\`${(label || target).trim()}\``);
+const links = (text) => plain(text).replace(/\{@link\s+([^}\s|]+)(?:\s*\|?\s*([^}]*))?\}/g, (_, target, label) => `\`${(label || target).trim()}\``);
 
 /**
  * The raw JSDoc comment attached to a declaration.
@@ -117,7 +124,7 @@ const overviewOf = (moduleName) => {
   const match = /^(?:"use strict";\s*)?(\/\*\*[\s\S]*?\*\/)\n\n/.exec(source);
   if (!match) return { description: "", examples: [] };
   const parsed = parseJSDoc(match[1]);
-  return { description: links(parsed.description), examples: parsed.tags.filter((t) => t.tag === "example").map((t) => t.text) };
+  return { description: links(parsed.description), examples: parsed.tags.filter((t) => t.tag === "example").map((t) => plain(t.text)) };
 };
 
 /** @returns {{ package: { name: string, version: string, description: string, homepage?: string }, flat: Record<string, string[]>, namespaces: Namespace[], typeOwners: Record<string, string> }} */
@@ -183,7 +190,7 @@ function buildModel() {
       params,
       returns: ret ? { type: clean(ret.type ?? checker.typeToString(signature.getReturnType(), undefined, FORMAT)), description: links(ret.text) } : undefined,
       throws: parsed.tags.filter((t) => t.tag === "throws").map((t) => ({ type: t.type ?? "", description: links(t.text) })),
-      examples: parsed.tags.filter((t) => t.tag === "example").map((t) => t.text),
+      examples: parsed.tags.filter((t) => t.tag === "example").map((t) => plain(t.text)),
       deprecated: deprecated ? links(deprecated.text) || "Deprecated." : undefined,
     };
   };
