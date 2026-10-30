@@ -1,6 +1,6 @@
 {
   "name": "@ix-xs/node-comfort",
-  "version": "2.1.0",
+  "version": "2.1.1",
   "description": "The zero-dependency standard library for Node.js: logger, filesystem, SQLite, schema validation, HTTP client, CLI toolkit, cache, env, async pools, colors, events, i18n dates, ids, crypto and hundreds of fully typed helpers.",
   "keywords": [
     "utils",

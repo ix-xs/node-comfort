@@ -2172,3 +2172,33 @@ describe("found on the first run of the CI", () => {
     assert.ok(Date.now() - started < 6000, `settled after ${Date.now() - started}ms`);
   });
 });
+
+describe("the fetch of Node.js", () => {
+  // undici 6.29.1, 7.30.1 and 8.12.2, as in Node.js 22.23.4, 24.22.1 and 26.12.1. Before them this crashes,
+  // and nothing in the package can prevent it: the guide and SECURITY.md say so.
+  const FIXED = /** @type {Record<string, number[]>} */ ({ 6: [29, 1], 7: [30, 1], 8: [12, 2] });
+  const [major, minor, patch] = String(process.versions.undici).split(".").map(Number);
+  const fixed = FIXED[major] !== undefined && (minor > FIXED[major][0] || (minor === FIXED[major][0] && patch >= FIXED[major][1]));
+
+  it("a response with too many content codings fails without stopping the process", { skip: fixed ? false : `undici ${process.versions.undici} has the flaw` }, async () => {
+    const script = `
+      const http = require("node:http");
+      const nc = require(${JSON.stringify(require.resolve(".."))});
+      const server = http.createServer((req, res) => {
+        res.socket.write("HTTP/1.1 200 OK\\r\\nContent-Encoding: gzip, gzip, gzip, gzip, gzip, gzip\\r\\nContent-Length: 100\\r\\n\\r\\n");
+        setTimeout(() => res.socket.destroy(), 20);
+      });
+      server.listen(0, "127.0.0.1", async () => {
+        await nc.http.get("http://127.0.0.1:" + server.address().port, { retry: false }).catch((error) => console.log(error.code));
+        setTimeout(() => {
+          console.log("still here");
+          server.close();
+          server.closeAllConnections();
+        }, 300);
+      });
+    `;
+    const result = await nc.sys.run(process.execPath, ["-e", script], { reject: false, env: { ...process.env, NODE_COMFORT_DOTENV: "false" } });
+    assert.equal(result.exitCode, 0, result.stderr);
+    assert.deepEqual(result.stdout.split(/\r?\n/), ["ERR_NETWORK", "still here"]);
+  });
+});

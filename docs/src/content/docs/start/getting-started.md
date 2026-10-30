@@ -11,7 +11,7 @@ sidebar:
 npm install @ix-xs/node-comfort
 ```
 
-You need Node.js 22.13 or newer. That's the first version where `node:sqlite`, which `nc.SQLite` uses, works without a flag. Check yours with `node --version`.
+You need Node.js 22.13 or newer. That's the first version where `node:sqlite`, which `nc.SQLite` uses, works without a flag. Check yours with `node --version`. If your program calls servers you don't control, [use a more recent one](/system/http/#servers-you-dont-control).
 
 ## Your first script
 

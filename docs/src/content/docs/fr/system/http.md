@@ -93,6 +93,12 @@ Passez `throwHttpErrors: false` pour recevoir la réponse à la place. Une panne
 
 Le corps d'une réponse d'erreur est toujours lu, même avec `responseType: "stream"` : `error.data` contient donc ce que le serveur a répondu.
 
+## Serveurs que vous ne contrôlez pas
+
+`nc.http` utilise le `fetch()` intégré à Node.js : il dépend donc de la version de Node.js que vous faites tourner. Avant 22.23.4, 24.22.1 et 26.12.1, une seule réponse malveillante peut arrêter votre programme ([GHSA-xjj6-f33q-929c](https://github.com/advisories/GHSA-xjj6-f33q-929c)) : la requête échoue avec une `HttpError` que vous pouvez attraper, puis le processus plante quand même. Aucun code dans un paquet ne peut l'empêcher, et Node.js 25 n'a pas de correctif.
+
+Si votre programme appelle des adresses fournies par vos utilisateurs, des webhooks ou n'importe quel serveur que vous ne contrôlez pas, utilisez l'une de ces versions ou une version plus récente.
+
 ## Timeouts et nouvelles tentatives
 
 Chaque tentative dispose de 30 secondes par défaut. Changez cette durée avec `timeout: "10s"`, ou désactivez-la avec `timeout: false`. Avec `responseType: "stream"`, la limite ne couvre que l'attente des en-têtes de la réponse. Une fois ceux-ci reçus, la lecture du corps peut prendre le temps qu'il faut.

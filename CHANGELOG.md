@@ -4,6 +4,23 @@ All notable changes to this project are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and the project uses
 [Semantic Versioning](https://semver.org/).
 
+## [2.1.1] - 2026-10-30
+
+### Security
+
+- **Update Node.js if your program calls servers you don't control.** Versions of Node.js before 22.23.4,
+  24.22.1 and 26.12.1 can be crashed by a single malicious HTTP response (GHSA-xjj6-f33q-929c,
+  CVE-2026-109869), in the copy of undici behind their `fetch()`. `nc.http` uses that `fetch()`, so it is
+  exposed like any other client: the error can be caught, but the process stops right after, and no code in
+  a package can prevent it. The package still accepts older versions of Node.js. Node.js 25 has no fix.
+
+### Documentation
+
+- The reference is now in French too, like the rest of the website, and the landing page and the page for
+  an address that does not exist no longer have English left in them.
+- A dozen sentences of the JSDoc were wrong or unclear, among them the parameter of `func.throttle()` and
+  the options of `fs.move()`, `fs.hashFile()` and `fs.sanitizeFilename()`. Your editor now shows the right ones.
+
 ## [2.1.0] - 2026-10-12
 
 Every module was read again, line by line. The result: about sixty new functions and options, a hot path
@@ -335,6 +352,7 @@ Each item explains what to change. Most projects only need the SQLite and Node.j
 
 - SQLite: the folder of the database was created in one place and the file opened in another.
 
+[2.1.1]: https://github.com/ix-xs/node-comfort/compare/v2.1.0...v2.1.1
 [2.1.0]: https://github.com/ix-xs/node-comfort/compare/v2.0.0...v2.1.0
 [2.0.0]: https://github.com/ix-xs/node-comfort/compare/v1.2.0...v2.0.0
 [1.2.0]: https://github.com/ix-xs/node-comfort/releases/tag/v1.2.0
