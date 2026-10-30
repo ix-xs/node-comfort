@@ -1,6 +1,6 @@
 ---
 title: "All exports"
-description: "Everything in @ix-xs/node-comfort 2.1.0: 23 namespaces and classes, 573 functions and methods, each with a line that says what it does."
+description: "Everything in @ix-xs/node-comfort 2.1.1: 23 namespaces and classes, 573 functions and methods, each with a line that says what it does."
 sidebar:
   label: "All exports"
   order: 0

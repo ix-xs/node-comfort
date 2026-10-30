@@ -93,6 +93,12 @@ Pass `throwHttpErrors: false` to get the response instead. A network failure is 
 
 The body of an error response is always read, even with `responseType: "stream"`, so `error.data` holds what the server said.
 
+## Servers you don't control
+
+`nc.http` uses the `fetch()` built into Node.js, so it depends on the version of Node.js you run. Before 22.23.4, 24.22.1 and 26.12.1, a single malicious response can stop your program ([GHSA-xjj6-f33q-929c](https://github.com/advisories/GHSA-xjj6-f33q-929c)): the request fails with an `HttpError` you can catch, then the process crashes anyway. No code in a package can prevent it, and Node.js 25 has no fix.
+
+If your program calls addresses given by your users, webhooks or any server you don't control, use one of these versions or a later one.
+
 ## Timeouts and retries
 
 Each attempt has 30 seconds by default. Change it with `timeout: "10s"`, or turn it off with `timeout: false`. With `responseType: "stream"`, the limit only covers the wait for the response headers. Once they're in, reading the body can take as long as it needs.

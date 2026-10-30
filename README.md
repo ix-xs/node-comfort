@@ -51,7 +51,7 @@ nc.sys.onShutdown(() => db.close());
 npm install @ix-xs/node-comfort
 ```
 
-Node.js 22.13 or newer. That's the first version where `node:sqlite` works without a flag.
+Node.js 22.13 or newer. That's the first version where `node:sqlite` works without a flag. If your program calls servers you don't control, use at least 22.23.4, 24.22.1 or 26.12.1: [older versions can be crashed by a malicious response](https://ix-xs.github.io/node-comfort/system/http/#servers-you-dont-control).
 
 ## Why node-comfort
 

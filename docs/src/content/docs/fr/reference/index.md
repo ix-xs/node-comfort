@@ -1,6 +1,6 @@
 ---
 title: "Tous les exports"
-description: "Tout ce que contient @ix-xs/node-comfort 2.1.0 : 23 espaces de noms et classes, 573 fonctions et méthodes, avec pour chacune une ligne qui dit ce qu'elle fait."
+description: "Tout ce que contient @ix-xs/node-comfort 2.1.1 : 23 espaces de noms et classes, 573 fonctions et méthodes, avec pour chacune une ligne qui dit ce qu'elle fait."
 sidebar:
   label: "Tous les exports"
   order: 0
