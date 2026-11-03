@@ -476,7 +476,8 @@ const _copyTree = (src, dest, options = {}) => {
     force: overwrite,
     errorOnExist: options.errorOnExist ?? false,
     preserveTimestamps: options.preserveTimestamps ?? false,
-    filter: process.platform !== "win32" ? options.filter : (s, d) => {
+    // Every platform: cpSync follows junctions on Windows, and elsewhere refuses to copy a link over the same link.
+    filter: (s, d) => {
       if (options.filter && !options.filter(s, d)) return false;
       // the source itself was named by the caller: only links inside it are kept as links
       if (nodePath.resolve(s) === src) return true;
@@ -1734,6 +1735,19 @@ function tempFolder(prefix = "nc-") {
 }
 
 /**
+ * Removes the dots and spaces at the end, in one pass: a regex like
+ * `/[. ]+$/` would start again from every dot or space of a long name.
+ * @param {string} text
+ * @param {string} chars
+ * @returns {string}
+ */
+const _trimEnd = (text, chars) => {
+  let end = text.length;
+  while (end > 0 && chars.includes(text[end - 1])) end--;
+  return text.slice(0, end);
+};
+
+/**
  * Turns any text into a file name that works on Windows, macOS and Linux:
  * forbidden characters are replaced, invisible and text direction
  * characters are removed, reserved names like `CON`, `NUL .txt` or
@@ -1749,13 +1763,15 @@ function tempFolder(prefix = "nc-") {
  */
 function sanitizeFilename(name, options = {}) {
   const replacement = options.replacement ?? "_";
-  let clean = String(name)
-    // invisible characters, and the ones that reverse the text so that "exe.txt" reads "txt.exe"
-    .replace(/[​-‏‪-‮⁠⁦-⁩﻿]/g, "")
-    .replace(/[<>:"/\\|?*\u0000-\u001f\u007f]/g, replacement)
-    .replace(/[. ]+$/, "");
+  let clean = _trimEnd(
+    String(name)
+      // invisible characters, and the ones that reverse the text so that "exe.txt" reads "txt.exe"
+      .replace(/[​-‏‪-‮⁠⁦-⁩﻿]/g, "")
+      .replace(/[<>:"/\\|?*\u0000-\u001f\u007f]/g, replacement),
+    ". ",
+  );
   // Windows ignores the extension and the spaces before it: "NUL .txt" is still the NUL device
-  if (/^(con|prn|aux|nul|conin\$|conout\$|com[0-9¹²³]|lpt[0-9¹²³])$/i.test(clean.split(".")[0].replace(/ +$/, ""))) clean = `_${clean}`;
+  if (/^(con|prn|aux|nul|conin\$|conout\$|com[0-9¹²³]|lpt[0-9¹²³])$/i.test(_trimEnd(clean.split(".")[0], " "))) clean = `_${clean}`;
   if (clean === "." || clean === "..") clean = replacement;
   if (Buffer.byteLength(clean) > 255) {
     // File systems count bytes, and a character cut in two would be broken.
@@ -1766,7 +1782,7 @@ function sanitizeFilename(name, options = {}) {
       if (bytes > 255) break;
       kept += char;
     }
-    clean = kept.replace(/[. ]+$/, "");
+    clean = _trimEnd(kept, ". ");
   }
   return clean || "_";
 }
