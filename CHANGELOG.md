@@ -4,6 +4,141 @@ All notable changes to this project are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and the project uses
 [Semantic Versioning](https://semver.org/).
 
+## [2.2.0] - 2026-11-03
+
+A security release. Three audits went through every module looking for what an attacker could do with the
+values a program receives: a request body, a header, a file name, a `.env` in a cloned repository, a log
+line. More than fifty problems came out of them, a few serious ones. They are all fixed, each with a test
+that failed before. Most fixes change nothing for code that works today, and the ones you could notice are
+listed under "Changed". The package also makes use of what Node.js 26 brings.
+
+### Security
+
+- **JWT**: a public key could be used as an HMAC secret when it was read from a file with a BOM, had text
+  before its PEM header, or was in DER form, so anyone could sign `HS256` tokens with it. Anything that looks
+  like an asymmetric key is now refused as a secret, and `HS*` secrets need at least 32 bytes (RFC 7518).
+  An invalid `clockTolerance` or `now` no longer turns the expiry check off, signatures must be written in
+  canonical Base64URL, and a `crit` header is refused unless you list it in `options.crit`.
+- **sys**: on Windows, an argument passed to an npm command (`npm.cmd`, global shims) could run another
+  command (the "BatBadBut" problem). Arguments are now escaped twice for every `.cmd` or `.bat` that passes
+  them on, and a line break, which can't be escaped, is refused.
+- **SQLite**: `update()`, `delete()` and `increment()` with a filter whose values were all `undefined`
+  (`{ id: undefined }`, `{ $or: [{}] }`, `{ id: { notIn: [] } }`) changed or deleted the whole table. They
+  now throw. A filter value taken from a JSON body could also become an operator (`{ "ne": "x" }` matched
+  every row): the new `operators: "tagged"` option and `SQLite.op` close that door, see "Added".
+- **http**: with a `baseURL`, a path like `"https://evil.example"`, `"\\evil.example"` or `"../../admin"`
+  left the base and took the client's `auth` header with it. Paths now stay under the base. Responses are
+  limited to 100 MB once decompressed (a 500 KB gzip bomb used to fill 512 MB), redirects to another origin
+  drop `x-api-key` and the other secret headers, the temporary file of `download()` has an unguessable name,
+  and an `HttpError` no longer shows query-string secrets or cookies in its message and `toJSON()`.
+- **env**: the `.env` loaded automatically at startup set `NODE_OPTIONS` (code run in every child process),
+  `NODE_TLS_REJECT_UNAUTHORIZED` and other dangerous variables. They are now left out, with one warning on
+  stderr. `env.parse()` no longer reads `process.env` for `${VAR}`, and a value that expands to more than
+  64 KB is refused.
+- **Denial of service**: a few hundred bytes could block the process for seconds or minutes in
+  `isMimeType()`, the duration parser (`"5m"`, behind every `timeout`, `ttl` and `expiresIn`), `time.add()`,
+  the case converters of `str`, the paths of `obj`, a recursive `schema.union()`, `.env` comments and
+  expansion, `time.parse()`, `obj.set()` with a key like `"a.4000000000"` and `arr.unzip()`. All of them are
+  now linear.
+- **logger and cli**: a logged value could send escape sequences to the terminal (write to the clipboard,
+  change the title, clear the screen), forge a log line with `\r` or `\n`, or be read as markup. They are now
+  shown as text, and the colors and links you add with `nc.color` still work. `redact` also covers `Map`,
+  `Set` and the causes of errors, and log files are created readable by their owner only.
+- **id**: a program started from a startup snapshot (`node --build-snapshot`, single executable
+  applications) printed the same ids at each start. They are now drawn again in each process.
+- **memoize**: `func.memoize()`, `func.dedupe()` and `cache.wrap()` could give one call the cached result of
+  another, for example `{ role: "admin" }` and `{ role: "guest" }` held in a `Set`.
+- **fs**: copying or moving a file onto itself, or a folder into itself, deleted it. `copy()` followed
+  junctions out of the folder on Windows, `emptyFolder()` emptied the folder a junction pointed to, and
+  `sanitizeFilename()` let `COM¹`, `CONIN$` and right-to-left characters through.
+- **Smaller fixes**: TOTP secrets need 10 bytes (16 for new ones from `totpSecret()`) and the window is
+  capped at 10, `verifyPassword()` refuses hashes that would take minutes, `safeEqual("", "")` is `false`, `str.mask()` no longer shows a short
+  secret in full, `isURL()` and `schema.string().url()` refuse text that only parses once cleaned
+  (`https://a.com/"><script>`), `sys.open()` only opens web and mail links, and `obj.set()` converts each
+  key once, so a key object can't pass the `__proto__` check and then change.
+
+### Added
+
+- **crypto**: Argon2id passwords, with `hashPassword(password, { algorithm: "argon2id" })` (Node.js 24.7 or
+  later). The hashes use the standard PHC format, so other libraries can read them. `verifyPassword()` reads
+  both kinds, and `needsRehash()` says when a hash should move to the algorithm you ask for.
+- **crypto**: `totpStep()` gives the time step of a valid code, and `verifyTOTP({ after })` refuses a code
+  that was already used. `verifyJWT()` takes `typ` and `crit`, and `clockTolerance` takes text like `"30s"`.
+- **SQLite**: `SQLite.op` builds operators (`SQLite.op.gte(18)`, `SQLite.op.in([1, 2])`) that a value from
+  JSON can't imitate, and `new SQLite(path, { operators: "tagged" })` only accepts those. In that mode, a read
+  throws on an `undefined` filter value too, so a missing field can't drop its condition.
+- **http**: `maxResponseSize`, `allowAbsoluteUrls` and `sensitiveHeaders` options, and the client follows
+  redirects itself (`redirect: "follow" | "manual" | "error"`).
+- **sys**: `open(target, { protocols, allowUNC })` and `which(command, { cwd })`.
+- **schema**: `parse()`, `safeParse()` and `is()` take `{ maxDepth }` (1000 by default), and a value nested
+  deeper gets a `"too_deep"` issue instead of a stack overflow.
+- **str**: `levenshtein(a, b, { maxDistance })` and `closest(..., { maxDistance })` stop counting early.
+- **checker**: `isDataURL(value, { types })` limits the accepted media types.
+- **logger**: the `mode` of log files (`0o600` by default).
+- **`using`**: watchers, schedules (`every()`, `cron()`), spinners, progress bars, `when()` tasks,
+  `dontCrash()`, and the functions returned by `emitter.on()`, `onAny()` and `sys.onShutdown()` work with
+  `using` (Node.js 24 and later): they stop at the end of the block.
+- **time**: dates can be `Temporal` objects (`Temporal.Instant`, `Temporal.ZonedDateTime`).
+
+### Changed
+
+- **Node.js 22.23.4, 24.22.1, 26.12.1 or a later version of these lines is required** (`engines`). Older
+  versions can be crashed by a single malicious HTTP response, which no package can prevent (2.1.1 only
+  warned about it). Node.js 25 is not supported.
+- **Faster on Node.js 26**: time zones go through `Temporal`, and `time.add()` or `time.startOf()` with a
+  zone are more than twice as fast.
+- JWT `HS*` secrets shorter than 32 bytes throw a `TypeError`, when signing and when verifying.
+- TOTP secrets shorter than 10 bytes throw, `totpSecret()` needs at least 16 bytes, and `window` must be an
+  integer from 0 to 10.
+- `update()`, `delete()`, `increment()` and `set()` of SQLite throw on an `undefined` filter value, an empty
+  `$and` or `$or`, or a filter that matches every row (use `clearTable()` to empty a table).
+- `http`: with a `baseURL`, a URL outside it throws a `TypeError` unless you pass `allowAbsoluteUrls: true`,
+  and then the client's `auth`, `headers` and `query` stay home. A `params` value of `.` or `..` throws.
+  Bodies over 100 MB throw `ERR_RESPONSE_TOO_LARGE`, and `redirect: "error"` throws `ERR_REDIRECT`, which
+  is not retried.
+- `sys.run()` on Windows rejects a line break in an argument to a `.cmd` or `.bat`. A relative command is
+  looked up from `options.cwd`, and `extendEnv: false` without `env` gives an empty environment.
+- `sys.open()` throws for a scheme other than `http:`, `https:` and `mailto:`, for a path that doesn't
+  exist, for a control character and, on Windows, for a network path or a double quote.
+- `env.parse()` only expands `${VAR}` from the text itself and the `env` option: pass `{ env: process.env }`
+  for the old behaviour. `env.load()` is unchanged.
+- The logger shows control characters as text, indents the lines of a message after the first one even
+  without a timestamp (but not for `log()` with no scope and no timestamp, which prints like `console.log`),
+  and reads markup in the first argument only. Without colors (and in files), colors
+  are removed from logged strings. In JSON, a logged object can't replace `time`, `level`, `scope` or `msg`.
+- `color.strip()` also removes `\r`, `\b` and every other control character but tabs and new lines.
+- `str.mask()` hides everything when `start` and `end` would show the whole text, `arr.pluck()` and the
+  other string iteratees ignore what an item inherits from `Object.prototype`, and `obj.get({}, "toString")`
+  is `undefined`.
+- `obj.set()` and `obj.unflatten()` make an object, not an array, for a number key above 10000.
+- `isURL()` and `schema.string().url()` refuse spaces, double quotes, `<`, `>`, backticks and backslashes, and
+  `isEmail()`, `isHostname()`, `isMimeType()` and `isCron()` are stricter on look-alike characters, label
+  lengths, line breaks and trailing garbage. `time.cron()` refuses `"*/5/x"` too.
+- `memoize`, `dedupe` and `cache.wrap()` compare `Set`, `Map` and class instances given as arguments by
+  identity.
+- `fs.copyFile()`, `moveFile()`, `copy()`, `move()` and the folder helpers return `false` (or `0`) instead
+  of losing data when the destination is the source or inside it.
+- `schema.union()` stops checking an option at its first issue, and `is()` stops at the first issue: the
+  refinements after it no longer run.
+- `crypto.verifyPassword()` throws a `RangeError` for a hash that asks for more work than allowed (scrypt
+  with `p` over 16, Argon2 with more than 1 GiB of memory), without doing that work: the password may be
+  right, the hash has to be replaced.
+
+### Fixed
+
+- `fs.move()` keeps the destination when the move fails, `findUp({ stopAt })` honors a path with a trailing
+  separator or another letter case, and `color.link()` can't be cut short by its own text.
+- `fs.moveFilesIn()` deleted every selected file, even one whose copy failed. Now a file that can't be
+  copied stays where it is, and `moveFile()` can change only the letter case of a name on Windows and macOS.
+- A response body is cancelled when `onDownloadProgress` throws, so the connection doesn't stay open.
+- `s.literal(5n)` and enums of bigints report a failure instead of throwing.
+
+### Repository
+
+- Every GitHub Action is pinned to a commit, the jobs keep no git credentials, and CodeQL scans the code and
+  the workflows on each pull request. Dependabot keeps the tools up to date.
+- `scripts/bench.js` measures 63 hot paths and compares two runs.
+
 ## [2.1.1] - 2026-10-30
 
 ### Security
