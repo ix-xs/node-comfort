@@ -165,4 +165,17 @@ describe("hostile input", () => {
     assert.deepEqual(arr.unzip(/** @type {any} */ ({ length: 3e6 })), []);
     assert.deepEqual(arr.zip(["a"], [1, 2]), [["a", 1], [undefined, 2]]);
   });
+
+  it("parseBytes and sanitizeFilename stay linear on long runs", () => {
+    // each took seconds: a run of digits, or spaces and dots at the end
+    for (const fn of [() => nc.num.parseBytes("1".repeat(30000) + "!"), () => nc.num.parseBytes(".9" + " ".repeat(50000) + "x"), () => nc.fs.sanitizeFilename(" ".repeat(50000) + "x"), () => nc.fs.sanitizeFilename(". ".repeat(25000) + "x")]) {
+      const started = performance.now();
+      fn();
+      assert.ok(performance.now() - started < 1000, String(fn));
+    }
+    assert.equal(nc.num.parseBytes(" 1.5G "), 1610612736);
+    assert.equal(nc.num.parseBytes("5."), 5);
+    assert.equal(nc.fs.sanitizeFilename("report. . "), "report");
+    assert.equal(nc.fs.sanitizeFilename("CON .txt"), "_CON .txt");
+  });
 });
