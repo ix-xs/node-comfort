@@ -437,7 +437,7 @@ arr.flatten([1, [2, [3, [4]]]], Infinity); // [1, 2, 3, 4]
 zip<T>(...arrays: (readonly T[])[]): (T | undefined)[][]
 ```
 
-Associe les éléments par position. Les tableaux plus courts laissent des trous `undefined`.
+Associe les éléments par position. Les tableaux plus courts laissent des trous `undefined`, et les valeurs qui ne sont pas des tableaux comptent comme des tableaux vides.
 
 ```js
 arr.zip(["a", "b"], [1, 2]); // [["a", 1], ["b", 2]]
@@ -449,7 +449,7 @@ arr.zip(["a", "b"], [1, 2]); // [["a", 1], ["b", 2]]
 unzip<T>(tuples: readonly (readonly T[])[]): (T | undefined)[][]
 ```
 
-L'inverse de `zip()` : les lignes deviennent des colonnes.
+L'inverse de `zip()` : les lignes deviennent des colonnes. Les lignes qui ne sont pas des tableaux comptent comme des tableaux vides.
 
 ```js
 arr.unzip([["a", 1], ["b", 2]]); // [["a", "b"], [1, 2]]

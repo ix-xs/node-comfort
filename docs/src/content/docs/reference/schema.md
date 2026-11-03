@@ -316,10 +316,27 @@ type ObjectOutput = Simplify<{ [K in keyof S as undefined extends Infer<S[K]> ? 
 
 ### ParseContext
 
+The state of a parse. `abortEarly` is set by `is()` and while a union
+tries its options: containers then stop at the first issue, and set
+`aborted` when they do. `memo` keeps what unions found on objects for
+the rest of the parse.
+
 | Property | Type | Description |
 | --- | --- | --- |
 | `issues` | [`ValidationIssue`](/reference/errors/#validationissue)`[]` |  |
 | `path` | `(string \| number)[]` |  |
+| `maxDepth` | `number` |  |
+| `abortEarly` | `boolean` |  |
+| `aborted` | `boolean` |  |
+| `memo` | `{ unions: ``WeakMap``<object, ``Map``<``Schema``<any>, _UnionMemo>> \| undefined; }` |  |
+
+### ParseOptions
+
+Options for `parse()`, `safeParse()` and `is()`.
+
+| Property | Type | Description |
+| --- | --- | --- |
+| `maxDepth?` | `number` | How many levels of objects and arrays a value may have. A value nested deeper is refused with a `"too_deep"` issue instead of running out of stack. Defaults to `1000`. |
 
 ### RefineOptions
 

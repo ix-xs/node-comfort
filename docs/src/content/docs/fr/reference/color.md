@@ -58,7 +58,7 @@ Le niveau de couleur pris en charge par un flux, en tenant compte de `NO_COLOR` 
 strip(text: string): string
 ```
 
-Retire les couleurs et les autres codes d'échappement du terminal.
+Retire les couleurs, tous les autres codes d'échappement du terminal et tous les caractères de contrôle sauf les tabulations et les retours à la ligne (`\r` et `\b` partent donc aussi).
 
 ## width
 
@@ -82,7 +82,7 @@ Coupe le texte à un nombre de colonnes et ajoute `…`. Les couleurs sont conse
 link(text: string, url: string): string
 ```
 
-Un lien cliquable dans les terminaux qui le prennent en charge, `"text (url)"` ailleurs.
+Un lien cliquable dans les terminaux qui le prennent en charge, `"text (url)"` ailleurs. Les caractères de contrôle sont retirés des deux, pour qu'ils ne puissent pas terminer le lien trop tôt ; le texte garde ses couleurs.
 
 ## gradient
 
@@ -118,10 +118,10 @@ Utilitaires de couleur.
 | `enabled` | `boolean` | Indique si les couleurs sont émises. |
 | `create` | `(level?: `[`ColorLevel`](#colorlevel)`) => `[`ColorModule`](#colormodule) | Une instance séparée avec son propre niveau, pour un autre flux ou pour les tests. |
 | `detect` | `(stream?: ``WriteStream`` \| { isTTY?: boolean; } \| undefined) => `[`ColorLevel`](#colorlevel) | Le niveau de couleur pris en charge par un flux, en tenant compte de `NO_COLOR` et de `FORCE_COLOR`. |
-| `strip` | `(text: string) => string` | Retire les couleurs et les autres codes d'échappement du terminal. |
+| `strip` | `(text: string) => string` | Retire les couleurs, tous les autres codes d'échappement du terminal et tous les caractères de contrôle sauf les tabulations et les retours à la ligne (`\r` et `\b` partent donc aussi). |
 | `width` | `(text: string) => number` | Le nombre de colonnes occupées par le texte, sans tenir compte des couleurs et en comptant 2 pour les emoji et les caractères CJK. |
 | `truncate` | `(text: string, columns: number, options?: { ellipsis?: string; } \| undefined) => string` | Coupe le texte à un nombre de colonnes et ajoute `…`. Les couleurs sont conservées et restent correctement fermées. |
-| `link` | `(text: string, url: string) => string` | Un lien cliquable dans les terminaux qui le prennent en charge, `"text (url)"` ailleurs. |
+| `link` | `(text: string, url: string) => string` | Un lien cliquable dans les terminaux qui le prennent en charge, `"text (url)"` ailleurs. Les caractères de contrôle sont retirés des deux, pour qu'ils ne puissent pas terminer le lien trop tôt ; le texte garde ses couleurs. |
 | `gradient` | `(text: string, colors: string[]) => string` | Colore le texte le long d'un dégradé de couleurs hexadécimales. |
 
 ### ColorLevel

@@ -475,7 +475,10 @@ isEmail(value: unknown): value is string
 
 Does it look like an email address? The rules are practical rather than
 the full RFC: one `@`, no stray dots, a real top-level domain.
-International addresses are accepted.
+International addresses are accepted, but not look-alike characters such
+as the Kelvin sign in the domain. A valid address can still contain
+quotes, `&`, `|` or backticks: it is not safe to put unescaped into HTML
+or a shell command.
 
 ```js
 nc.isEmail("jose@exemple.fr");     // true
@@ -490,6 +493,9 @@ isURL(value: unknown, options?: IsURLOptions): value is string
 ```
 
 Is it an absolute URL with an allowed protocol (http and https by default)?
+The text must already be clean: spaces, control characters, double
+quotes, backticks, `<`, `>` and backslashes are refused, even where the URL
+parser would quietly fix them. An apostrophe is fine.
 
 ```js
 nc.isURL("https://example.com/a?b=1");                 // true
@@ -704,6 +710,8 @@ isHostname(value: unknown, options?: IsHostnameOptions): value is string
 
 Is it a host name, like `example.com`, `api.internal` or `localhost`?
 International names are accepted. IP addresses aren't: see `isIP`.
+Lengths are counted the way DNS sees them, once converted to ASCII
+(`xn--`): 63 bytes per label, 253 in all.
 
 ```js
 nc.isHostname("api.example.com");                    // true
@@ -780,14 +788,17 @@ nc.isULID(nc.id.ulid()); // true
 ## isDataURL
 
 ```ts
-isDataURL(value: unknown): value is string
+isDataURL(value: unknown, options?: IsDataURLOptions): value is string
 ```
 
-Is it a `data:` URL, like an inline image?
+Is it a `data:` URL, like an inline image? Only the header is checked,
+not the data. Without `types`, any media type passes, `text/html` and
+`image/svg+xml` included, and both can run scripts.
 
 ```js
 nc.isDataURL("data:image/png;base64,iVBORw0KGgo="); // true
 nc.isDataURL("data:,Hello");                         // true
+nc.isDataURL("data:text/html,<p>Hi</p>", { types: ["image/png"] }); // false
 ```
 
 ## isMimeType
@@ -919,6 +930,14 @@ Options for `isBase64()`.
 | Property | Type | Description |
 | --- | --- | --- |
 | `urlSafe?` | `boolean` | Expect the URL-safe alphabet (`-` and `_`), padding optional. |
+
+### IsDataURLOptions
+
+Options for `isDataURL()`.
+
+| Property | Type | Description |
+| --- | --- | --- |
+| `types?` | `string[]` | Accepted media types, like `["image/png", "image/jpeg"]`, case ignored. A URL without a type, like `data:,Hello`, counts as `text/plain`. Without this option, any type passes. |
 
 ### IsHostnameOptions
 

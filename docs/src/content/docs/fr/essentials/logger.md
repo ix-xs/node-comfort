@@ -66,6 +66,18 @@ nc.info("user:", { id: 1, roles: ["admin"] });
 nc.error(new Error("Cannot save order", { cause: dbError }));
 ```
 
+Un message sur plusieurs lignes garde sa forme : les lignes qui suivent la première sont indentées, avec ou sans horodatage, pour qu'un saut de ligne dans une valeur ne puisse pas passer pour une ligne de journal à part entière. L'exception est `log()` sans scope ni horodatage, qui affiche comme `console.log` : une boîte ou un tableau reste ainsi aligné.
+
+## Valeurs que vous ne contrôlez pas
+
+Une valeur journalisée peut contenir des caractères de contrôle : un nom d'utilisateur, un en-tête, un nom de fichier. Un terminal réagit à certains d'entre eux (il peut effacer l'écran, changer son titre ou écrire dans le presse-papiers), et `\r` peut faire ressembler une ligne à une autre. Le logger les affiche donc sous forme de texte, comme `\x1b` ou `\r`, au lieu de les envoyer au terminal :
+
+```js
+nc.info("Login from", req.headers["user-agent"]); // "Mozilla\x1b]0;hacked\x07" est affiché comme du texte
+```
+
+Les sauts de ligne et les tabulations sont conservés, de même que les couleurs et les liens que vous ajoutez avec [`nc.color`](/system/color/). Sans couleurs, et dans les fichiers de journal, les couleurs sont retirées des chaînes journalisées.
+
 ## Balisage
 
 Mettez en forme des parties d'un message avec `<% styles text%>` :
@@ -76,6 +88,12 @@ nc.log("<% #ff8800 Orange%> on <% bg#1e1e2e white a dark background%>");
 ```
 
 Toutes les couleurs et tous les styles de [`nc.color`](/system/color/) fonctionnent, ainsi que `#hex`, `bg#hex`, `rgb(r, g, b)` et `bgRgb(r, g, b)`. Les espaces placés avant `%>` sont conservés et font partie du texte. Si `<%` entre en conflit avec un moteur de templates, changez les délimiteurs avec `nc.setDelimiter({ open: "{{", close: "}}" })`.
+
+Le balisage n'est lu que dans le premier argument. Les autres arguments s'affichent tels quels : placez-y donc les valeurs qui viennent de l'extérieur, plutôt qu'à l'intérieur de la première chaîne.
+
+```js
+nc.info("<% bold New user:%>", user.name); // un nom comme "<% red x%>" reste du texte
+```
 
 ## Groupes, chronomètres et tableaux
 
@@ -126,7 +144,7 @@ log.error("charge failed", { orderId: 42 }, error);
 {"time":"2026-09-11T14:30:05.120Z","level":"error","service":"billing","version":"2.3.0","orderId":42,"err":{"name":"Error","message":"card declined","stack":"Error: card declined\n    at ..."},"msg":"charge failed"}
 ```
 
-Les objets simples passés en arguments sont fusionnés dans l'enregistrement, les erreurs vont sous `err`, et tout le reste devient le message.
+Les objets simples passés en arguments sont fusionnés dans l'enregistrement, les erreurs vont sous `err`, et tout le reste devient le message. Un objet journalisé ne peut pas remplacer `time`, `level`, `scope` ou `msg`.
 
 ## Masquer les secrets
 
@@ -178,6 +196,14 @@ nc.configure({ file: { path: "logs/app.log", maxSize: "10MB", maxFiles: 5 } });
 ```
 
 Les couleurs sont retirées dans les fichiers. Quand `app.log` dépasse 10 Mo, il devient `app.log.1`, et le fichier le plus ancien au-delà de cinq est supprimé.
+
+Les journaux contiennent souvent ce que d'autres ne devraient pas lire : un nouveau fichier de journal n'est donc lisible que par son propriétaire (`0o600`). Changez cela avec `mode`, par exemple pour qu'un collecteur de journaux du même groupe puisse le lire :
+
+```js
+nc.configure({ file: { path: "logs/app.log", mode: 0o640 } });
+```
+
+Un fichier qui existe déjà garde ses permissions. `mode` est ignoré sous Windows.
 
 ## Les réglages en un coup d'œil
 

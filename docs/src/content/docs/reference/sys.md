@@ -38,7 +38,7 @@ a `ProcessError` if the exit code isn't 0.
 | `args?` | `string[]` | Defaults to `[]`. |
 | `options?` | [`RunOptions`](#runoptions) |  |
 
-**Throws** `ProcessError`: If it can't start, fails (unless `reject: false`) or times out.
+**Throws** `ProcessError`: If it can't start, fails (unless `reject: false`) or times out. On Windows, also when a `.cmd` or `.bat` file would get an argument with a line break, or with a quote when the file doesn't pass its arguments on with `%*`: cmd.exe can't be given those safely.
 
 ```js
 const { stdout } = await sys.run("git", ["log", "-1", "--format=%s"]);
@@ -65,34 +65,50 @@ const { exitCode } = await sys.exec("npm test", { reject: false, stdio: "inherit
 ## which
 
 ```ts
-which(command: string): string | undefined
+which(command: string, options?: WhichOptions): string | undefined
 ```
 
-Finds an executable in `PATH`, like the `which` command.
+Finds an executable in `PATH`, like the `which` command. A path, like
+`"./bin/tool"`, is looked up from `cwd` instead.
 
 ```js
 sys.which("git");  // "/usr/bin/git"
 sys.which("nope"); // undefined
+sys.which("./tool", { cwd: "./app" });
 ```
 
 ## open
 
 ```ts
-open(target: string): boolean
+open(target: string, options?: OpenOptions): boolean
 ```
 
-Opens a URL, file or folder with the default app.
+Opens a URL, file or folder with the default app. Only `http:`,
+`https:` and `mailto:` URLs are opened unless you allow more with
+`protocols`; anything else is a path, which must exist. A program is
+started, as with a double click: don't pass a path you didn't choose.
+
+| Parameter | Type | Description |
+| --- | --- | --- |
+| `target` | `string` | A URL, or the path of a file or folder. |
+| `options?` | [`OpenOptions`](#openoptions) |  |
 
 **Returns** `boolean`: `true` if the opener started.
 
+**Throws** `TypeError`: If the URL's scheme isn't allowed, the target holds a control character (or a double quote, on Windows), or it's a network path without `allowUNC`.
+
+**Throws** `Error`: If the path doesn't exist.
+
 ```js
 sys.open("http://localhost:3000");
+sys.open("./report.html");
+sys.open("vscode://file/C:/app/index.js", { protocols: ["vscode:"] });
 ```
 
 ## onShutdown
 
 ```ts
-onShutdown(handler: (reason: ShutdownReason) => unknown, options?: ShutdownOptions): () => void
+onShutdown(handler: (reason: ShutdownReason) => unknown, options?: ShutdownOptions): (() => void) & Disposable
 ```
 
 Runs cleanup code when the process is asked to stop (Ctrl+C,
@@ -105,7 +121,7 @@ longer than `timeout`, the exit is forced; a second Ctrl+C exits at once.
 | `handler` | `(reason: `[`ShutdownReason`](#shutdownreason)`) => unknown` | Can be async. Gets the signal that stopped the process. |
 | `options?` | [`ShutdownOptions`](#shutdownoptions) |  |
 
-**Returns** `() => void`: Removes the handler.
+**Returns** `(() => void) & ``Disposable`: Removes the handler. With `using`, at the end of the block.
 
 ```js
 const server = app.listen(3000);
@@ -254,7 +270,16 @@ nc.num.formatBytes(sys.memory().heapUsed); // "42.1 MB"
 
 ## Types
 
-The types behind the options and results above. In TypeScript, import them from the package: `import type { RunOptions } from "@ix-xs/node-comfort"`.
+The types behind the options and results above. In TypeScript, import them from the package: `import type { OpenOptions } from "@ix-xs/node-comfort"`.
+
+### OpenOptions
+
+Options for `open()`.
+
+| Property | Type | Description |
+| --- | --- | --- |
+| `protocols?` | `string[]` | The URL schemes that may be opened, like `"https:"` or `"vscode:"`. Defaults to `["http:", "https:", "mailto:"]`: `file:`, `search-ms:` and the schemes other apps register can start programs, so they're refused unless you name them. An allowed `file:` URL is checked like a path. |
+| `allowUNC?` | `boolean` | Allow a Windows network path like `\\server\share\file`. Defaults to `false`: just looking one up can send your Windows credentials to that server. |
 
 ### RunOptions
 
@@ -264,7 +289,7 @@ Options for `run()` and `exec()`.
 | --- | --- | --- |
 | `cwd?` | `string` | Where to run the command. |
 | `env?` | `Record``<string, string \| undefined>` | Extra environment variables, added to `process.env`. `undefined` removes one. |
-| `extendEnv?` | `boolean` | Set to `false` to pass only `env`, without `process.env`. |
+| `extendEnv?` | `boolean` | Set to `false` to pass only `env`, without `process.env`. Without `env`, the command then gets an empty environment. |
 | `input?` | `string \| ``Buffer``<``ArrayBufferLike``>` | Written to the command's stdin. |
 | `timeout?` | `string \| number` | Kill the command after this long, like `"30s"`. On Windows, what it started is stopped with it. |
 | `signal?` | `AbortSignal` | Kills the command when aborted. On Windows, what it started is stopped with it. |
@@ -326,3 +351,11 @@ Returned by `info()`.
 | `ci` | `boolean` | Running in CI. |
 | `docker` | `boolean` | Running in a container. |
 | `wsl` | `boolean` | Running in WSL. |
+
+### WhichOptions
+
+Options for `which()`.
+
+| Property | Type | Description |
+| --- | --- | --- |
+| `cwd?` | `string` | Where a relative path like `"./bin/tool"`, or a relative folder in `PATH`, is looked up from. Defaults to `process.cwd()`. |

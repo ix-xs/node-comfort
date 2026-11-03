@@ -1,6 +1,6 @@
 ---
 title: "nc.crypto"
-description: "Crypto without the footguns, built on `node:crypto`: hashes, HMAC, password hashing (scrypt), encryption (AES-256-GCM), JWT, two-factor codes (TOTP) and secure random values."
+description: "Crypto without the footguns, built on `node:crypto`: hashes, HMAC, password hashing (scrypt or Argon2id), encryption (AES-256-GCM), JWT, two-factor codes (TOTP) and secure random values."
 sidebar:
   label: "crypto"
   order: 23
@@ -86,7 +86,10 @@ safeEqual(a: string | Buffer<ArrayBufferLike> | Uint8Array<ArrayBufferLike>, b: 
 Compares two secrets in constant time, so the comparison can't leak
 anything through timing, not even their lengths. Use it instead of `===`
 for tokens, signatures and API keys. A missing value (`undefined`, `null`)
-never equals anything.
+or an empty one (`""`) never equals anything, not even another empty
+value, so an unset secret can't match an empty header.
+
+**Returns** `boolean`: `false` when either side is missing or empty.
 
 ```js
 if (!crypto.safeEqual(providedKey, process.env.API_KEY)) throw new Error("Forbidden");
@@ -98,15 +101,24 @@ if (!crypto.safeEqual(providedKey, process.env.API_KEY)) throw new Error("Forbid
 hashPassword(password: string, options?: HashPasswordOptions): Promise<string>
 ```
 
-Hashes a password with scrypt and a random salt. The result records its
-own settings, so you can raise the cost later without breaking old
-hashes.
+Hashes a password with a random salt: scrypt by default, or Argon2id. The
+result records its own settings, so you can raise the cost, or move to
+Argon2id, later without breaking old hashes.
+
+Argon2id hashes are standard PHC strings, readable by the other Argon2
+libraries. Hashing and verifying them needs Node.js 24.7 or later; scrypt
+works on every supported version.
 
 **Throws** `RangeError`: If the settings are out of bounds, like a cost that needs more than 1 GiB of memory.
+
+**Throws** `NodeComfortError`: With code `ERR_ARGON2_UNAVAILABLE` for `"argon2id"` on a Node.js older than 24.7.
 
 ```js
 const stored = await crypto.hashPassword(password);
 // "$scrypt$ln=15,r=8,p=1$4xY...$kq9...", store this
+
+const modern = await crypto.hashPassword(password, { algorithm: "argon2id" });
+// "$argon2id$v=19$m=19456,t=2,p=1$Zm9v...$YmFy..."
 ```
 
 ## verifyPassword
@@ -115,8 +127,17 @@ const stored = await crypto.hashPassword(password);
 verifyPassword(password: string, stored: string): Promise<boolean>
 ```
 
-Checks a password against a stored hash, in constant time. A wrong
-password or a broken hash gives `false`, never an error.
+Checks a password against a stored hash, in constant time: scrypt hashes
+from `hashPassword()`, and Argon2 PHC strings (`$argon2id$`, `$argon2i$`,
+`$argon2d$`) from here or from another library. A wrong password or a
+broken hash gives `false`. A hash asking for more work than allowed (more
+than 1 GiB of memory, for instance) throws instead, without doing that
+work: a doctored hash would stall the server that way, and a genuine one
+isn't a wrong password but a hash to replace.
+
+**Throws** `RangeError`: If the hash asks for more work than allowed: scrypt with `p` over 16 or `128 * N * r * p` over 2**30 bytes (up to what version 2.1 accepted: past that, the hash is broken and gives `false`), Argon2 with more than 1 GiB of memory, 10 passes or 16 lanes. Rehash such passwords with settings within these limits.
+
+**Throws** `NodeComfortError`: With code `ERR_ARGON2_UNAVAILABLE` if the hash is Argon2 and this Node.js is older than 24.7. That is a deployment problem, not a wrong password, so it isn't hidden behind `false`.
 
 ```js
 if (!(await crypto.verifyPassword(input, user.passwordHash))) throw new Error("Invalid credentials");
@@ -128,17 +149,23 @@ if (!(await crypto.verifyPassword(input, user.passwordHash))) throw new Error("I
 needsRehash(stored: string, options?: HashPasswordOptions): boolean
 ```
 
-Was this hash made with weaker settings than yours? If so, re-hash the
-password right after a successful login.
+Was this hash made with another algorithm, or with weaker settings than
+yours (lower cost, a key under 32 bytes, a salt under 16)? If so, re-hash
+the password right after a successful login.
 
 | Parameter | Type | Description |
 | --- | --- | --- |
 | `stored` | `string` |  |
-| `options?` | [`HashPasswordOptions`](#hashpasswordoptions) | The settings you use today. |
+| `options?` | [`HashPasswordOptions`](#hashpasswordoptions) | The settings you use today. `algorithm` defaults to `"scrypt"`. |
 
 ```js
 if (await crypto.verifyPassword(input, user.hash) && crypto.needsRehash(user.hash, { cost: 16 })) {
   user.hash = await crypto.hashPassword(input, { cost: 16 });
+}
+
+// moving everyone to Argon2id, one login at a time
+if (await crypto.verifyPassword(input, user.hash) && crypto.needsRehash(user.hash, { algorithm: "argon2id" })) {
+  user.hash = await crypto.hashPassword(input, { algorithm: "argon2id" });
 }
 ```
 
@@ -249,10 +276,12 @@ with HMAC is never accepted where a public key is expected.
 | Parameter | Type | Description |
 | --- | --- | --- |
 | `token` | `string` |  |
-| `secret` | [`JWTKey`](#jwtkey) | The shared secret, or the public key for RS, PS, ES and EdDSA tokens. |
+| `secret` | [`JWTKey`](#jwtkey) | The shared secret (at least 32 bytes), or the public key for RS, PS, ES and EdDSA tokens. |
 | `options?` | [`VerifyJWTOptions`](#verifyjwtoptions) |  |
 
-**Throws** `JWTError`
+**Throws** `JWTError`: If the token is malformed, badly signed, expired or doesn't meet your options.
+
+**Throws** `TypeError`: If the key can't be used (a secret under 32 bytes, a public key passed as raw bytes...) or an option is invalid.
 
 ```js
 try {
@@ -298,7 +327,9 @@ Store it encrypted.
 
 | Parameter | Type | Description |
 | --- | --- | --- |
-| `bytes?` | `number` | Defaults to `20`. |
+| `bytes?` | `number` | At least `16` (128 bits, the minimum of RFC 4226). `20` is what most apps use. Defaults to `20`. |
+
+**Throws** `RangeError`: If `bytes` is under 16.
 
 ```js
 user.totpSecret = crypto.totpSecret();
@@ -313,6 +344,13 @@ totp(secret: string, options?: TOTPOptions): string
 The current 6-digit code for a two-factor secret, as shown by
 authenticator apps.
 
+| Parameter | Type | Description |
+| --- | --- | --- |
+| `secret` | `string` | Base32, at least 10 bytes once decoded (16 characters), so older 80-bit secrets keep working. Make new ones with `totpSecret()`, which gives 20 bytes. |
+| `options?` | [`TOTPOptions`](#totpoptions) |  |
+
+**Throws** `TypeError`: If the secret isn't Base32 or is too short.
+
 ```js
 crypto.totp(user.totpSecret); // "492039"
 ```
@@ -326,14 +364,53 @@ verifyTOTP(token: string, secret: string, options?: VerifyTOTPOptions): boolean
 Checks a code typed by a user. Codes from the neighbouring periods are
 accepted too, to cope with clock drift.
 
+On its own it accepts the same code again until it expires. To refuse
+reuse, keep the step of the last accepted code from `totpStep()` and
+pass it as `after`.
+
 | Parameter | Type | Description |
 | --- | --- | --- |
 | `token` | `string` | Spaces are ignored. |
-| `secret` | `string` |  |
+| `secret` | `string` | Base32, at least 10 bytes once decoded (16 characters), so older 80-bit secrets keep working. Make new ones with `totpSecret()`, which gives 20 bytes. |
 | `options?` | [`VerifyTOTPOptions`](#verifytotpoptions) |  |
+
+**Throws** `RangeError`: If `window` isn't an integer from 0 to 10.
+
+**Throws** `TypeError`: If the secret isn't Base32 or is too short.
 
 ```js
 if (!crypto.verifyTOTP(req.body.code, user.totpSecret)) throw new Error("Invalid code");
+```
+
+## totpStep
+
+```ts
+totpStep(code: string, secret: string, options?: VerifyTOTPOptions): number | undefined
+```
+
+Finds which time step a code typed by a user belongs to. Codes from the
+neighbouring periods are accepted too, to cope with clock drift.
+
+Store the step of the last code you accepted and pass it as `after` next
+time: the same code, or an older one, is then refused, so a code seen
+over someone's shoulder can't be used again.
+
+| Parameter | Type | Description |
+| --- | --- | --- |
+| `code` | `string` | Spaces are ignored. |
+| `secret` | `string` | Base32, at least 10 bytes once decoded (16 characters), so older 80-bit secrets keep working. Make new ones with `totpSecret()`, which gives 20 bytes. |
+| `options?` | [`VerifyTOTPOptions`](#verifytotpoptions) |  |
+
+**Returns** `number | undefined`: The time step of the code (Unix time divided by the period), or `undefined` if it doesn't match.
+
+**Throws** `RangeError`: If `window` isn't an integer from 0 to 10.
+
+**Throws** `TypeError`: If the secret isn't Base32 or is too short, or `after` isn't an integer.
+
+```js
+const step = crypto.totpStep(req.body.code, user.totpSecret, { after: user.totpLastStep });
+if (step === undefined) throw new Error("Invalid code");
+user.totpLastStep = step; // save it with the user
 ```
 
 ## totpURI
@@ -447,15 +524,19 @@ Options for `hash()` and `hmac()`.
 
 ### HashPasswordOptions
 
-Options for `hashPassword()`.
+Options for `hashPassword()` and `needsRehash()`.
 
 | Property | Type | Description |
 | --- | --- | --- |
-| `cost?` | `number` | Work factor as a power of two; each +1 doubles the time. Defaults to `15`. |
+| `algorithm?` | `"argon2id" \| "scrypt"` | Defaults to `"scrypt"`, which every supported Node.js version can verify. `"argon2id"` needs Node.js 24.7 or later, to hash and to verify. |
+| `cost?` | `number` | scrypt work factor as a power of two; each +1 doubles the time. Defaults to `15`. |
 | `blockSize?` | `number` | scrypt `r`. Defaults to `8`. |
-| `parallelization?` | `number` | scrypt `p`. Defaults to `1`. |
-| `saltLength?` | `number` | In bytes. Defaults to `16`. |
-| `keyLength?` | `number` | In bytes. Defaults to `32`. |
+| `parallelization?` | `number` | scrypt `p`, at most `16`. Defaults to `1`. |
+| `memory?` | `number` | Argon2id memory, in KiB, at most `1048576` (1 GiB). Defaults to `19456` (19 MiB), as OWASP recommends. |
+| `passes?` | `number` | Argon2id passes over the memory (`t`), from `1` to `10`. Defaults to `2`. |
+| `parallelism?` | `number` | Argon2id lanes (`p`), from `1` to `16`. Defaults to `1`. |
+| `saltLength?` | `number` | In bytes, at least `8`. Defaults to `16`. |
+| `keyLength?` | `number` | In bytes, from `16` to `128`. Defaults to `32`. |
 
 ### JWTAlgorithm
 
@@ -525,7 +606,7 @@ Options for `totp()` and `verifyTOTP()`.
 | `digits?` | `number` | Defaults to `6`. |
 | `period?` | `number` | How long a code lasts, in seconds. Defaults to `30`. |
 | `algorithm?` | `"``SHA1``" \| "``SHA256``" \| "``SHA512``"` | Defaults to `"SHA1"`, which is what authenticator apps expect. |
-| `time?` | `number \| ``Date` | Compute the code for this moment. Defaults to now. |
+| `time?` | `number \| ``Date` | Compute the code for this moment, as a `Date` or Unix milliseconds. Defaults to now. |
 
 ### TOTPURIOptions
 
@@ -549,16 +630,22 @@ Options for `verifyJWT()`.
 | `issuer?` | `string \| string[]` | Required issuer. |
 | `audience?` | `string \| string[]` | Required audience; one match is enough. |
 | `subject?` | `string` | Required subject. |
-| `clockTolerance?` | `number` | Seconds of slack for `exp` and `nbf` when server clocks differ. |
+| `clockTolerance?` | `string \| number` | Slack for `exp` and `nbf` when server clocks differ: seconds (`0` or more) or a duration like `"30s"`. Defaults to `0`. |
 | `maxAge?` | `string \| number` | Reject tokens issued longer ago than this. |
 | `ignoreExpiration?` | `boolean` | Skip the `exp` check. |
-| `now?` | `number \| ``Date` | What time it is. Defaults to now. Handy in tests. |
+| `now?` | `number \| ``Date` | What time it is, as a `Date` or Unix milliseconds. Defaults to now. Handy in tests. |
+| `typ?` | `string` | Required `typ` header, like `"at+jwt"` for OAuth access tokens. Compared ignoring case, with or without `application/`. A token with another `typ`, or none, is refused. |
+| `crit?` | `string[]` | Header extensions your code understands. A token whose `crit` header lists anything else is refused, as RFC 7515 requires. |
 
 ### VerifyTOTPOptions
 
-Options for `verifyTOTP()`. `window` is how many periods before and after
-now are accepted (defaults to `1`).
+Options for `verifyTOTP()` and `totpStep()`.
 
-```ts
-type VerifyTOTPOptions = TOTPOptions & { window?: number; }
-```
+| Property | Type | Description |
+| --- | --- | --- |
+| `digits?` | `number` | Defaults to `6`. |
+| `period?` | `number` | How long a code lasts, in seconds. Defaults to `30`. |
+| `algorithm?` | `"``SHA1``" \| "``SHA256``" \| "``SHA512``"` | Defaults to `"SHA1"`, which is what authenticator apps expect. |
+| `time?` | `number \| ``Date` | Check the code at this moment, as a `Date` or Unix milliseconds. Defaults to now. |
+| `window?` | `number` | How many periods before and after now are accepted, from `0` to `10`. Defaults to `1`. |
+| `after?` | `number` | The time step of the last code you accepted, from `totpStep()`. Codes from that step or an earlier one are refused, so a code can't be used twice. |

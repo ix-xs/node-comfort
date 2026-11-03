@@ -466,7 +466,7 @@ if (nc.isOneOf(input, ROLES)) input; // "admin" | "user"
 isEmail(value: unknown): value is string
 ```
 
-Cela ressemble-t-il à une adresse e-mail ? Les règles sont pragmatiques plutôt que conformes à toute la RFC : un seul `@`, pas de point mal placé, un vrai domaine de premier niveau. Les adresses internationales sont acceptées.
+Cela ressemble-t-il à une adresse e-mail ? Les règles sont pragmatiques plutôt que conformes à toute la RFC : un seul `@`, pas de point mal placé, un vrai domaine de premier niveau. Les adresses internationales sont acceptées, mais pas les caractères trompeurs comme le signe kelvin dans le domaine. Une adresse valide peut quand même contenir des guillemets, `&`, `|` ou des accents graves : il n'est pas sûr de l'insérer sans échappement dans du HTML ou dans une commande shell.
 
 ```js
 nc.isEmail("jose@exemple.fr");     // true
@@ -480,7 +480,7 @@ nc.isEmail("john@localhost");       // false
 isURL(value: unknown, options?: IsURLOptions): value is string
 ```
 
-Est-ce une URL absolue avec un protocole autorisé (http et https par défaut) ?
+Est-ce une URL absolue avec un protocole autorisé (http et https par défaut) ? Le texte doit déjà être propre : les espaces, les caractères de contrôle, les guillemets doubles, les accents graves, `<`, `>` et les barres obliques inverses sont refusés, même là où l'analyseur d'URL les corrigerait sans rien dire. Une apostrophe ne pose pas de problème.
 
 ```js
 nc.isURL("https://example.com/a?b=1");                 // true
@@ -691,7 +691,7 @@ Cela ressemble-t-il à un JSON Web Token ? La signature n'est pas vérifiée ; u
 isHostname(value: unknown, options?: IsHostnameOptions): value is string
 ```
 
-Est-ce un nom d'hôte, comme `example.com`, `api.internal` ou `localhost` ? Les noms internationaux sont acceptés. Les adresses IP ne le sont pas : voir `isIP`.
+Est-ce un nom d'hôte, comme `example.com`, `api.internal` ou `localhost` ? Les noms internationaux sont acceptés. Les adresses IP ne le sont pas : voir `isIP`. Les longueurs sont comptées comme le DNS les voit, une fois converties en ASCII (`xn--`) : 63 octets par étiquette, 253 au total.
 
 ```js
 nc.isHostname("api.example.com");                    // true
@@ -766,14 +766,15 @@ nc.isULID(nc.id.ulid()); // true
 ## isDataURL
 
 ```ts
-isDataURL(value: unknown): value is string
+isDataURL(value: unknown, options?: IsDataURLOptions): value is string
 ```
 
-Est-ce une URL `data:`, comme une image intégrée ?
+Est-ce une URL `data:`, comme une image intégrée ? Seul l'en-tête est vérifié, pas les données. Sans `types`, tous les types de média passent, `text/html` et `image/svg+xml` compris, et les deux peuvent exécuter des scripts.
 
 ```js
 nc.isDataURL("data:image/png;base64,iVBORw0KGgo="); // true
 nc.isDataURL("data:,Hello");                         // true
+nc.isDataURL("data:text/html,<p>Hi</p>", { types: ["image/png"] }); // false
 ```
 
 ## isMimeType
@@ -902,6 +903,14 @@ Options de `isBase64()`.
 | Propriété | Type | Description |
 | --- | --- | --- |
 | `urlSafe?` | `boolean` | Attend l'alphabet compatible avec les URL (`-` et `_`), remplissage facultatif. |
+
+### IsDataURLOptions
+
+Options de `isDataURL()`.
+
+| Propriété | Type | Description |
+| --- | --- | --- |
+| `types?` | `string[]` | Types de média acceptés, comme `["image/png", "image/jpeg"]`, sans tenir compte de la casse. Une URL sans type, comme `data:,Hello`, compte comme `text/plain`. Sans cette option, tous les types passent. |
 
 ### IsHostnameOptions
 

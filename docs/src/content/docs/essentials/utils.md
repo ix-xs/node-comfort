@@ -52,7 +52,7 @@ nc.dontCrash()
   });
 ```
 
-It only ever removes its own handlers; listeners from your code or other libraries stay in place. `dispose()` on the returned object removes everything it installed. For a full graceful shutdown with timeouts, see [`sys.onShutdown()`](/system/sys/).
+It only ever removes its own handlers; listeners from your code or other libraries stay in place. `dispose()` on the returned object removes everything it installed, and so does the end of the block with `using` on Node.js 24 and later ([more on `using`](/recipes/#cleaning-up-with-using)). For a full graceful shutdown with timeouts, see [`sys.onShutdown()`](/system/sys/).
 
 ## when
 
@@ -65,6 +65,6 @@ nc.when(() => queue.length > 0, { reason: "jobs waiting" }, { interval: 500, max
   .start();
 ```
 
-`"trigger"` fires at every check where the condition is true. `max` stops the task after that many triggers, and `timeout` stops it after that long, whatever happened before. Without either, it runs until you call `.stop()`.
+`"trigger"` fires at every check where the condition is true. `max` stops the task after that many triggers, and `timeout` stops it after that long, whatever happened before. Without either, it runs until you call `.stop()`, or until the end of its block if you declared it with `using`.
 
 To wait until something is true, [`async.poll()`](/flow/async/) returns a promise and is usually easier.

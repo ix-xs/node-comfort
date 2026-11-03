@@ -118,7 +118,7 @@ await http.delete(`https://api.example.com/users/${id}`);
 download(url: string | URL, destination: string, options?: HttpOptions): Promise<{ path: string; size: number; }>
 ```
 
-Télécharge vers un fichier en stream, la mémoire reste donc stable quelle que soit la taille. Les dossiers sont créés. Les données vont dans un fichier temporaire qui prend le nom final une fois complet : un téléchargement échoué ou interrompu ne laisse donc jamais une moitié de fichier là où vous en attendez un entier.
+Télécharge vers un fichier en stream, la mémoire reste donc stable quelle que soit la taille. Les dossiers sont créés. Les données vont dans un fichier temporaire qui prend le nom final une fois complet : un téléchargement échoué ou interrompu ne laisse donc jamais une moitié de fichier là où vous en attendez un entier. Ce fichier temporaire a un nom aléatoire et n'est lisible et modifiable que par vous (mode `0o600`), ce que le fichier final conserve. `maxResponseSize` ne s'applique pas ici.
 
 `timeout` est le temps dont dispose le serveur pour commencer à répondre ; le transfert lui-même peut durer aussi longtemps que nécessaire. Utilisez `signal` pour lui fixer une limite.
 
@@ -156,6 +156,8 @@ HttpError: typeof HttpError
 ```
 
 Levée par `nc.http` quand le statut de la réponse n'est pas 2xx (sauf si vous passez `throwHttpErrors: false`), et pour les échecs réseau (`status` 0).
+
+Les valeurs des paramètres de requête qui semblent secrètes (`api_key`, `token`, `sig`...) apparaissent comme `***` dans le message et dans `url` : l'erreur peut donc aller dans les logs telle quelle.
 
 ## Types
 
@@ -219,9 +221,10 @@ Options de requête.
 | Propriété | Type | Description |
 | --- | --- | --- |
 | `method?` | [`HttpMethod`](#httpmethod) | Par défaut : `"GET"`. |
-| `baseURL?` | `string` | Préfixe pour les URL relatives. |
+| `baseURL?` | `string` | Préfixe pour les URL relatives. C'est une limite : un chemin qui en sortirait, comme `"../admin"`, `"//other.host"` ou une URL absolue vers un autre endroit, lève une `TypeError` (voir `allowAbsoluteUrls`). |
+| `allowAbsoluteUrls?` | `boolean` | Avec une `baseURL`, autorise une URL absolue à aller ailleurs : `api.get("https://cdn.example.com/x", { allowAbsoluteUrls: true })`. Les `auth`, `headers` et `query` propres au client restent liés à l'origine de base, seuls ceux de l'appel y vont. Par défaut : `false`, pour qu'une URL construite à partir d'une entrée extérieure ne puisse pas emmener les identifiants du client vers un autre hôte. |
 | `headers?` | [`HttpHeaders`](#httpheaders) | Mettez un en-tête à `undefined` pour retirer un en-tête par défaut. |
-| `params?` | `Record``<string, string \| number \| boolean>` | Valeurs pour les parties `:name` de l'URL : `"users/:id"` avec `{ id: 42 }` donne `users/42`. Elles sont encodées pour vous. |
+| `params?` | `Record``<string, string \| number \| boolean>` | Valeurs pour les parties `:name` de l'URL : `"users/:id"` avec `{ id: 42 }` donne `users/42`. Elles sont encodées pour vous, et `"."` ou `".."` lève une `TypeError`, puisqu'ils feraient remonter dans le chemin. |
 | `query?` | `URLSearchParams`` \| `[`QueryParams`](#queryparams) | Ajouté à la chaîne de requête de l'URL elle-même, et à celle par défaut du client. |
 | `json?` | `unknown` | Envoyé en JSON. |
 | `form?` | `Record``<string, string \| number \| boolean>` | Envoyé sous forme de formulaire encodé en URL. |
@@ -235,7 +238,9 @@ Options de requête.
 | `signal?` | `AbortSignal` | Annule la requête. |
 | `hooks?` | [`HttpHooks`](#httphooks) |  |
 | `onDownloadProgress?` | `((progress: { loaded: number; total: number \| undefined; percent: number \| undefined; }) => void)` | Appelé pendant le téléchargement du corps. |
-| `redirect?` | `"error" \| "follow" \| "manual"` | Par défaut : `"follow"`. |
+| `maxResponseSize?` | `string \| number` | Taille maximale d'un corps lu en mémoire, en octets ou comme `"50MB"`, comptée après décompression. Au-delà, la requête est annulée et une `HttpError` de code `ERR_RESPONSE_TOO_LARGE` est levée : une réponse énorme ou une bombe de décompression ne peut donc pas remplir la mémoire. Par défaut : `"100MB"`, et `Infinity` désactive la limite. Un stream (`responseType: "stream"`) et le fichier de `download()` ne sont pas gardés en mémoire : ils ne sont donc pas limités. |
+| `redirect?` | `"error" \| "follow" \| "manual"` | `"follow"` (par défaut) suit jusqu'à 20 redirections, `"manual"` renvoie la réponse 3xx telle quelle, `"error"` lève une `HttpError` de code `ERR_REDIRECT`. Quand une redirection va vers une autre origine, `authorization`, `cookie`, `proxy-authorization` et les `sensitiveHeaders` sont laissés de côté. |
+| `sensitiveHeaders?` | `string[]` | En-têtes retirés quand une redirection va vers une autre origine, en plus de `authorization`, `cookie` et `proxy-authorization`. Les noms ne tiennent pas compte de la casse. Par défaut : `["x-api-key", "x-auth-token", "api-key"]` ; une liste que vous donnez la remplace, ajoutez-y donc ceux-là si vous les utilisez. |
 
 ### HttpOptionsOf
 

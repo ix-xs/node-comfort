@@ -1,6 +1,6 @@
 ---
 title: "SQLite"
-description: "SQLite made pleasant, on the engine built into Node.js (22.13+): CRUD with rich filters, JSON and boolean columns, transactions, migrations and backups. Methods are synchronous, like the engine, but `await` still works. Errors are `SQLiteError`s. Values are always bound as parameters and names are checked, so there's no SQL injection through them."
+description: "SQLite made pleasant, on the engine built into Node.js: CRUD with rich filters, JSON and boolean columns, transactions, migrations and backups. Methods are synchronous, like the engine, but `await` still works. Errors are `SQLiteError`s. Values are always bound as parameters and names are checked, so there's no SQL injection through them."
 sidebar:
   label: "SQLite"
   order: 19
@@ -26,6 +26,10 @@ db.createTable({
 });
 db.insert("users", { email: "ada@example.com", settings: { theme: "dark" } });
 db.getAll("users", { email: { like: "%@example.com" } }, { orderBy: "email", limit: 20 });
+
+// Values from a request can't turn into operators:
+const safe = new nc.SQLite("data/app.sqlite", { operators: "tagged" });
+safe.getAll("users", { age: nc.SQLite.op.gte(18), role: nc.SQLite.op.in(["admin", "editor"]) });
 ```
 
 ## constructor
@@ -49,6 +53,17 @@ const db = new nc.SQLite();                                  // ./db.sqlite
 const app = new nc.SQLite("data/app.sqlite", { dates: true });
 const mem = new nc.SQLite(":memory:");
 ```
+
+## op
+
+```ts
+op: OperatorHelpers
+```
+
+Filter operators that only code can make. Plain objects like
+`{ gte: 18 }` still work, unless the database was opened with
+`operators: "tagged"`: then only these are operators, and a value
+taken from a request stays a value.
 
 ## exec
 
@@ -82,8 +97,7 @@ queryOne<T = R>(sql: string, params?: string | number | bigint | boolean | unkno
 ```
 
 Runs a query and returns the first row. JSON and boolean columns are
-converted like in `get()`, joins and renamed columns included. On Node.js
-before 22.16, that only works for a query on a single table.
+converted like in `get()`, joins and renamed columns included.
 
 **Throws** `SQLiteError`
 
@@ -336,7 +350,8 @@ update(tableName: string, data: Partial<R> & Record<string, unknown>, where: Whe
 ```
 
 Updates the rows that match. The filter is required, so a forgotten
-condition can't rewrite the whole table.
+condition can't rewrite the whole table: an `undefined` value in it, an
+empty `$and` or `$or`, or a filter that matches every row throws.
 
 | Parameter | Type | Description |
 | --- | --- | --- |
@@ -389,7 +404,8 @@ delete(tableName: string, where: Where<R>): ChangeResult
 ```
 
 Deletes the rows that match. The filter is required; `clearTable()`
-deletes everything on purpose.
+deletes everything on purpose. An `undefined` value in the filter, an
+empty `$and` or `$or`, or a filter that matches every row throws.
 
 **Throws** `SQLiteError`
 
@@ -406,7 +422,7 @@ increment(tableName: string, amounts: Partial<Record<keyof R & string, number>> 
 Adds to number columns in one statement, so two requests at the same
 moment both count. Reading the value, adding to it and writing it back
 would lose one of them. Negative numbers subtract; an empty column
-counts as 0.
+counts as 0. The filter is checked like the one of `update()`.
 
 | Parameter | Type | Description |
 | --- | --- | --- |
@@ -611,7 +627,7 @@ A column.
 | `defaultValue?` | `unknown` | Objects work for JSON columns, booleans for BOOLEAN ones. `"CURRENT_TIMESTAMP"`, `"CURRENT_DATE"` and `"CURRENT_TIME"` mean the moment of the insert. |
 | `defaultExpression?` | `string` | A default computed by SQLite, like `"(unixepoch())"` or `"(lower(hex(randomblob(16))))"`. Written into the table as is: never build it from user input. |
 | `values?` | `unknown[]` | Allowed values. |
-| `check?` | `string` | A `CHECK` expression, like `"price >= 0"`. |
+| `check?` | `string` | A `CHECK` expression, like `"price >= 0"`. Written into the table as is: never build it from user input. |
 | `references?` | `{ table: string; column: string; }` | Foreign key target. |
 | `onDelete?` | [`ForeignKeyAction`](#foreignkeyaction) | When the referenced row is deleted. |
 | `onUpdate?` | [`ForeignKeyAction`](#foreignkeyaction) | When the referenced key changes. |
@@ -654,7 +670,7 @@ An index.
 | `columns` | `string[]` | Several columns make a composite index. |
 | `unique?` | `boolean` |  |
 | `name?` | `string` | Defaults to `idx_<table>_<columns>`. |
-| `where?` | `string` | Makes it a partial index, like `"deleted_at IS NULL"`. |
+| `where?` | `string` | Makes it a partial index, like `"deleted_at IS NULL"`. Written into the index as is: never build it from user input. |
 
 ### InsertOptions
 
@@ -682,6 +698,27 @@ the database.
 ```ts
 type Migration = string | ((db: SQLite<any>) => void)
 ```
+
+### OperatorHelpers
+
+The helpers of `SQLite.op`, one per filter operator.
+
+| Property | Type | Description |
+| --- | --- | --- |
+| `eq` | `(value: unknown) => ``Readonly``<`[`WhereOperators`](#whereoperators)`>` | Equal. `null` means `IS NULL`. |
+| `ne` | `(value: unknown) => ``Readonly``<`[`WhereOperators`](#whereoperators)`>` | Not equal. Rows where the column is `NULL` match too. |
+| `gt` | `(value: string \| number \| bigint \| ``Date``) => ``Readonly``<`[`WhereOperators`](#whereoperators)`>` | Greater than. |
+| `gte` | `(value: string \| number \| bigint \| ``Date``) => ``Readonly``<`[`WhereOperators`](#whereoperators)`>` | Greater than or equal. |
+| `lt` | `(value: string \| number \| bigint \| ``Date``) => ``Readonly``<`[`WhereOperators`](#whereoperators)`>` | Less than. |
+| `lte` | `(value: string \| number \| bigint \| ``Date``) => ``Readonly``<`[`WhereOperators`](#whereoperators)`>` | Less than or equal. |
+| `in` | `(values: readonly unknown[]) => ``Readonly``<`[`WhereOperators`](#whereoperators)`>` | One of these values. |
+| `notIn` | `(values: readonly unknown[]) => ``Readonly``<`[`WhereOperators`](#whereoperators)`>` | None of these values. |
+| `like` | `(pattern: string) => ``Readonly``<`[`WhereOperators`](#whereoperators)`>` | A `LIKE` pattern: `%` any text, `_` one character. |
+| `notLike` | `(pattern: string) => ``Readonly``<`[`WhereOperators`](#whereoperators)`>` |  |
+| `glob` | `(pattern: string) => ``Readonly``<`[`WhereOperators`](#whereoperators)`>` | A case-sensitive pattern: `*` any text, `?` one character. |
+| `between` | `(min: unknown, max: unknown) => ``Readonly``<`[`WhereOperators`](#whereoperators)`>` | From `min` to `max`, both included. |
+| `isNull` | `() => ``Readonly``<`[`WhereOperators`](#whereoperators)`>` | `IS NULL`. |
+| `notNull` | `() => ``Readonly``<`[`WhereOperators`](#whereoperators)`>` | `IS NOT NULL`. |
 
 ### PaginateOptions
 
@@ -729,10 +766,12 @@ Options for `new SQLite()`.
 | `busyTimeout?` | `string \| number` | How long to wait for a lock held by another connection, in ms or like `"5s"`. Defaults to 5 seconds. |
 | `synchronous?` | `"``OFF``" \| "``NORMAL``" \| "``FULL``" \| "``EXTRA``"` | How hard SQLite pushes each commit to the disk. With `wal`, `"NORMAL"` writes several times faster and can't corrupt the file; a power cut may undo the last commits. Defaults to SQLite's own setting, `"FULL"`. |
 | `readOnly?` | `boolean` |  |
+| `operators?` | `"plain" \| "tagged"` | What makes an object in a filter an operator. `"plain"`, the default: any object with an operator key, like `{ gte: 18 }`, and an array means "one of". `"tagged"`: only the operators made by `SQLite.op`, any other object or array is a value compared as JSON text, so a value taken from a request can never become an operator. |
 
 ### TableConstraint
 
-A constraint on several columns.
+A constraint on several columns. The `expression` of a `check` is written
+into the table as is: never build it from user input.
 
 ```ts
 type TableConstraint = { type: "unique"; columns: string[]; } | { type: "primaryKey"; columns: string[]; } | { type: "check"; expression: string; } | { type: "foreignKey"; columns: string[]; references: { table: string; columns: string[]; }; onDelete?: ForeignKeyAction; onUpdate?: ForeignKeyAction; }
@@ -770,6 +809,16 @@ Shortcuts bound to one table, from `table()`.
 | `exists` | `(where?: `[`Where`](#where)`<``R``>) => boolean` | Does any row match? |
 | `clear` | `() => { ok: true; }` | Deletes every row. |
 
+### TaggedOperator
+
+An operator made by `SQLite.op`. It carries a mark that JSON can't
+produce, so it's an operator with `operators: "tagged"` too. Several can
+be spread into one object: `{ ...op.gte(18), ...op.lt(65) }`.
+
+```ts
+type TaggedOperator = Readonly<WhereOperators>
+```
+
 ### TransactionOptions
 
 Options for `transaction()`.
@@ -783,6 +832,13 @@ Options for `transaction()`.
 A filter. Each key is a column: a value means "equals", `null` means
 `IS NULL`, an array means "one of", and an object uses operators. Keys
 combine with AND; use `$or` and `$and` for the rest.
+
+A value taken from a request must be checked first (parsed JSON like
+`{ "ne": "" }` would act as an operator), or the database opened with
+`operators: "tagged"`, where only `SQLite.op` makes operators.
+
+On a read, a missing value drops its condition: check required values
+first (writes, and reads with `operators: "tagged"`, throw instead).
 
 A key with dots looks inside a JSON column: `"settings.theme"` is the
 `theme` key of the `settings` column, `"tags.0"` the first item of `tags`.
@@ -816,5 +872,5 @@ Operators for a column in a filter.
 The condition for one column: a value, `null`, an array, or operators.
 
 ```ts
-type WhereValue = null | string | number | bigint | boolean | Date | Uint8Array | readonly unknown[] | WhereOperators
+type WhereValue = null | string | number | bigint | boolean | Date | Uint8Array | readonly unknown[] | WhereOperators | TaggedOperator
 ```

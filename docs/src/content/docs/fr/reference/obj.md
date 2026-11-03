@@ -28,6 +28,8 @@ clone<T>(value: T): T
 
 Copie profonde. Contrairement à `structuredClone`, elle conserve les fonctions et les instances de classe (avec leur prototype), et elle est plus rapide sur des données simples. Les références partagées et les cycles sont préservés.
 
+**Lève** `RangeError` : Si la valeur est imbriquée trop profondément pour être parcourue (des milliers de niveaux).
+
 ```js
 const copy = obj.clone({ a: { b: [1, 2] }, when: new Date() });
 copy.a.b.push(3); // l'original est intact
@@ -44,6 +46,8 @@ merge(...sources: object[]): Record<string, any>
 
 Fusionne des objets en profondeur dans un nouvel objet. Les derniers objets l'emportent, les objets imbriqués sont fusionnés, les tableaux sont remplacés. Voir `mergeWith()` pour concaténer les tableaux à la place.
 
+**Lève** `RangeError` : Si un objet est imbriqué trop profondément pour être parcouru (des milliers de niveaux).
+
 ```js
 obj.merge({ db: { host: "localhost", port: 5432 } }, { db: { port: 6543 } });
 // { db: { host: "localhost", port: 6543 } }
@@ -56,6 +60,8 @@ mergeWith(options: MergeOptions, ...sources: object[]): Record<string, any>
 ```
 
 Comme `merge()`, avec le choix de ce qui arrive aux tableaux et à `undefined`.
+
+**Lève** `RangeError` : Si un objet est imbriqué trop profondément pour être parcouru (des milliers de niveaux).
 
 ```js
 obj.mergeWith({ arrays: "unique" }, { tags: ["a", "b"] }, { tags: ["b", "c"] });
@@ -77,6 +83,8 @@ Complète les propriétés manquantes à partir de valeurs par défaut, en profo
 | `target` | `T` |  |
 | `...sources` | `...``D` | La première a la priorité la plus élevée. |
 
+**Lève** `RangeError` : Si un objet est imbriqué trop profondément pour être parcouru (des milliers de niveaux).
+
 ```js
 obj.defaults({ port: 8080, db: { user: "me" } }, { port: 80, db: { user: "root", pass: "" } });
 // { port: 8080, db: { user: "me", pass: "" } }
@@ -89,6 +97,8 @@ equal(a: unknown, b: unknown): boolean
 ```
 
 Égalité profonde. Gère les tableaux, les dates, les expressions régulières, les Map, les Set, les tableaux typés, `NaN` et les références circulaires.
+
+**Lève** `RangeError` : Si les valeurs sont imbriquées trop profondément pour être parcourues (des milliers de niveaux).
 
 ```js
 obj.equal({ a: [1, { b: 2 }] }, { a: [1, { b: 2 }] }); // true
@@ -106,6 +116,8 @@ Liste ce qui a changé entre deux valeurs, en profondeur. Pratique pour les jour
 
 **Renvoie** [`Change`](#change)`[]` : Vide quand rien n'a changé.
 
+**Lève** `RangeError` : Si les valeurs sont imbriquées trop profondément pour être parcourues (des milliers de niveaux).
+
 ```js
 obj.diff({ name: "Ada", tags: ["a"] }, { name: "Ada L.", tags: ["a", "b"] });
 // [
@@ -121,7 +133,7 @@ get<T, P extends string>(object: T, path: P | (T extends PathLeaf ? never : T ex
 get<T, P extends string, F>(object: T, path: P | readonly (string | number)[] | (T extends PathLeaf ? never : T extends object ? { [K in keyof T & (string | number)]: NonNullable<T[K]> extends PathLeaf ? `${K}` : NonNullable<T[K]> extends object ? `${K}` | `${K}.${NonNullable<T[K]> extends PathLeaf ? never : NonNullable<T[K]> extends object ? { [K in keyof NonNullable<T[K]> & (string | number)]: NonNullable<NonNullable<T[K]>[K]> extends PathLeaf ? `${K}` : NonNullable<NonNullable<T[K]>[K]> extends object ? `${K}` | `${K}.${NonNullable<NonNullable<T[K]>[K]> extends PathLeaf ? never : NonNullable<NonNullable<T[K]>[K]> extends object ? { [K in keyof NonNullable<NonNullable<T[K]>[K]> & (string | number)]: NonNullable<NonNullable<NonNullable<T[K]>[K]>[K]> extends PathLeaf ? `${K}` : NonNullable<NonNullable<NonNullable<T[K]>[K]>[K]> extends object ? `${K}` | `${K}.${NonNullable<NonNullable<NonNullable<T[K]>[K]>[K]> extends PathLeaf ? never : NonNullable<NonNullable<NonNullable<T[K]>[K]>[K]> extends object ? { [K in keyof NonNullable<NonNullable<NonNullable<T[K]>[K]>[K]> & (string | number)]: NonNullable<NonNullable<NonNullable<NonNullable<T[K]>[K]>[K]>[K]> extends PathLeaf ? `${K}` : NonNullable<NonNullable<NonNullable<NonNullable<T[K]>[K]>[K]>[K]> extends object ? `${K}` | `${K}.${NonNullable<NonNullable<NonNullable<NonNullable<T[K]>[K]>[K]>[K]> extends PathLeaf ? never : NonNullable<NonNullable<NonNullable<NonNullable<T[K]>[K]>[K]>[K]> extends object ? { [K in keyof NonNullable<NonNullable<NonNullable<NonNullable<T[K]>[K]>[K]>[K]> & (string | number)]: NonNullable<NonNullable<NonNullable<NonNullable<NonNullable<T[K]>[K]>[K]>[K]>[K]> extends PathLeaf ? `${K}` : NonNullable<NonNullable<NonNullable<NonNullable<NonNullable<T[K]>[K]>[K]>[K]>[K]> extends object ? `${K}` | `${K}.${NonNullable<NonNullable<NonNullable<NonNullable<NonNullable<T[K]>[K]>[K]>[K]>[K]> extends PathLeaf ? never : NonNullable<NonNullable<NonNullable<NonNullable<NonNullable<T[K]>[K]>[K]>[K]>[K]> extends object ? { [K in keyof NonNullable<NonNullable<NonNullable<NonNullable<NonNullable<T[K]>[K]>[K]>[K]>[K]> & (string | number)]: NonNullable<NonNullable<NonNullable<NonNullable<NonNullable<NonNullable<T[K]>[K]>[K]>[K]>[K]>[K]> extends PathLeaf ? `${K}` : NonNullable<NonNullable<NonNullable<NonNullable<NonNullable<NonNullable<T[K]>[K]>[K]>[K]>[K]>[K]> extends object ? `${K}` : `${K}`; }[keyof NonNullable<NonNullable<NonNullable<NonNullable<NonNullable<T[K]>[K]>[K]>[K]>[K]> & (string | number)] : never}` : `${K}`; }[keyof NonNullable<NonNullable<NonNullable<NonNullable<T[K]>[K]>[K]>[K]> & (string | number)] : never}` : `${K}`; }[keyof NonNullable<NonNullable<NonNullable<T[K]>[K]>[K]> & (string | number)] : never}` : `${K}`; }[keyof NonNullable<NonNullable<T[K]>[K]> & (string | number)] : never}` : `${K}`; }[keyof NonNullable<T[K]> & (string | number)] : never}` : `${K}`; }[keyof T & (string | number)] : never), fallback: F): F | Exclude<PathValue<T, P>, undefined>
 ```
 
-Lit une valeur imbriquée à partir d'un chemin pointé. Votre éditeur complète les chemins et connaît le type du résultat.
+Lit une valeur imbriquée à partir d'un chemin pointé. Votre éditeur complète les chemins et connaît le type du résultat. Ce qu'un objet simple hérite n'est pas lu : `obj.get({}, "toString")` vaut `undefined`.
 
 | Paramètre | Type | Description |
 | --- | --- | --- |
@@ -142,7 +154,7 @@ obj.get(data, ["users", 0, "name"]);
 set<T>(object: T, path: PathInput<T>, value: unknown): T
 ```
 
-Renvoie une copie dans laquelle une valeur imbriquée est définie. Les niveaux manquants sont créés (des tableaux quand la clé suivante est un nombre).
+Renvoie une copie dans laquelle une valeur imbriquée est définie. Les niveaux manquants sont créés (des tableaux quand la clé suivante est un nombre jusqu'à 10000, des objets sinon : une clé comme `"a.4000000000"` ne peut donc pas créer un tableau énorme).
 
 ```js
 obj.set({}, "a.b.c", 1);            // { a: { b: { c: 1 } } }
@@ -295,6 +307,8 @@ compact<T extends object>(object: T, options?: CompactOptions): Partial<T>
 
 Retire les valeurs `null` et `undefined`, et éventuellement les valeurs vides.
 
+**Lève** `RangeError` : Avec `deep`, si l'objet est imbriqué trop profondément pour être parcouru (des milliers de niveaux).
+
 ```js
 obj.compact({ a: 1, b: null, c: undefined });                          // { a: 1 }
 obj.compact({ a: { b: null, c: "" } }, { deep: true, removeEmpty: true }); // {}
@@ -313,6 +327,8 @@ Aplatit les objets imbriqués en clés pointées. Les tableaux restent des valeu
 | `object` | `object` |  |
 | `prefix?` | `string` | Ajouté devant chaque clé. Par défaut : `""`. |
 
+**Lève** `RangeError` : Si l'objet est imbriqué trop profondément pour être parcouru (des milliers de niveaux).
+
 ```js
 obj.flatten({ db: { host: "x", port: 5432 } }); // { "db.host": "x", "db.port": 5432 }
 ```
@@ -323,7 +339,7 @@ obj.flatten({ db: { host: "x", port: 5432 } }); // { "db.host": "x", "db.port": 
 unflatten(object: Record<string, unknown>): Record<string, any>
 ```
 
-Reconstruit des objets imbriqués à partir de clés pointées. L'inverse de `flatten()`.
+Reconstruit des objets imbriqués à partir de clés pointées. L'inverse de `flatten()`. Une clé numérique jusqu'à 10000 crée un tableau, comme dans `set()`.
 
 ```js
 obj.unflatten({ "db.host": "x", "db.port": 5432 }); // { db: { host: "x", port: 5432 } }
@@ -348,6 +364,8 @@ sortKeys<T>(object: T, options?: SortKeysOptions): T
 ```
 
 Une copie dont les clés sont triées, objets imbriqués compris. Deux objets de même contenu donnent alors le même JSON, ce qui permet des hashs stables, des clés de cache et des diffs lisibles.
+
+**Lève** `RangeError` : Si l'objet est imbriqué trop profondément pour être parcouru (des milliers de niveaux).
 
 ```js
 obj.sortKeys({ b: 1, a: { d: 1, c: 2 } }); // { a: { c: 2, d: 1 }, b: 1 }
@@ -420,6 +438,8 @@ deepFreeze<T>(object: T): DeepReadonly<T>
 Gèle un objet et tout ce qu'il contient. Pratique pour la configuration et les constantes.
 
 **Renvoie** [`DeepReadonly`](#deepreadonly)`<``T``>` : Le même objet.
+
+**Lève** `RangeError` : Si l'objet est imbriqué trop profondément pour être parcouru (des milliers de niveaux). Ce qui a été atteint jusque-là reste gelé.
 
 ```js
 const CONFIG = obj.deepFreeze({ db: { host: "localhost" } });

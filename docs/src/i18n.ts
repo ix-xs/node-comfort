@@ -34,7 +34,7 @@ const en = {
   // Landing page
   "hero.eyebrow": "The standard library for Node.js",
   "hero.copy": "Copy the install command",
-  "hero.facts": "Zero dependencies|Open source, MIT|Node 22.13 and later",
+  "hero.facts": "Zero dependencies|Open source, MIT|Node 22, 24 and 26",
 
   // Showcase
   "showcase.label": "Examples you can run",
@@ -74,7 +74,7 @@ const fr: Record<UiKey, string> = {
 
   "hero.eyebrow": "La bibliothèque standard pour Node.js",
   "hero.copy": "Copier la commande d'installation",
-  "hero.facts": "Zéro dépendance|Open source, MIT|Node 22.13 et suivants",
+  "hero.facts": "Zéro dépendance|Open source, MIT|Node 22, 24 et 26",
 
   "showcase.label": "Des exemples à lancer",
   "showcase.scenes": "À essayer",

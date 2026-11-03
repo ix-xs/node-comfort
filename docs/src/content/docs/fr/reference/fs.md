@@ -168,7 +168,7 @@ Cherche un fichier ou un dossier dans un dossier, puis dans son parent, et ainsi
 | Paramètre | Type | Description |
 | --- | --- | --- |
 | `name` | `string \| string[]` | Un nom, ou plusieurs à essayer dans chaque dossier, dans cet ordre. |
-| `options?` | `{ cwd?: string, type?: "file" \| "folder" \| "any", stopAt?: string }` | Où commencer (le répertoire de travail par défaut), quoi chercher (`"any"` par défaut), et un dossier au-dessus duquel ne pas remonter. |
+| `options?` | `{ cwd?: string, type?: "file" \| "folder" \| "any", stopAt?: string }` | Où commencer (le répertoire de travail par défaut), quoi chercher (`"any"` par défaut), et un dossier au-dessus duquel ne pas remonter : la recherche s'arrête là, ou dès qu'elle en sort. |
 
 **Renvoie** `string | undefined` : Le chemin absolu.
 
@@ -419,9 +419,9 @@ nc.deleteFilesIn("./logs", false, (file) => file.endsWith(".log"));
 emptyFolder(path: string): boolean | undefined
 ```
 
-Supprime tout le contenu d'un dossier, en conservant le dossier.
+Supprime tout le contenu d'un dossier, en conservant le dossier. Un lien vers un dossier (une jonction sous Windows) est refusé : ce vers quoi il pointe n'est pas touché.
 
-**Renvoie** `boolean | undefined` : `undefined` s'il n'existe pas.
+**Renvoie** `boolean | undefined` : `undefined` s'il n'existe pas, `false` si c'est un lien ou si quelque chose n'a pas pu être supprimé.
 
 ## copy
 
@@ -429,9 +429,9 @@ Supprime tout le contenu d'un dossier, en conservant le dossier.
 copy(source: string, destination: string, options?: CopyOptions): boolean
 ```
 
-Copie un fichier ou un dossier entier, comme `cp -r`.
+Copie un fichier ou un dossier entier, comme `cp -r`. Les liens à l'intérieur du dossier sont copiés comme des liens (des jonctions sous Windows), jamais suivis : les fichiers hors du dossier ne sont jamais emportés.
 
-**Renvoie** `boolean` : `false` si la source est absente ou si la copie a échoué.
+**Renvoie** `boolean` : `false` si la source est absente, si la destination est la source ou se trouve à l'intérieur, ou si la copie a échoué.
 
 ```js
 nc.copy("./templates", "./dist/templates");
@@ -444,13 +444,15 @@ nc.copy("./.env.example", "./.env", { overwrite: false });
 move(source: string, destination: string, options?: { overwrite?: boolean; } | undefined): boolean
 ```
 
-Déplace ou renomme un fichier ou un dossier, y compris d'un disque à un autre.
+Déplace ou renomme un fichier ou un dossier, y compris d'un disque à un autre. Une destination qui gêne est d'abord mise de côté, puis remise en place si le déplacement échoue.
 
 | Paramètre | Type | Description |
 | --- | --- | --- |
 | `source` | `string` |  |
 | `destination` | `string` |  |
 | `options?` | `{ overwrite?: boolean }` | `overwrite` remplace une destination existante. Par défaut : `true`. |
+
+**Renvoie** `boolean` : `false` si la source est absente, si la destination se trouve à l'intérieur, si la source est un lien vers la destination, ou si le déplacement a échoué.
 
 ```js
 nc.move("./report.pdf", "./archive/2024/report.pdf");
@@ -464,7 +466,7 @@ copyFoldersIn(options: CopyFoldersOptions): number | undefined
 
 Copie les dossiers contenus dans un dossier vers un autre. `copy()` est plus simple dans la plupart des cas.
 
-**Renvoie** `number | undefined` : Le nombre d'éléments copiés.
+**Renvoie** `number | undefined` : Le nombre d'éléments copiés : `0` quand `dest` est le dossier source ou se trouve à l'intérieur.
 
 ## copyFolder
 
@@ -474,6 +476,8 @@ copyFolder(options: CopyFolderOptions): boolean | undefined
 
 Copie un dossier. Sans `recursive` ni `withFiles`, seul le dossier vide est créé ; `copy()` copie tout en un seul appel.
 
+**Renvoie** `boolean | undefined` : `false` quand `dest` est le dossier source ou se trouve à l'intérieur.
+
 ## copyFilesIn
 
 ```ts
@@ -482,7 +486,7 @@ copyFilesIn(options: CopyFilesOptions): number | undefined
 
 Copie les fichiers contenus dans un dossier vers un autre, en conservant l'arborescence.
 
-**Renvoie** `number | undefined` : Le nombre d'éléments copiés.
+**Renvoie** `number | undefined` : Le nombre d'éléments copiés : `0` quand `dest` est le dossier source, ou se trouve à l'intérieur avec `recursive`.
 
 ```js
 nc.copyFilesIn({ path: "./src", dest: "./dist", filter: (file) => file.endsWith(".css") });
@@ -496,6 +500,8 @@ copyFile(options: CopyFileOptions): boolean | undefined
 
 Copie un fichier. Si `dest` se termine par `/`, le fichier garde son nom dans ce dossier.
 
+**Renvoie** `boolean | undefined` : `false` quand `dest` est le fichier lui-même.
+
 ```js
 nc.copyFile({ path: "./src/index.js", dest: "./dist/" });
 ```
@@ -508,7 +514,7 @@ moveFoldersIn(options: CopyFoldersOptions): number | undefined
 
 Déplace les dossiers contenus dans un dossier.
 
-**Renvoie** `number | undefined` : Le nombre d'éléments déplacés.
+**Renvoie** `number | undefined` : Le nombre d'éléments déplacés : `0` quand `dest` est le dossier source ou se trouve à l'intérieur.
 
 ## moveFolder
 
@@ -518,15 +524,17 @@ moveFolder(options: CopyFolderOptions & { path: string; }): boolean | undefined
 
 Déplace un dossier.
 
+**Renvoie** `boolean | undefined` : `false` quand `dest` est le dossier source ou se trouve à l'intérieur.
+
 ## moveFilesIn
 
 ```ts
 moveFilesIn(options: CopyFilesOptions): number | undefined
 ```
 
-Déplace les fichiers contenus dans un dossier.
+Déplace les fichiers contenus dans un dossier. Un fichier qui ne peut pas être copié reste où il est, et n'est pas compté.
 
-**Renvoie** `number | undefined` : Le nombre d'éléments déplacés.
+**Renvoie** `number | undefined` : Le nombre d'éléments déplacés : `0` quand `dest` est le dossier source, ou se trouve à l'intérieur avec `recursive`.
 
 ## moveFile
 
@@ -535,6 +543,8 @@ moveFile(options: CopyFileOptions): boolean | undefined
 ```
 
 Déplace un fichier.
+
+**Renvoie** `boolean | undefined` : `false` quand `dest` est le fichier lui-même sous le même nom, ou quand le fichier est un lien vers `dest`.
 
 ```js
 nc.moveFile({ path: "./logs/app.log", dest: "./logs/archive/" });
@@ -645,7 +655,7 @@ try { await exportTo(dir); } finally { nc.remove(dir); }
 sanitizeFilename(name: string, options?: { replacement?: string; } | undefined): string
 ```
 
-Transforme n'importe quel texte en un nom de fichier valide sous Windows, macOS et Linux : les caractères interdits sont remplacés, les noms réservés comme `CON` sont préfixés, et la longueur est plafonnée.
+Transforme n'importe quel texte en un nom de fichier valide sous Windows, macOS et Linux : les caractères interdits sont remplacés, les caractères invisibles et de direction du texte sont retirés, les noms réservés comme `CON`, `NUL .txt` ou `COM¹` sont préfixés, et la longueur est plafonnée.
 
 | Paramètre | Type | Description |
 | --- | --- | --- |
@@ -778,7 +788,7 @@ Options de `readJSON()`.
 
 ### Watcher
 
-Renvoyé par `watch()`.
+Renvoyé par `watch()`. Avec `using`, la surveillance s'arrête à la fin du bloc.
 
 | Propriété | Type | Description |
 | --- | --- | --- |

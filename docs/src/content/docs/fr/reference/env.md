@@ -31,11 +31,14 @@ config.PORT; // un nombre, typé dans votre éditeur
 parse(content: string, options?: EnvParseOptions): Record<string, string>
 ```
 
-Analyse le texte d'un fichier `.env` : guillemets, valeurs multilignes, `export`, commentaires, échappements et expansion de `${VAR}` (sauf entre guillemets simples).
+Analyse le texte d'un fichier `.env` : guillemets, valeurs multilignes, `export`, commentaires, échappements et expansion de `${VAR}` (sauf entre guillemets simples). Les références se résolvent à partir du texte lui-même et de `env`, jamais de `process.env` sauf si vous le passez.
+
+**Lève** `RangeError` : Si des références font grossir une valeur au-delà de 64 Ko, comme avec des variables qui reprennent chacune la précédente plusieurs fois.
 
 ```js
 env.parse('PORT=3000\nURL="http://localhost:${PORT}"');
 // { PORT: "3000", URL: "http://localhost:3000" }
+env.parse("HOME_COPY=${HOME}", { env: process.env });
 ```
 
 ## load
@@ -45,6 +48,8 @@ load(files?: string | string[], options?: EnvLoadOptions): Record<string, string
 ```
 
 Charge des fichiers `.env` dans `process.env`. Le premier fichier qui définit une variable l'emporte, et les variables déjà définies sont conservées, sauf si vous passez `override`. Le `.env` chargé automatiquement au démarrage ne compte pas comme déjà défini : `.env.local` l'emporte sur lui, comme on s'y attend.
+
+Le chargement au démarrage laisse de côté les variables qui peuvent exécuter du code ou affaiblir TLS, et le signale sur stderr : `NODE_OPTIONS`, `NODE_TLS_REJECT_UNAUTHORIZED`, `NODE_EXTRA_CA_CERTS`, `NODE_PATH`, `NODE_REDIRECT_WARNINGS`, `NODE_REPL_EXTERNAL_MODULE`, `NODE_USE_ENV_PROXY`, `LD_PRELOAD`, `LD_LIBRARY_PATH`, `LD_AUDIT`, `DYLD_*`, `GIT_SSH_COMMAND`, `GIT_SSH`, `GIT_ASKPASS`, `GIT_EXEC_PATH`, `GIT_CONFIG*`, `GIT_PROXY_COMMAND`, `GIT_EXTERNAL_DIFF`, `GIT_TEMPLATE_DIR`, `GIT_PAGER`, `GIT_EDITOR`, `GIT_SEQUENCE_EDITOR`, `PAGER`, `EDITOR`, `VISUAL`, `SSH_ASKPASS`, `PATH`, `PATHEXT`, `ComSpec`, `BASH_ENV`, `PROMPT_COMMAND`, `PERL5OPT`, `PYTHONSTARTUP`, `PYTHONPATH`, `RUBYOPT`, `JAVA_TOOL_OPTIONS` et `_JAVA_OPTIONS`. Un appel à `load()` les charge toutes : ne l'appelez donc pas sur un fichier non fiable, comme le `.env` d'un dépôt que quelqu'un vous a envoyé.
 
 | Paramètre | Type | Description |
 | --- | --- | --- |
@@ -342,7 +347,7 @@ Options de `parse()`.
 | Propriété | Type | Description |
 | --- | --- | --- |
 | `expand?` | `boolean` | Remplacer `$VAR`, `${VAR}` et `${VAR:-default}`. Par défaut : `true`. |
-| `env?` | `Record``<string, string \| undefined>` | Autres variables utilisables dans les expansions. Par défaut : `process.env`. |
+| `env?` | `Record``<string, string \| undefined>` | Autres variables utilisables dans les expansions. Par défaut : aucune. Une référence ne se résout qu'à partir du texte lui-même : analyser un fichier non fiable ne peut donc pas y copier vos secrets. Passez `process.env` pour lire ses variables. |
 
 ### EnvVarSpec
 

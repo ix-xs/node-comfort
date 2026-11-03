@@ -37,6 +37,19 @@ time.relative(date, undefined, { locale: "de" });               // "vor 3 Stunde
 
 `time.timezones()` lists every zone, and `time.offset("Europe/Paris")` gives the current offset in minutes, daylight saving included.
 
+## Temporal
+
+Wherever a function takes a date, it also takes an instant from `Temporal`: a `Temporal.Instant` or a `Temporal.ZonedDateTime`, next to a `Date`, a timestamp in milliseconds and an ISO string. Results are still `Date` objects.
+
+```js
+time.format(Temporal.Now.instant(), "YYYY-MM-DD HH:mm");
+time.isWeekend(Temporal.ZonedDateTime.from("2026-03-29T09:00[Europe/Paris]")); // true
+```
+
+Only the instant is read: the zone of a `ZonedDateTime` isn't used, so pass `{ timeZone }` when you want it.
+
+On Node.js 26, which has `Temporal` built in, time zones go through it instead of `Intl`. Calls that work in a zone, like `time.add()` or `time.startOf()` with a `timeZone`, are more than twice as fast there. Results are the same on Node.js 22 and 24.
+
 ## Formatting
 
 ```js
@@ -203,4 +216,4 @@ time.nextRun("0 0 1 * *"); // when it would run next
 
 Expressions have five fields (`minute hour day month weekday`), or six with seconds first. They support lists, ranges, steps, month and day names, `L` in the day field for the last day of the month, and the `@hourly`, `@daily`, `@weekly`, `@monthly` and `@yearly` shortcuts.
 
-Both return a task with `stop()`, `next()`, `isRunning()` and `runs()`. Every function is listed in the [reference](/reference/time/).
+Both return a task with `stop()`, `next()`, `isRunning()` and `runs()`. On Node.js 24 and later, a task declared with `using` stops at the end of its block ([more on `using`](/recipes/#cleaning-up-with-using)). Every function is listed in the [reference](/reference/time/).

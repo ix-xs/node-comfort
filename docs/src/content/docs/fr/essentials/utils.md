@@ -52,7 +52,7 @@ nc.dontCrash()
   });
 ```
 
-Elle ne retire jamais que ses propres gestionnaires ; les écouteurs de votre code ou d'autres bibliothèques restent en place. Appelé sur l'objet renvoyé, `dispose()` retire tout ce qu'elle a installé. Pour un arrêt propre complet, avec des timeouts, voyez [`sys.onShutdown()`](/system/sys/).
+Elle ne retire jamais que ses propres gestionnaires ; les écouteurs de votre code ou d'autres bibliothèques restent en place. Appelé sur l'objet renvoyé, `dispose()` retire tout ce qu'elle a installé, tout comme la fin du bloc avec `using` sur Node.js 24 ou plus récent ([en savoir plus sur `using`](/recipes/#cleaning-up-with-using)). Pour un arrêt propre complet, avec des timeouts, voyez [`sys.onShutdown()`](/system/sys/).
 
 ## when
 
@@ -65,6 +65,6 @@ nc.when(() => queue.length > 0, { reason: "jobs waiting" }, { interval: 500, max
   .start();
 ```
 
-`"trigger"` est émis à chaque vérification où la condition est vraie. `max` arrête la tâche après ce nombre de déclenchements, et `timeout` l'arrête au bout de cette durée, quoi qu'il se soit passé avant. Sans l'un ni l'autre, elle tourne jusqu'à ce que vous appeliez `.stop()`.
+`"trigger"` est émis à chaque vérification où la condition est vraie. `max` arrête la tâche après ce nombre de déclenchements, et `timeout` l'arrête au bout de cette durée, quoi qu'il se soit passé avant. Sans l'un ni l'autre, elle tourne jusqu'à ce que vous appeliez `.stop()`, ou jusqu'à la fin de son bloc si vous l'avez déclarée avec `using`.
 
 Pour attendre qu'une condition devienne vraie, [`async.poll()`](/flow/async/) renvoie une promesse et s'avère souvent plus simple.

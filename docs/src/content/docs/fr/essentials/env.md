@@ -111,6 +111,16 @@ nc.env.load([".env.local", ".env"]);
 
 Le `.env` chargé au démarrage fait exception : ce qu'il a défini a la priorité la plus basse, un fichier que vous chargez vous-même l'emporte donc sur lui. `nc.env.load(".env.local")` fait ce que vous attendez, sans rien avoir à désactiver. L'environnement réel l'emporte toujours sur tous les fichiers.
 
+### Ce que le chargement automatique laisse de côté
+
+Le `.env` chargé au démarrage est lu dans le dossier de travail, qui peut être un dépôt que quelqu'un vous a envoyé. Il ne définit donc jamais les variables capables d'exécuter du code dans les programmes que votre application lance, ou de désactiver les vérifications TLS : `NODE_OPTIONS`, `NODE_TLS_REJECT_UNAUTHORIZED`, `NODE_EXTRA_CA_CERTS`, `NODE_PATH`, `LD_PRELOAD`, `DYLD_*`, `GIT_SSH_COMMAND`, `GIT_CONFIG*`, `PATH`, `EDITOR`, `PAGER` et quelques autres du même genre (la [référence](/reference/env/) donne la liste complète). Quand il en laisse une de côté, il le signale une fois sur stderr.
+
+Si vous voulez vraiment l'une d'elles depuis un fichier de confiance, chargez-le vous-même : un appel explicite à `nc.env.load()` les définit toutes.
+
+```js
+nc.env.load(".env"); // votre propre fichier : NODE_OPTIONS et les autres sont aussi définies
+```
+
 Une référence comme `${HOST}` prend la valeur finale de `HOST`. Si l'environnement ou `.env.local` définit `HOST`, un `URL=http://${HOST}` placé dans `.env` la suit.
 
 `load()` renvoie tout ce qu'elle a lu dans les fichiers. Les fichiers absents sont ignorés, sauf si vous passez `required: true`.
@@ -141,7 +151,14 @@ PRIVATE_KEY="-----BEGIN KEY-----
 GREETING='single quotes keep ${THIS} as is'
 ```
 
-`nc.env.parse(text)` analyse le texte sans toucher à `process.env`.
+`nc.env.parse(text)` analyse le texte sans toucher à `process.env`, et sans le lire non plus : une référence `${VAR}` n'utilise que les variables du texte lui-même et celles de l'option `env`. Passez `process.env` pour utiliser l'environnement réel :
+
+```js
+nc.env.parse('PORT=3000\nURL="http://localhost:${PORT}"'); // { PORT: "3000", URL: "http://localhost:3000" }
+nc.env.parse("TMP_COPY=${TMP}", { env: process.env });       // TMP vient de l'environnement réel
+```
+
+Une valeur qui dépasse 64 Ko à force de références (des variables qui utilisent chacune plusieurs fois la précédente) lève une `RangeError`.
 
 ## Modes
 

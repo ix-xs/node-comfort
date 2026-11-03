@@ -237,6 +237,41 @@ nc.sys.onShutdown(async () => {
 
 Handlers run in reverse order of registration, and a second Ctrl+C exits immediately.
 
+## Cleaning up with `using`
+
+On Node.js 24 and later, a `using` declaration stops a resource at the end of its block, however the block ends: normally, with `return`, or with an error. No `try`/`finally` to write, and no timer left running because something threw:
+
+```js
+const nc = require("@ix-xs/node-comfort");
+
+async function build(files) {
+  using bar = nc.cli.progress({ total: files.length });
+  using heartbeat = nc.time.every("30s", () => nc.info("Still building..."));
+  using handler = nc.sys.onShutdown(() => nc.warn("Build interrupted"));
+
+  for (const file of files) {
+    await compile(file); // if this throws, all three stop anyway
+    bar.tick(1, file);
+  }
+}
+```
+
+These work with `using`:
+
+| What | At the end of the block |
+| --- | --- |
+| `nc.watch()` | the watcher is closed |
+| `time.every()`, `time.cron()` | the schedule stops |
+| `cli.spinner()` | a spinner still running is stopped |
+| `cli.progress()` | the bar is stopped |
+| `nc.when()` | the task stops |
+| `nc.dontCrash()` | its handlers are removed |
+| what `emitter.on()`, `once()` and `onAny()` return | the listener is removed |
+| what `sys.onShutdown()` returns | the handler is removed |
+| `new nc.SQLite()` | the connection is closed |
+
+`using` is new syntax: on Node.js 22 it doesn't parse, so call `stop()`, `close()` or the returned function yourself there. A `watch()` on a missing path returns `undefined`, which `using` accepts.
+
 ## Structured logs in production
 
 ```js

@@ -1,10 +1,10 @@
 {
   "A small typed event emitter. Declare your events once, and your editor checks every event name and listener argument. `on()` returns a function that removes the listener, and you can `await` an event or loop over events with `for await`.": "Un petit émetteur d'événements typé. Déclarez vos événements une fois, et votre éditeur vérifie chaque nom d'événement et chaque argument d'écouteur. `on()` renvoie une fonction qui retire l'écouteur, et vous pouvez attendre un événement avec `await` ou parcourir des événements avec `for await`.",
   "Listens to an event.": "Écoute un événement.",
-  "Removes the listener.": "Retire l'écouteur.",
+  "Removes the listener. With `using`, at the end of the block.": "Retire l'écouteur. Avec `using`, à la fin du bloc.",
   "const off = emitter.on(\"data\", (chunk) => chunks.push(chunk));\noff(); // stop listening\n\nconst controller = new AbortController();\nemitter.on(\"data\", onData, { signal: controller.signal });\nemitter.on(\"end\", onEnd, { signal: controller.signal });\ncontroller.abort(); // removes both": "const off = emitter.on(\"data\", (chunk) => chunks.push(chunk));\noff(); // arrête d'écouter\n\nconst controller = new AbortController();\nemitter.on(\"data\", onData, { signal: controller.signal });\nemitter.on(\"end\", onEnd, { signal: controller.signal });\ncontroller.abort(); // retire les deux",
   "Listens to an event once.": "Écoute un événement une seule fois.",
-  "Removes the listener if it hasn't run yet.": "Retire l'écouteur s'il n'a pas encore été appelé.",
+  "Removes the listener if it hasn't run yet. With `using`, at the end of the block.": "Retire l'écouteur s'il n'a pas encore été appelé. Avec `using`, à la fin du bloc.",
   "Listens to every event; the listener gets the event name first. Handy for logging.": "Écoute tous les événements ; l'écouteur reçoit d'abord le nom de l'événement. Pratique pour la journalisation.",
   "Removes a listener, or all listeners of the event if you don't pass one.": "Retire un écouteur, ou tous les écouteurs de l'événement si vous n'en passez pas.",
   "The function given to `on()` or `once()`.": "La fonction donnée à `on()` ou `once()`.",

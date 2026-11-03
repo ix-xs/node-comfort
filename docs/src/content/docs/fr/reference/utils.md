@@ -135,7 +135,7 @@ Les types derrière les options et les résultats ci-dessus. En TypeScript, impo
 
 ### DontCrashController
 
-Renvoyé par `dontCrash()`.
+Renvoyé par `dontCrash()`. Avec `using`, ce qu'il a installé est retiré à la fin du bloc.
 
 | Propriété | Type | Description |
 | --- | --- | --- |
@@ -171,7 +171,7 @@ Options de `when()`.
 
 ### WhenTask
 
-La tâche renvoyée par `when()`. Chaque méthode renvoie la tâche, ce qui permet d'enchaîner les appels.
+La tâche renvoyée par `when()`. Chaque méthode renvoie la tâche, ce qui permet d'enchaîner les appels. Avec `using`, elle s'arrête à la fin du bloc.
 
 | Propriété | Type | Description |
 | --- | --- | --- |

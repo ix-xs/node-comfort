@@ -19,7 +19,9 @@ await nc.sys.run("npm", ["install"], { cwd: "./app", stdio: "inherit" }); // out
 await nc.sys.run("ffmpeg", ["-i", input, output], { timeout: "5m", onStderr: (line) => nc.debug(line) });
 ```
 
-On Windows, `run("npm", ...)` finds `npm.cmd` and escapes arguments correctly, which Node's `spawn` doesn't do on its own.
+On Windows, `run("npm", ...)` finds `npm.cmd` and escapes arguments correctly, which Node's `spawn` doesn't do on its own. A `.cmd` or `.bat` file goes through `cmd.exe`, which reads `%`, `&` or `^` in an argument as part of a command, and reads them again in every `.cmd` the arguments are passed on to (like the shims of global npm packages). So arguments are escaped twice, and a value like `"&calc"` stays a value. Some things can't be escaped for `cmd.exe`: a line break in an argument, or a quote given to a batch file that doesn't pass its arguments on with `%*`, rejects with a `ProcessError` before anything runs.
+
+A relative command, like `"./bin/tool"`, is looked up from `cwd`, not from the folder your program started in.
 
 `exec` goes through the shell, for pipes and `&&`. Never build its command from untrusted input.
 
@@ -47,7 +49,7 @@ try {
 
 A timeout that can't be read, like `"soon"`, rejects with a `TypeError` before anything starts, so a typo never runs a command without a limit.
 
-Other options: `env` (added to `process.env`), `input` (written to stdin), `onStdout` and `onStderr` (called for each line) and `trim`. The [reference](/reference/sys/) has the full list.
+Other options: `env` (added to `process.env`, or used alone with `extendEnv: false`: the command then gets nothing else, and an empty environment without `env`), `input` (written to stdin), `onStdout` and `onStderr` (called for each line) and `trim`. The [reference](/reference/sys/) has the full list.
 
 ## Finding and opening things
 
@@ -57,7 +59,19 @@ nc.sys.open("http://localhost:3000"); // default browser
 nc.sys.open("./report.html");
 ```
 
-`which` remembers what it found, so you can call it as often as you like.
+`which` remembers what it found, so you can call it as often as you like. A path, like `"./bin/tool"`, is looked up from `cwd` instead of `PATH`:
+
+```js
+nc.sys.which("./node_modules/.bin/eslint", { cwd: "./app" });
+```
+
+`open` starts a program, as a double click would, so it only opens what is safe by default: `http:`, `https:` and `mailto:` URLs, and paths that exist. Other schemes (`file:`, `search-ms:`, and the ones other apps register) can start programs, so they throw a `TypeError` unless you list them in `protocols`. A path that doesn't exist throws an `Error`. On Windows, a network path like `\\server\share\file` is refused unless you pass `allowUNC: true`, because just looking it up can send your Windows credentials to that server.
+
+```js
+nc.sys.open("vscode://file/C:/app/index.js", { protocols: ["vscode:"] });
+```
+
+Don't pass `open` a path or a URL you didn't choose.
 
 ## Ports and addresses
 
@@ -83,7 +97,7 @@ nc.sys.onShutdown(() => db.close());
 nc.sys.onShutdown((reason) => nc.info(`Stopping (${reason})`));
 ```
 
-Handlers run in reverse order (the last one registered runs first), then the process exits. Each one gets the reason: the signal, like `"SIGINT"` or `"SIGTERM"`, or `"shutdown"` when you asked for it yourself. If they take longer than 10 seconds (change it with `{ timeout: "30s" }`), the exit is forced. Pressing Ctrl+C a second time exits right away. `onShutdown` returns a function that removes the handler.
+Handlers run in reverse order (the last one registered runs first), then the process exits. Each one gets the reason: the signal, like `"SIGINT"` or `"SIGTERM"`, or `"shutdown"` when you asked for it yourself. If they take longer than 10 seconds (change it with `{ timeout: "30s" }`), the exit is forced. Pressing Ctrl+C a second time exits right away. `onShutdown` returns a function that removes the handler. On Node.js 24 and later, declare it with `using` to remove the handler at the end of a block ([more on `using`](/recipes/#cleaning-up-with-using)).
 
 To stop on your own, call `shutdown` instead of `process.exit()`, which would skip the handlers:
 

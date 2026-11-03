@@ -37,6 +37,19 @@ time.relative(date, undefined, { locale: "de" });               // "vor 3 Stunde
 
 `time.timezones()` liste tous les fuseaux, et `time.offset("Europe/Paris")` donne le décalage actuel en minutes, heure d'été comprise.
 
+## Temporal
+
+Partout où une fonction accepte une date, elle accepte aussi un instant venant de `Temporal` : un `Temporal.Instant` ou un `Temporal.ZonedDateTime`, en plus d'une `Date`, d'un timestamp en millisecondes et d'une chaîne ISO. Les résultats restent des objets `Date`.
+
+```js
+time.format(Temporal.Now.instant(), "YYYY-MM-DD HH:mm");
+time.isWeekend(Temporal.ZonedDateTime.from("2026-03-29T09:00[Europe/Paris]")); // true
+```
+
+Seul l'instant est lu : le fuseau d'un `ZonedDateTime` n'est pas utilisé, passez donc `{ timeZone }` si vous en avez besoin.
+
+Sur Node.js 26, qui intègre `Temporal`, les fuseaux horaires passent par lui plutôt que par `Intl`. Les appels qui travaillent dans un fuseau, comme `time.add()` ou `time.startOf()` avec un `timeZone`, y sont plus de deux fois plus rapides. Les résultats sont les mêmes sur Node.js 22 et 24.
+
 ## Mise en forme
 
 ```js
@@ -203,4 +216,4 @@ time.nextRun("0 0 1 * *"); // le moment de sa prochaine exécution
 
 Les expressions ont cinq champs (`minute hour day month weekday`), ou six avec les secondes en premier. Elles acceptent les listes, les intervalles, les pas, les noms de mois et de jours, `L` dans le champ du jour pour le dernier jour du mois, et les raccourcis `@hourly`, `@daily`, `@weekly`, `@monthly` et `@yearly`.
 
-Les deux renvoient une tâche dotée de `stop()`, `next()`, `isRunning()` et `runs()`. Toutes les fonctions sont listées dans la [référence](/reference/time/).
+Les deux renvoient une tâche dotée de `stop()`, `next()`, `isRunning()` et `runs()`. Avec Node.js 24 ou plus récent, une tâche déclarée avec `using` s'arrête à la fin de son bloc ([en savoir plus sur `using`](/recipes/#cleaning-up-with-using)). Toutes les fonctions sont listées dans la [référence](/reference/time/).

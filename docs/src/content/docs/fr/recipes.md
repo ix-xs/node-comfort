@@ -237,6 +237,41 @@ nc.sys.onShutdown(async () => {
 
 Les gestionnaires s'exécutent dans l'ordre inverse de leur enregistrement, et un second Ctrl+C quitte immédiatement.
 
+## Faire le ménage avec `using`
+
+Avec Node.js 24 ou plus récent, une déclaration `using` arrête une ressource à la fin de son bloc, quelle que soit la façon dont le bloc se termine : normalement, avec `return` ou sur une erreur. Pas de `try`/`finally` à écrire, et aucun timer qui continue de tourner parce que quelque chose a levé une erreur :
+
+```js
+const nc = require("@ix-xs/node-comfort");
+
+async function build(files) {
+  using bar = nc.cli.progress({ total: files.length });
+  using heartbeat = nc.time.every("30s", () => nc.info("Still building..."));
+  using handler = nc.sys.onShutdown(() => nc.warn("Build interrupted"));
+
+  for (const file of files) {
+    await compile(file); // si ceci lève une erreur, les trois s'arrêtent quand même
+    bar.tick(1, file);
+  }
+}
+```
+
+Ceux-ci fonctionnent avec `using` :
+
+| Quoi | À la fin du bloc |
+| --- | --- |
+| `nc.watch()` | le watcher est fermé |
+| `time.every()`, `time.cron()` | la planification s'arrête |
+| `cli.spinner()` | un spinner encore en cours est arrêté |
+| `cli.progress()` | la barre est arrêtée |
+| `nc.when()` | la tâche s'arrête |
+| `nc.dontCrash()` | ses gestionnaires sont retirés |
+| ce que renvoient `emitter.on()`, `once()` et `onAny()` | l'écouteur est retiré |
+| ce que renvoie `sys.onShutdown()` | le gestionnaire est retiré |
+| `new nc.SQLite()` | la connexion est fermée |
+
+`using` est une nouvelle syntaxe : Node.js 22 ne la comprend pas, appelez donc vous-même `stop()`, `close()` ou la fonction renvoyée sur cette version. Un `watch()` sur un chemin absent renvoie `undefined`, ce que `using` accepte.
+
 ## Des logs structurés en production
 
 ```js

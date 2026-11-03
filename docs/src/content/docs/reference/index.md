@@ -1,6 +1,6 @@
 ---
 title: "All exports"
-description: "Everything in @ix-xs/node-comfort 2.1.1: 23 namespaces and classes, 573 functions and methods, each with a line that says what it does."
+description: "Everything in @ix-xs/node-comfort 2.2.0: 23 namespaces and classes, 574 functions and methods, each with a line that says what it does."
 sidebar:
   label: "All exports"
   order: 0
@@ -89,7 +89,7 @@ Files and folders without try/catch: read and write text or JSON (atomically), c
 | [`folderSize()`](/reference/fs/#foldersize) | The total size of every file in a folder. |
 | [`hashFile()`](/reference/fs/#hashfile) | Hashes a file in chunks, so huge files are fine. |
 | [`tempFolder()`](/reference/fs/#tempfolder) | Creates a new, unique folder in the system's temp directory. |
-| [`sanitizeFilename()`](/reference/fs/#sanitizefilename) | Turns any text into a file name that works on Windows, macOS and Linux: forbidden characters are replaced, reserved names like `CON` are prefixed, and the length is capped. |
+| [`sanitizeFilename()`](/reference/fs/#sanitizefilename) | Turns any text into a file name that works on Windows, macOS and Linux: forbidden characters are replaced, invisible and text direction characters are removed, reserved names like `CON`, `NUL .txt` or `COM¹` are prefixed, and the length is capped. |
 | [`watch()`](/reference/fs/#watch) | Watches a file or folder for changes. |
 
 ### nc.checker
@@ -253,7 +253,7 @@ String helpers: case conversion, slugs, truncation, templates, wrapping, fuzzy m
 | [`slugify()`](/reference/str/#slugify) | Turns text into a URL slug: no accents, lowercase, words joined by dashes. |
 | [`squish()`](/reference/str/#squish) | Collapses runs of whitespace into single spaces and trims the ends. |
 | [`stripTags()`](/reference/str/#striptags) | Removes HTML tags and keeps the text. |
-| [`escapeHTML()`](/reference/str/#escapehtml) | Escapes `& < > " '` so the text is safe inside HTML content and attributes. |
+| [`escapeHTML()`](/reference/str/#escapehtml) | Escapes `& < > " '` so the text is safe inside HTML content and quoted attribute values. |
 | [`unescapeHTML()`](/reference/str/#unescapehtml) | Decodes HTML entities: named ones like `&amp;` and `&nbsp;`, and numeric ones like `&#233;`. |
 | [`escapeRegExp()`](/reference/str/#escaperegexp) | Escapes regex special characters so the text matches literally. |
 | [`length()`](/reference/str/#length) | Counts visible characters. |
@@ -640,11 +640,12 @@ An HTTP client on top of `fetch`: JSON by default, query objects, base URLs, tim
 
 ### SQLite
 
-SQLite made pleasant, on the engine built into Node.js (22.13+): CRUD with rich filters, JSON and boolean columns, transactions, migrations and backups. [Reference](/reference/sqlite/) • [Guide](/system/sqlite/)
+SQLite made pleasant, on the engine built into Node.js: CRUD with rich filters, JSON and boolean columns, transactions, migrations and backups. [Reference](/reference/sqlite/) • [Guide](/system/sqlite/)
 
 | Name | What it does |
 | --- | --- |
 | [`new SQLite()`](/reference/sqlite/#constructor) | Opens a database, creating the file and its folders if needed. |
+| [`op`](/reference/sqlite/#op) | Filter operators that only code can make. |
 | [`exec()`](/reference/sqlite/#exec) | Runs SQL that doesn't return rows. |
 | [`queryOne()`](/reference/sqlite/#queryone) | Runs a query and returns the first row. |
 | [`queryAll()`](/reference/sqlite/#queryall) | Runs a query and returns every row. |
@@ -713,7 +714,7 @@ Terminal colors you can chain, like `chalk`. [Reference](/reference/color/) • 
 | [`enabled`](/reference/color/#enabled) | Whether colors are being output. |
 | [`create()`](/reference/color/#create) | A separate instance with its own level, for another stream or for tests. |
 | [`detect()`](/reference/color/#detect) | The color level a stream supports, taking `NO_COLOR` and `FORCE_COLOR` into account. |
-| [`strip()`](/reference/color/#strip) | Removes colors and other terminal escape codes. |
+| [`strip()`](/reference/color/#strip) | Removes colors, every other terminal escape code and every control character but tabs and new lines (so `\r` and `\b` go too). |
 | [`width()`](/reference/color/#width) | How many columns the text takes, ignoring colors and counting emoji and CJK as 2. |
 | [`truncate()`](/reference/color/#truncate) | Cuts text to a number of columns and adds `…`. |
 | [`link()`](/reference/color/#link) | A clickable link in terminals that support it, `"text (url)"` elsewhere. |
@@ -744,7 +745,7 @@ Processes and the system: run commands and get their output, find executables, s
 
 ### nc.crypto
 
-Crypto without the footguns, built on `node:crypto`: hashes, HMAC, password hashing (scrypt), encryption (AES-256-GCM), JWT, two-factor codes (TOTP) and secure random values. [Reference](/reference/crypto/) • [Guide](/system/crypto/)
+Crypto without the footguns, built on `node:crypto`: hashes, HMAC, password hashing (scrypt or Argon2id), encryption (AES-256-GCM), JWT, two-factor codes (TOTP) and secure random values. [Reference](/reference/crypto/) • [Guide](/system/crypto/)
 
 | Name | What it does |
 | --- | --- |
@@ -752,9 +753,9 @@ Crypto without the footguns, built on `node:crypto`: hashes, HMAC, password hash
 | [`hmac()`](/reference/crypto/#hmac) | An HMAC signature: a hash keyed with a secret. |
 | [`verifyHmac()`](/reference/crypto/#verifyhmac) | Checks an HMAC signature you received, in constant time. |
 | [`safeEqual()`](/reference/crypto/#safeequal) | Compares two secrets in constant time, so the comparison can't leak anything through timing, not even their lengths. |
-| [`hashPassword()`](/reference/crypto/#hashpassword) | Hashes a password with scrypt and a random salt. |
-| [`verifyPassword()`](/reference/crypto/#verifypassword) | Checks a password against a stored hash, in constant time. |
-| [`needsRehash()`](/reference/crypto/#needsrehash) | Was this hash made with weaker settings than yours? |
+| [`hashPassword()`](/reference/crypto/#hashpassword) | Hashes a password with a random salt: scrypt by default, or Argon2id. |
+| [`verifyPassword()`](/reference/crypto/#verifypassword) | Checks a password against a stored hash, in constant time: scrypt hashes from `hashPassword()`, and Argon2 PHC strings (`$argon2id$`, `$argon2i$`, `$argon2d$`) from here or from another library. |
+| [`needsRehash()`](/reference/crypto/#needsrehash) | Was this hash made with another algorithm, or with weaker settings than yours (lower cost, a key under 32 bytes, a salt under 16)? |
 | [`generateKey()`](/reference/crypto/#generatekey) | A random 256-bit key for `encrypt()`, as text you can put in an environment variable. |
 | [`encrypt()`](/reference/crypto/#encrypt) | Encrypts data with AES-256-GCM, which also detects tampering. |
 | [`decrypt()`](/reference/crypto/#decrypt) | Decrypts what `encrypt()` produced. |
@@ -765,6 +766,7 @@ Crypto without the footguns, built on `node:crypto`: hashes, HMAC, password hash
 | [`totpSecret()`](/reference/crypto/#totpsecret) | A new two-factor secret, in the Base32 format authenticator apps expect. |
 | [`totp()`](/reference/crypto/#totp) | The current 6-digit code for a two-factor secret, as shown by authenticator apps. |
 | [`verifyTOTP()`](/reference/crypto/#verifytotp) | Checks a code typed by a user. |
+| [`totpStep()`](/reference/crypto/#totpstep) | Finds which time step a code typed by a user belongs to. |
 | [`totpURI()`](/reference/crypto/#totpuri) | The `otpauth://` link to show as a QR code when a user turns on 2FA. |
 | [`randomBytes()`](/reference/crypto/#randombytes) | Secure random bytes. |
 | [`randomInt()`](/reference/crypto/#randomint) | A secure random integer from `min` to `max`, both included, with no bias. |

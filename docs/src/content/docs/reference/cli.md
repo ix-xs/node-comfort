@@ -6,6 +6,10 @@ sidebar:
   order: 20
 ---
 
+Tables, boxes, trees and menus show what a terminal could act on as text
+(`\x1b`, `\r`), so a value can't move the cursor or break the layout.
+Colors and links in them still work.
+
 ```js
 const { cli } = require("@ix-xs/node-comfort");
 // or on its own, which loads nothing else
@@ -397,7 +401,7 @@ type ParsedFlags = { [K in keyof S]: S[K] extends { multiple: true; } ? Array<Fl
 
 ### ProgressBar
 
-A progress bar.
+A progress bar. With `using`, it stops at the end of the block.
 
 | Property | Type | Description |
 | --- | --- | --- |
@@ -447,7 +451,7 @@ Options for `select()` and `multiselect()`.
 
 ### Spinner
 
-A spinner. Every method returns it.
+A spinner. Every method returns it. With `using`, it stops at the end of the block.
 
 | Property | Type | Description |
 | --- | --- | --- |

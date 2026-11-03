@@ -1,6 +1,6 @@
 ---
 title: "SQLite"
-description: "`nc.SQLite` enveloppe le moteur SQLite livré avec Node.js 22.13+. Il n'y a aucun module natif à compiler, et vous disposez d'aides CRUD, de filtres riches, de colonnes JSON, de transactions, de migrations et de sauvegardes."
+description: "`nc.SQLite` enveloppe le moteur SQLite livré avec Node.js. Il n'y a aucun module natif à compiler, et vous disposez d'aides CRUD, de filtres riches, de colonnes JSON, de transactions, de migrations et de sauvegardes."
 sidebar:
   order: 2
 ---
@@ -114,6 +114,22 @@ db.getAll("users", { "settings.theme": "dark", "settings.langs.0": "en" }, { ord
 
 `"settings.theme"` est la clé `theme` de la colonne `settings`, et `"settings.langs.0"` le premier élément de son tableau `langs`. Les opérateurs fonctionnent aussi sur ces clés, et `orderBy` les accepte.
 
+### Valeurs venant d'une requête
+
+Par défaut, tout objet qui a une clé d'opérateur est un opérateur. C'est un piège quand une valeur vient d'un corps JSON : si `req.body.token` vaut `{ "ne": "" }`, alors `{ token: req.body.token }` trouve toutes les lignes dont le token n'est pas vide, au lieu de la seule ligne qui a ce token.
+
+Vérifiez d'abord ces valeurs (avec `nc.schema`, par exemple), ou ouvrez la base avec `operators: "tagged"`. Seuls les opérateurs créés par `SQLite.op` comptent alors, et tout autre objet ou tableau est une valeur, comparée comme texte JSON :
+
+```js
+const { op } = nc.SQLite;
+const db = new nc.SQLite("data/app.sqlite", { operators: "tagged" });
+
+db.getAll("users", { age: op.between(18, 65), role: op.in(["admin", "editor"]), deleted_at: op.isNull() });
+db.get("users", { email, token: req.body.token }); // { "ne": "" } est comparé comme du texte, un token absent lève une erreur
+```
+
+`SQLite.op` a une fonction par opérateur (`op.gte(18)`, `op.like("%@acme.com")`, `op.notNull()`...). Ses opérateurs portent une marque que JSON ne peut pas produire, et ils fonctionnent aussi sans `"tagged"`. Plusieurs peuvent être réunis dans un même objet : `{ ...op.gte(18), ...op.lt(65) }`. Avec `"tagged"`, un tableau est lui aussi une valeur : écrivez donc `op.in([...])` pour « l'un de ». Et une lecture lève une erreur pour une valeur `undefined`, comme les écritures le font toujours : dans le mode par défaut, une valeur absente fait simplement disparaître sa condition, vérifiez donc d'abord les valeurs obligatoires.
+
 ## Écrire
 
 ```js
@@ -125,7 +141,12 @@ db.upsert("settings", { user_id: 1, key: "theme", value: "dark" }, ["user_id", "
 db.delete("sessions", { expires_at: { lt: new Date() } });
 ```
 
-Les objets et les tableaux sont stockés en JSON, les booléens en 1 et 0, et les dates en chaînes ISO. `update`, `increment` et `delete` refusent un filtre vide : une condition oubliée ne peut donc pas vider une table ; `clearTable()` est là pour le faire volontairement.
+Les objets et les tableaux sont stockés en JSON, les booléens en 1 et 0, et les dates en chaînes ISO. `update`, `increment`, `delete` et `set` refusent un filtre qui atteindrait toutes les lignes : une condition oubliée ne peut donc pas vider une table. Cela couvre un filtre vide, mais aussi `{ id: undefined }` (une variable jamais définie), un `$or` ou un `$and` vide, et `{ id: { notIn: [] } }`. Ils lèvent alors une `SQLiteError`. Pour vider une table volontairement, utilisez `clearTable()` :
+
+```js
+db.delete("sessions", { user_id: req.user?.id }); // lève une erreur si req.user est absent
+db.clearTable("sessions");                         // supprime toutes les lignes, garde la table
+```
 
 `increment` ajoute aux colonnes numériques en une seule instruction : deux requêtes qui arrivent en même temps comptent donc toutes les deux. Lire la valeur, y ajouter puis la réécrire en ferait perdre une. Les nombres négatifs soustraient, et une colonne vide compte pour 0.
 

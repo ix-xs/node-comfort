@@ -92,7 +92,7 @@
   "Start a run even if the previous one hasn't finished. By default it's skipped.": "Lance une exécution même si la précédente n'est pas terminée. Par défaut, elle est sautée.",
   "`cron()` only: also run once right away.": "`cron()` uniquement : exécute aussi une fois tout de suite.",
   "Called when the task fails.": "Appelée quand la tâche échoue.",
-  "A date: a `Date`, a timestamp in ms, or a string `new Date()` understands (ISO 8601 is safest).": "Une date : une `Date`, un horodatage en ms, ou une chaîne que `new Date()` comprend (ISO 8601 est le plus sûr).",
+  "A date: a `Date`, a timestamp in ms, a string `new Date()` understands (ISO 8601 is safest), or an instant from `Temporal`, like a `Temporal.Instant` or a `Temporal.ZonedDateTime`.": "Une date : une `Date`, un horodatage en ms, une chaîne que `new Date()` comprend (ISO 8601 est le plus sûr), ou un instant de `Temporal`, comme un `Temporal.Instant` ou un `Temporal.ZonedDateTime`.",
   "Options for `range()`.": "Options de `range()`.",
   "How many units between two dates. Defaults to `1`.": "Nombre d'unités entre deux dates. Par défaut : `1`.",
   "Zone whose calendar is used for days, weeks, months and years.": "Fuseau dont le calendrier sert aux jours, semaines, mois et années.",
@@ -115,11 +115,7 @@
   "Options for `relative()`.": "Options de `relative()`.",
   "`\"auto\"` says `\"yesterday\"` instead of `\"1 day ago\"`. Defaults to `\"always\"`.": "`\"auto\"` dit `\"yesterday\"` au lieu de `\"1 day ago\"`. Par défaut : `\"always\"`.",
   "`\"short\"` gives `\"in 3 mo.\"`. Defaults to `\"long\"`.": "`\"short\"` donne `\"in 3 mo.\"`. Par défaut : `\"long\"`.",
-  "A schedule returned by `every()` and `cron()`.": "Une planification renvoyée par `every()` et `cron()`.",
-  "Stops the schedule. A run in progress finishes.": "Arrête la planification. Une exécution en cours se termine.",
-  "When the next run is planned.": "Date prévue de la prochaine exécution.",
-  "Whether a run is in progress.": "Indique si une exécution est en cours.",
-  "How many runs have started.": "Nombre d'exécutions lancées.",
+  "A schedule returned by `every()` and `cron()`. With `using`, it stops at the end of the block.": "Une planification renvoyée par `every()` et `cron()`. Avec `using`, elle s'arrête à la fin du bloc.",
   "A unit for `startOf()` and `endOf()`.": "Une unité pour `startOf()` et `endOf()`.",
   "Returned by `stopwatch()`.": "Renvoyé par `stopwatch()`.",
   "Milliseconds since the start.": "Millisecondes écoulées depuis le départ.",
@@ -131,5 +127,9 @@
   "Zone used to decide which day it is. Defaults to the global zone, then the system's.": "Fuseau qui sert à décider quel jour on est. Par défaut : le fuseau global, puis celui du système.",
   "Week settings.": "Réglages de la semaine.",
   "First day of the week: `0` for Sunday, `1` for Monday. Defaults to `1`.": "Premier jour de la semaine : `0` pour dimanche, `1` pour lundi. Par défaut : `1`.",
-  "Zone whose calendar is used. Defaults to the global zone, then the system's.": "Fuseau dont le calendrier est utilisé. Par défaut : le fuseau global, puis celui du système."
+  "Zone whose calendar is used. Defaults to the global zone, then the system's.": "Fuseau dont le calendrier est utilisé. Par défaut : le fuseau global, puis celui du système.",
+  "Stops the schedule. A run in progress finishes.": "Arrête la planification. Une exécution en cours se termine.",
+  "When the next run is planned.": "Date prévue de la prochaine exécution.",
+  "Whether a run is in progress.": "Indique si une exécution est en cours.",
+  "How many runs have started.": "Nombre d'exécutions lancées."
 }

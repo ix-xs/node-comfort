@@ -184,6 +184,13 @@ const Category = s.object({
 });
 ```
 
+Une valeur très profondément imbriquée, comme un corps JSON fait de cent mille `[`, épuiserait la pile. `parse()`, `safeParse()` et `is()` s'arrêtent donc à 1000 niveaux d'objets et de tableaux, et signalent un problème `"too_deep"` au lieu de lever une `RangeError` depuis les profondeurs. Abaissez la limite avec `maxDepth` quand vous savez jusqu'où vos données descendent :
+
+```js
+const result = Category.safeParse(req.body, { maxDepth: 20 });
+if (!result.success) result.issues; // [{ path: ["children", 0, "children", ...], code: "too_deep", ... }]
+```
+
 ## JSON Schema
 
 `toJSONSchema()` décrit ce qu'un schéma accepte sous la forme d'un JSON Schema (draft 2020-12), pour un document OpenAPI ou un générateur de formulaires :

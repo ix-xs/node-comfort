@@ -51,7 +51,7 @@ nc.sys.onShutdown(() => db.close());
 npm install @ix-xs/node-comfort
 ```
 
-Node.js 22.13 or newer. That's the first version where `node:sqlite` works without a flag. If your program calls servers you don't control, use at least 22.23.4, 24.22.1 or 26.12.1: [older versions can be crashed by a malicious response](https://ix-xs.github.io/node-comfort/system/http/#servers-you-dont-control).
+Node.js 22.23.4, 24.22.1, 26.12.1 or a later version of these lines. Older versions [can be crashed by a malicious HTTP response](https://ix-xs.github.io/node-comfort/system/http/#servers-you-dont-control), and no package can prevent it. On Node.js 26, time zones go through `Temporal` and are more than twice as fast.
 
 ## Why node-comfort
 
@@ -60,7 +60,7 @@ Node.js 22.13 or newer. That's the first version where `node:sqlite` works witho
 - **Fast to load.** Namespaces load the first time you use them. Requiring the package takes about 4 ms, and a script that only logs never loads the database or the HTTP client.
 - **Safe by default.** Prototype-pollution-proof objects, scrypt passwords, AES-256-GCM, constant-time comparisons, parameterized SQL, atomic file writes.
 - **One way of doing things.** Durations are always `"5m"` or milliseconds, options always come last, and every error has a stable `code`.
-- **Tested everywhere.** Linux, macOS and Windows, Node.js 22 and 24, TypeScript 5.9, 6 and 7.
+- **Tested everywhere.** Linux, macOS and Windows, Node.js 22, 24 and 26, TypeScript 5.9, 6 and 7.
 
 ## What's inside
 

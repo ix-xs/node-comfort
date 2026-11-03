@@ -179,7 +179,7 @@ belongs to.
 | Parameter | Type | Description |
 | --- | --- | --- |
 | `name` | `string \| string[]` | One name, or several to try in each folder, in this order. |
-| `options?` | `{ cwd?: string, type?: "file" \| "folder" \| "any", stopAt?: string }` | Where to start (the working directory by default), what to look for (`"any"` by default), and a folder not to go above. |
+| `options?` | `{ cwd?: string, type?: "file" \| "folder" \| "any", stopAt?: string }` | Where to start (the working directory by default), what to look for (`"any"` by default), and a folder not to go above: the search ends there, or as soon as it's outside of it. |
 
 **Returns** `string | undefined`: The absolute path.
 
@@ -435,9 +435,10 @@ nc.deleteFilesIn("./logs", false, (file) => file.endsWith(".log"));
 emptyFolder(path: string): boolean | undefined
 ```
 
-Deletes everything inside a folder, keeping the folder.
+Deletes everything inside a folder, keeping the folder. A link to a folder
+(a junction on Windows) is refused: what it points to is left alone.
 
-**Returns** `boolean | undefined`: `undefined` if it doesn't exist.
+**Returns** `boolean | undefined`: `undefined` if it doesn't exist, `false` if it's a link or something couldn't be deleted.
 
 ## copy
 
@@ -445,9 +446,11 @@ Deletes everything inside a folder, keeping the folder.
 copy(source: string, destination: string, options?: CopyOptions): boolean
 ```
 
-Copies a file or a whole folder, like `cp -r`.
+Copies a file or a whole folder, like `cp -r`. Links inside the folder
+are copied as links (junctions on Windows), never followed: files outside
+the folder are never brought along.
 
-**Returns** `boolean`: `false` if the source is missing or the copy failed.
+**Returns** `boolean`: `false` if the source is missing, if the destination is the source or inside it, or if the copy failed.
 
 ```js
 nc.copy("./templates", "./dist/templates");
@@ -460,13 +463,16 @@ nc.copy("./.env.example", "./.env", { overwrite: false });
 move(source: string, destination: string, options?: { overwrite?: boolean; } | undefined): boolean
 ```
 
-Moves or renames a file or folder, across drives too.
+Moves or renames a file or folder, across drives too. A destination in the
+way is put aside first, and put back if the move fails.
 
 | Parameter | Type | Description |
 | --- | --- | --- |
 | `source` | `string` |  |
 | `destination` | `string` |  |
 | `options?` | `{ overwrite?: boolean }` | `overwrite` replaces an existing destination. Defaults to `true`. |
+
+**Returns** `boolean`: `false` if the source is missing, if the destination is inside it, if the source is a link to the destination, or if the move failed.
 
 ```js
 nc.move("./report.pdf", "./archive/2024/report.pdf");
@@ -481,7 +487,7 @@ copyFoldersIn(options: CopyFoldersOptions): number | undefined
 Copies the folders inside a folder into another one. `copy()` is simpler
 for most cases.
 
-**Returns** `number | undefined`: How many were copied.
+**Returns** `number | undefined`: How many were copied: `0` when `dest` is the source folder or inside it.
 
 ## copyFolder
 
@@ -492,6 +498,8 @@ copyFolder(options: CopyFolderOptions): boolean | undefined
 Copies a folder. Without `recursive` or `withFiles`, only the empty
 folder is created; `copy()` copies everything in one call.
 
+**Returns** `boolean | undefined`: `false` when `dest` is the source folder or inside it.
+
 ## copyFilesIn
 
 ```ts
@@ -500,7 +508,7 @@ copyFilesIn(options: CopyFilesOptions): number | undefined
 
 Copies the files inside a folder into another one, keeping the tree.
 
-**Returns** `number | undefined`: How many were copied.
+**Returns** `number | undefined`: How many were copied: `0` when `dest` is the source folder, or inside it with `recursive`.
 
 ```js
 nc.copyFilesIn({ path: "./src", dest: "./dist", filter: (file) => file.endsWith(".css") });
@@ -515,6 +523,8 @@ copyFile(options: CopyFileOptions): boolean | undefined
 Copies one file. If `dest` ends with `/`, the file keeps its name inside
 that folder.
 
+**Returns** `boolean | undefined`: `false` when `dest` is the file itself.
+
 ```js
 nc.copyFile({ path: "./src/index.js", dest: "./dist/" });
 ```
@@ -527,7 +537,7 @@ moveFoldersIn(options: CopyFoldersOptions): number | undefined
 
 Moves the folders inside a folder.
 
-**Returns** `number | undefined`: How many were moved.
+**Returns** `number | undefined`: How many were moved: `0` when `dest` is the source folder or inside it.
 
 ## moveFolder
 
@@ -537,15 +547,18 @@ moveFolder(options: CopyFolderOptions & { path: string; }): boolean | undefined
 
 Moves a folder.
 
+**Returns** `boolean | undefined`: `false` when `dest` is the source folder or inside it.
+
 ## moveFilesIn
 
 ```ts
 moveFilesIn(options: CopyFilesOptions): number | undefined
 ```
 
-Moves the files inside a folder.
+Moves the files inside a folder. A file that can't be copied stays where
+it is, and isn't counted.
 
-**Returns** `number | undefined`: How many were moved.
+**Returns** `number | undefined`: How many were moved: `0` when `dest` is the source folder, or inside it with `recursive`.
 
 ## moveFile
 
@@ -554,6 +567,8 @@ moveFile(options: CopyFileOptions): boolean | undefined
 ```
 
 Moves one file.
+
+**Returns** `boolean | undefined`: `false` when `dest` is the file itself under the same name, or when the file is a link to `dest`.
 
 ```js
 nc.moveFile({ path: "./logs/app.log", dest: "./logs/archive/" });
@@ -665,8 +680,9 @@ sanitizeFilename(name: string, options?: { replacement?: string; } | undefined):
 ```
 
 Turns any text into a file name that works on Windows, macOS and Linux:
-forbidden characters are replaced, reserved names like `CON` are
-prefixed, and the length is capped.
+forbidden characters are replaced, invisible and text direction
+characters are removed, reserved names like `CON`, `NUL .txt` or
+`COM¹` are prefixed, and the length is capped.
 
 | Parameter | Type | Description |
 | --- | --- | --- |
@@ -799,7 +815,7 @@ Options for `readJSON()`.
 
 ### Watcher
 
-Returned by `watch()`.
+Returned by `watch()`. With `using`, the watch stops at the end of the block.
 
 | Property | Type | Description |
 | --- | --- | --- |

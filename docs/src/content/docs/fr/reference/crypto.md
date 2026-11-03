@@ -1,6 +1,6 @@
 ---
 title: "nc.crypto"
-description: "La cryptographie sans les pièges, construite sur `node:crypto` : hashes, HMAC, hachage de mots de passe (scrypt), chiffrement (AES-256-GCM), JWT, codes à deux facteurs (TOTP) et valeurs aléatoires sûres."
+description: "La cryptographie sans les pièges, construite sur `node:crypto` : hashes, HMAC, hachage de mots de passe (scrypt ou Argon2id), chiffrement (AES-256-GCM), JWT, codes à deux facteurs (TOTP) et valeurs aléatoires sûres."
 sidebar:
   label: "crypto"
   order: 23
@@ -81,7 +81,9 @@ if (!crypto.verifyHmac(req.rawBody, req.headers["x-hub-signature-256"], process.
 safeEqual(a: string | Buffer<ArrayBufferLike> | Uint8Array<ArrayBufferLike>, b: string | Buffer<ArrayBufferLike> | Uint8Array<ArrayBufferLike>): boolean
 ```
 
-Compare deux secrets en temps constant : la comparaison ne peut donc rien laisser fuiter par sa durée, pas même leurs longueurs. Utilisez-la à la place de `===` pour les tokens, les signatures et les clés d'API. Une valeur absente (`undefined`, `null`) n'est jamais égale à quoi que ce soit.
+Compare deux secrets en temps constant : la comparaison ne peut donc rien laisser fuiter par sa durée, pas même leurs longueurs. Utilisez-la à la place de `===` pour les tokens, les signatures et les clés d'API. Une valeur absente (`undefined`, `null`) ou vide (`""`) n'est jamais égale à quoi que ce soit, pas même à une autre valeur vide : un secret non défini ne peut donc pas correspondre à un en-tête vide.
+
+**Renvoie** `boolean` : `false` quand l'un des deux côtés est absent ou vide.
 
 ```js
 if (!crypto.safeEqual(providedKey, process.env.API_KEY)) throw new Error("Forbidden");
@@ -93,13 +95,20 @@ if (!crypto.safeEqual(providedKey, process.env.API_KEY)) throw new Error("Forbid
 hashPassword(password: string, options?: HashPasswordOptions): Promise<string>
 ```
 
-Calcule le hash d'un mot de passe avec scrypt et un sel aléatoire. Le résultat enregistre ses propres paramètres : vous pouvez donc augmenter le coût plus tard sans casser les anciens hashes.
+Calcule le hash d'un mot de passe avec un sel aléatoire : scrypt par défaut, ou Argon2id. Le résultat enregistre ses propres paramètres : vous pouvez donc augmenter le coût, ou passer à Argon2id, plus tard sans casser les anciens hashes.
+
+Les hashes Argon2id sont des chaînes PHC standard, lisibles par les autres bibliothèques Argon2. Les calculer et les vérifier demande Node.js 24.7 ou plus récent ; scrypt fonctionne sur toutes les versions prises en charge.
 
 **Lève** `RangeError` : Si les paramètres sont hors limites, par exemple un coût qui demande plus de 1 Gio de mémoire.
+
+**Lève** `NodeComfortError` : Avec le code `ERR_ARGON2_UNAVAILABLE` pour `"argon2id"` sur un Node.js antérieur à 24.7.
 
 ```js
 const stored = await crypto.hashPassword(password);
 // "$scrypt$ln=15,r=8,p=1$4xY...$kq9...", store this
+
+const modern = await crypto.hashPassword(password, { algorithm: "argon2id" });
+// "$argon2id$v=19$m=19456,t=2,p=1$Zm9v...$YmFy..."
 ```
 
 ## verifyPassword
@@ -108,7 +117,11 @@ const stored = await crypto.hashPassword(password);
 verifyPassword(password: string, stored: string): Promise<boolean>
 ```
 
-Vérifie un mot de passe par rapport à un hash stocké, en temps constant. Un mauvais mot de passe ou un hash corrompu donne `false`, jamais une erreur.
+Vérifie un mot de passe par rapport à un hash stocké, en temps constant : les hashes scrypt de `hashPassword()`, et les chaînes PHC Argon2 (`$argon2id$`, `$argon2i$`, `$argon2d$`) créées ici ou par une autre bibliothèque. Un mauvais mot de passe ou un hash corrompu donne `false`. Un hash qui demande plus de travail que permis (plus de 1 Gio de mémoire, par exemple) lève une erreur à la place, sans faire ce travail : un hash trafiqué bloquerait le serveur de cette façon, et un vrai hash n'est pas un mauvais mot de passe mais un hash à remplacer.
+
+**Lève** `RangeError` : Si le hash demande plus de travail que permis : scrypt avec `p` au-delà de 16 ou `128 * N * r * p` au-delà de 2**30 octets (jusqu'à ce que la version 2.1 acceptait : au-delà, le hash est corrompu et donne `false`), Argon2 avec plus de 1 Gio de mémoire, 10 passes ou 16 voies. Hashez à nouveau ces mots de passe avec des réglages dans ces limites.
+
+**Lève** `NodeComfortError` : Avec le code `ERR_ARGON2_UNAVAILABLE` si le hash est en Argon2 et que ce Node.js est antérieur à 24.7. C'est un problème de déploiement, pas un mauvais mot de passe : il n'est donc pas caché derrière `false`.
 
 ```js
 if (!(await crypto.verifyPassword(input, user.passwordHash))) throw new Error("Invalid credentials");
@@ -120,16 +133,21 @@ if (!(await crypto.verifyPassword(input, user.passwordHash))) throw new Error("I
 needsRehash(stored: string, options?: HashPasswordOptions): boolean
 ```
 
-Ce hash a-t-il été créé avec des paramètres plus faibles que les vôtres ? Si oui, recalculez le hash du mot de passe juste après une connexion réussie.
+Ce hash a-t-il été créé avec un autre algorithme, ou avec des paramètres plus faibles que les vôtres (coût inférieur, clé de moins de 32 octets, sel de moins de 16) ? Si oui, recalculez le hash du mot de passe juste après une connexion réussie.
 
 | Paramètre | Type | Description |
 | --- | --- | --- |
 | `stored` | `string` |  |
-| `options?` | [`HashPasswordOptions`](#hashpasswordoptions) | Les paramètres que vous utilisez aujourd'hui. |
+| `options?` | [`HashPasswordOptions`](#hashpasswordoptions) | Les paramètres que vous utilisez aujourd'hui. `algorithm` vaut `"scrypt"` par défaut. |
 
 ```js
 if (await crypto.verifyPassword(input, user.hash) && crypto.needsRehash(user.hash, { cost: 16 })) {
   user.hash = await crypto.hashPassword(input, { cost: 16 });
+}
+
+// moving everyone to Argon2id, one login at a time
+if (await crypto.verifyPassword(input, user.hash) && crypto.needsRehash(user.hash, { algorithm: "argon2id" })) {
+  user.hash = await crypto.hashPassword(input, { algorithm: "argon2id" });
 }
 ```
 
@@ -229,10 +247,12 @@ Les algorithmes acceptés découlent de la clé que vous passez : un token sign�
 | Paramètre | Type | Description |
 | --- | --- | --- |
 | `token` | `string` |  |
-| `secret` | [`JWTKey`](#jwtkey) | Le secret partagé, ou la clé publique pour les tokens RS, PS, ES et EdDSA. |
+| `secret` | [`JWTKey`](#jwtkey) | Le secret partagé (au moins 32 octets), ou la clé publique pour les tokens RS, PS, ES et EdDSA. |
 | `options?` | [`VerifyJWTOptions`](#verifyjwtoptions) |  |
 
-**Lève** `JWTError`
+**Lève** `JWTError` : Si le token est malformé, mal signé, expiré ou ne respecte pas vos options.
+
+**Lève** `TypeError` : Si la clé est inutilisable (un secret de moins de 32 octets, une clé publique passée en octets bruts...) ou si une option est invalide.
 
 ```js
 try {
@@ -273,7 +293,9 @@ Un nouveau secret à deux facteurs, au format Base32 attendu par les application
 
 | Paramètre | Type | Description |
 | --- | --- | --- |
-| `bytes?` | `number` | Par défaut : `20`. |
+| `bytes?` | `number` | Au moins `16` (128 bits, le minimum de la RFC 4226). `20` est ce qu'utilisent la plupart des applications. Par défaut : `20`. |
+
+**Lève** `RangeError` : Si `bytes` est inférieur à 16.
 
 ```js
 user.totpSecret = crypto.totpSecret();
@@ -287,6 +309,13 @@ totp(secret: string, options?: TOTPOptions): string
 
 Le code à 6 chiffres en cours pour un secret à deux facteurs, tel que l'affichent les applications d'authentification.
 
+| Paramètre | Type | Description |
+| --- | --- | --- |
+| `secret` | `string` | En Base32, au moins 10 octets une fois décodé (16 caractères), pour que les anciens secrets de 80 bits continuent de fonctionner. Créez les nouveaux avec `totpSecret()`, qui donne 20 octets. |
+| `options?` | [`TOTPOptions`](#totpoptions) |  |
+
+**Lève** `TypeError` : Si le secret n'est pas en Base32 ou est trop court.
+
 ```js
 crypto.totp(user.totpSecret); // "492039"
 ```
@@ -299,14 +328,48 @@ verifyTOTP(token: string, secret: string, options?: VerifyTOTPOptions): boolean
 
 Vérifie un code saisi par un utilisateur. Les codes des périodes voisines sont aussi acceptés, pour tolérer les décalages d'horloge.
 
+Utilisée seule, elle accepte à nouveau le même code jusqu'à son expiration. Pour refuser la réutilisation, gardez le pas du dernier code accepté, obtenu avec `totpStep()`, et passez-le comme `after`.
+
 | Paramètre | Type | Description |
 | --- | --- | --- |
 | `token` | `string` | Les espaces sont ignorés. |
-| `secret` | `string` |  |
+| `secret` | `string` | En Base32, au moins 10 octets une fois décodé (16 caractères), pour que les anciens secrets de 80 bits continuent de fonctionner. Créez les nouveaux avec `totpSecret()`, qui donne 20 octets. |
 | `options?` | [`VerifyTOTPOptions`](#verifytotpoptions) |  |
+
+**Lève** `RangeError` : Si `window` n'est pas un entier de 0 à 10.
+
+**Lève** `TypeError` : Si le secret n'est pas en Base32 ou est trop court.
 
 ```js
 if (!crypto.verifyTOTP(req.body.code, user.totpSecret)) throw new Error("Invalid code");
+```
+
+## totpStep
+
+```ts
+totpStep(code: string, secret: string, options?: VerifyTOTPOptions): number | undefined
+```
+
+Trouve à quel pas de temps appartient un code saisi par un utilisateur. Les codes des périodes voisines sont aussi acceptés, pour tolérer les décalages d'horloge.
+
+Stockez le pas du dernier code que vous avez accepté et passez-le comme `after` la fois suivante : le même code, ou un plus ancien, est alors refusé, ce qui empêche de réutiliser un code aperçu par-dessus l'épaule de quelqu'un.
+
+| Paramètre | Type | Description |
+| --- | --- | --- |
+| `code` | `string` | Les espaces sont ignorés. |
+| `secret` | `string` | En Base32, au moins 10 octets une fois décodé (16 caractères), pour que les anciens secrets de 80 bits continuent de fonctionner. Créez les nouveaux avec `totpSecret()`, qui donne 20 octets. |
+| `options?` | [`VerifyTOTPOptions`](#verifytotpoptions) |  |
+
+**Renvoie** `number | undefined` : Le pas de temps du code (le temps Unix divisé par la période), ou `undefined` s'il ne correspond pas.
+
+**Lève** `RangeError` : Si `window` n'est pas un entier de 0 à 10.
+
+**Lève** `TypeError` : Si le secret n'est pas en Base32 ou est trop court, ou si `after` n'est pas un entier.
+
+```js
+const step = crypto.totpStep(req.body.code, user.totpSecret, { after: user.totpLastStep });
+if (step === undefined) throw new Error("Invalid code");
+user.totpLastStep = step; // save it with the user
 ```
 
 ## totpURI
@@ -419,15 +482,19 @@ Options de `hash()` et `hmac()`.
 
 ### HashPasswordOptions
 
-Options de `hashPassword()`.
+Options de `hashPassword()` et `needsRehash()`.
 
 | Propriété | Type | Description |
 | --- | --- | --- |
-| `cost?` | `number` | Facteur de travail, en puissance de deux ; chaque +1 double le temps. Par défaut : `15`. |
+| `algorithm?` | `"argon2id" \| "scrypt"` | Par défaut : `"scrypt"`, que toutes les versions de Node.js prises en charge savent vérifier. `"argon2id"` demande Node.js 24.7 ou plus récent, pour calculer et pour vérifier. |
+| `cost?` | `number` | Facteur de travail de scrypt, en puissance de deux ; chaque +1 double le temps. Par défaut : `15`. |
 | `blockSize?` | `number` | Le `r` de scrypt. Par défaut : `8`. |
-| `parallelization?` | `number` | Le `p` de scrypt. Par défaut : `1`. |
-| `saltLength?` | `number` | En octets. Par défaut : `16`. |
-| `keyLength?` | `number` | En octets. Par défaut : `32`. |
+| `parallelization?` | `number` | Le `p` de scrypt, au plus `16`. Par défaut : `1`. |
+| `memory?` | `number` | Mémoire d'Argon2id, en Kio, au plus `1048576` (1 Gio). Par défaut : `19456` (19 Mio), comme le recommande l'OWASP. |
+| `passes?` | `number` | Nombre de passes d'Argon2id sur la mémoire (`t`), de `1` à `10`. Par défaut : `2`. |
+| `parallelism?` | `number` | Nombre de voies parallèles d'Argon2id (`p`), de `1` à `16`. Par défaut : `1`. |
+| `saltLength?` | `number` | En octets, au moins `8`. Par défaut : `16`. |
+| `keyLength?` | `number` | En octets, de `16` à `128`. Par défaut : `32`. |
 
 ### JWTAlgorithm
 
@@ -493,7 +560,7 @@ Options de `totp()` et `verifyTOTP()`.
 | `digits?` | `number` | Par défaut : `6`. |
 | `period?` | `number` | Durée de validité d'un code, en secondes. Par défaut : `30`. |
 | `algorithm?` | `"``SHA1``" \| "``SHA256``" \| "``SHA512``"` | Par défaut : `"SHA1"`, ce qu'attendent les applications d'authentification. |
-| `time?` | `number \| ``Date` | Calcule le code pour cet instant. Par défaut : maintenant. |
+| `time?` | `number \| ``Date` | Calcule le code pour cet instant, sous forme de `Date` ou de millisecondes Unix. Par défaut : maintenant. |
 
 ### TOTPURIOptions
 
@@ -517,15 +584,22 @@ Options de `verifyJWT()`.
 | `issuer?` | `string \| string[]` | Émetteur exigé. |
 | `audience?` | `string \| string[]` | Audience exigée ; une seule correspondance suffit. |
 | `subject?` | `string` | Sujet exigé. |
-| `clockTolerance?` | `number` | Secondes de tolérance pour `exp` et `nbf` quand les horloges des serveurs diffèrent. |
+| `clockTolerance?` | `string \| number` | Tolérance pour `exp` et `nbf` quand les horloges des serveurs diffèrent : des secondes (`0` ou plus) ou une durée comme `"30s"`. Par défaut : `0`. |
 | `maxAge?` | `string \| number` | Refuse les tokens émis depuis plus longtemps que cette durée. |
 | `ignoreExpiration?` | `boolean` | Ne vérifie pas `exp`. |
-| `now?` | `number \| ``Date` | L'heure qu'il est. Par défaut : maintenant. Pratique dans les tests. |
+| `now?` | `number \| ``Date` | L'heure qu'il est, sous forme de `Date` ou de millisecondes Unix. Par défaut : maintenant. Pratique dans les tests. |
+| `typ?` | `string` | En-tête `typ` exigé, comme `"at+jwt"` pour les tokens d'accès OAuth. Comparé sans tenir compte de la casse, avec ou sans `application/`. Un token avec un autre `typ`, ou sans aucun, est refusé. |
+| `crit?` | `string[]` | Extensions d'en-tête que votre code comprend. Un token dont l'en-tête `crit` liste autre chose est refusé, comme l'exige la RFC 7515. |
 
 ### VerifyTOTPOptions
 
-Options de `verifyTOTP()`. `window` est le nombre de périodes acceptées avant et après maintenant (par défaut : `1`).
+Options de `verifyTOTP()` et `totpStep()`.
 
-```ts
-type VerifyTOTPOptions = TOTPOptions & { window?: number; }
-```
+| Propriété | Type | Description |
+| --- | --- | --- |
+| `digits?` | `number` | Par défaut : `6`. |
+| `period?` | `number` | Durée de validité d'un code, en secondes. Par défaut : `30`. |
+| `algorithm?` | `"``SHA1``" \| "``SHA256``" \| "``SHA512``"` | Par défaut : `"SHA1"`, ce qu'attendent les applications d'authentification. |
+| `time?` | `number \| ``Date` | Vérifie le code à cet instant, sous forme de `Date` ou de millisecondes Unix. Par défaut : maintenant. |
+| `window?` | `number` | Nombre de périodes acceptées avant et après maintenant, de `0` à `10`. Par défaut : `1`. |
+| `after?` | `number` | Le pas de temps du dernier code que vous avez accepté, obtenu avec `totpStep()`. Les codes de ce pas ou d'un pas antérieur sont refusés : un code ne peut donc pas servir deux fois. |

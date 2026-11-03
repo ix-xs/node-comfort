@@ -66,6 +66,18 @@ nc.info("user:", { id: 1, roles: ["admin"] });
 nc.error(new Error("Cannot save order", { cause: dbError }));
 ```
 
+A message on several lines keeps its shape: the lines after the first one are indented, with or without a timestamp, so a new line inside a value can't pass for a log line of its own. The exception is `log()` with no scope and no timestamp, which prints like `console.log`, so a box or a table stays aligned.
+
+## Values you don't control
+
+A logged value can hold control characters: a user name, a header, a file name. A terminal acts on some of them (it can clear the screen, change its title, or write to the clipboard), and `\r` can make a line look like another one. So the logger shows them as text, like `\x1b` or `\r`, instead of sending them to the terminal:
+
+```js
+nc.info("Login from", req.headers["user-agent"]); // "Mozilla\x1b]0;hacked\x07" is printed as text
+```
+
+New lines and tabs are kept, and so are the colors and links you add with [`nc.color`](/system/color/). Without colors, and in log files, colors are removed from logged strings.
+
 ## Markup
 
 Style parts of a message with `<% styles text%>`:
@@ -76,6 +88,12 @@ nc.log("<% #ff8800 Orange%> on <% bg#1e1e2e white a dark background%>");
 ```
 
 Any color or style from [`nc.color`](/system/color/) works, plus `#hex`, `bg#hex`, `rgb(r, g, b)` and `bgRgb(r, g, b)`. Spaces before `%>` are kept as part of the text. If `<%` clashes with a template engine, change the delimiters with `nc.setDelimiter({ open: "{{", close: "}}" })`.
+
+Markup is read in the first argument only. The other arguments print as they are, so put values that come from outside there, not inside the first string:
+
+```js
+nc.info("<% bold New user:%>", user.name); // a name like "<% red x%>" stays text
+```
 
 ## Groups, timers and tables
 
@@ -126,7 +144,7 @@ log.error("charge failed", { orderId: 42 }, error);
 {"time":"2026-09-11T14:30:05.120Z","level":"error","service":"billing","version":"2.3.0","orderId":42,"err":{"name":"Error","message":"card declined","stack":"Error: card declined\n    at ..."},"msg":"charge failed"}
 ```
 
-Plain objects in the arguments are merged into the record, errors go under `err`, and everything else becomes the message.
+Plain objects in the arguments are merged into the record, errors go under `err`, and everything else becomes the message. A logged object can't replace `time`, `level`, `scope` or `msg`.
 
 ## Hiding secrets
 
@@ -178,6 +196,14 @@ nc.configure({ file: { path: "logs/app.log", maxSize: "10MB", maxFiles: 5 } });
 ```
 
 Colors are removed in files. When `app.log` passes 10 MB it becomes `app.log.1`, and the oldest file beyond five is deleted.
+
+Logs often hold things others shouldn't read, so a new log file is readable by its owner only (`0o600`). Change it with `mode`, for example to let a log collector in the same group read it:
+
+```js
+nc.configure({ file: { path: "logs/app.log", mode: 0o640 } });
+```
+
+A file that already exists keeps its permissions. `mode` is ignored on Windows.
 
 ## Settings at a glance
 

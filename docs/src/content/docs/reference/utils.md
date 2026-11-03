@@ -144,7 +144,7 @@ The types behind the options and results above. In TypeScript, import them from 
 
 ### DontCrashController
 
-Returned by `dontCrash()`.
+Returned by `dontCrash()`. With `using`, what it installed goes at the end of the block.
 
 | Property | Type | Description |
 | --- | --- | --- |
@@ -181,6 +181,7 @@ Options for `when()`.
 ### WhenTask
 
 The task returned by `when()`. Every method returns the task, so calls chain.
+With `using`, it stops at the end of the block.
 
 | Property | Type | Description |
 | --- | --- | --- |

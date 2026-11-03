@@ -87,4 +87,4 @@ Nothing to change in a project that used 2.0 as documented. A few behaviors were
 - **A `CURRENT_TIMESTAMP` default in `createTable()` is the time of the insert.** It used to store that text.
 - **`num.min()` and `num.max()` return `NaN`** when one of the values is `NaN`, and **`isEmpty()` is `false`** for a `Date`, a `RegExp` and an `Error`.
 
-The [changelog](https://github.com/ix-xs/node-comfort/blob/main/CHANGELOG.md) has the complete list.
+The [changelog](https://github.com/ix-xs/node-comfort/blob/main/CHANGELOG.md) has the complete list. To go on to 2.2, see [Upgrading to 2.2](/start/upgrade-2-2/).

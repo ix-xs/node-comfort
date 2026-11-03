@@ -22,11 +22,11 @@ try {
 | `TimeoutError` | `ETIMEDOUT` | `func.timeout`, `http`, `async.poll`, `emitter.waitFor`... | `timeout` |
 | `AbortError` | `ABORT_ERR` | tout ce qui est annulé avec un `AbortSignal`, une invite `cli` annulée | |
 | `ValidationError` | `ERR_VALIDATION` | `schema`, `env`, `http` avec un `schema` | `issues`, `flatten()` |
-| `HttpError` | `ERR_HTTP`, `ERR_NETWORK` | `http` | `status`, `statusText`, `url`, `method`, `headers`, `data` |
+| `HttpError` | `ERR_HTTP`, `ERR_NETWORK`, `ERR_RESPONSE_TOO_LARGE`, `ERR_REDIRECT`, `ERR_TOO_MANY_REDIRECTS` | `http` | `status`, `statusText`, `url`, `method`, `headers`, `data` |
 | `JWTError` | `ERR_JWT_*` | `crypto.verifyJWT` | `expiredAt` |
 | `ProcessError` | `ERR_PROCESS`, `ETIMEDOUT` | `sys.run`, `sys.exec` | `command`, `exitCode`, `signal`, `stdout`, `stderr`, `timedOut` |
 | `SQLiteError` | `ERR_SQLITE` | `SQLite` | `sql`, `sqliteCode` |
-| `NodeComfortError` | `ERR_DECRYPT` | `crypto.decrypt` | |
+| `NodeComfortError` | `ERR_DECRYPT`, `ERR_ARGON2_UNAVAILABLE` | `crypto.decrypt`, `crypto.hashPassword`, `crypto.verifyPassword` | |
 
 `AbortError` porte le nom `"AbortError"`, comme l'erreur native : les tests du type `error.name === "AbortError"` continuent donc de fonctionner.
 
@@ -45,10 +45,11 @@ try {
 }
 ```
 
-- `HttpError` : `ERR_HTTP` quand le serveur a répondu avec un statut qui n'est pas 2xx, ou avec un corps qui n'est pas le JSON que vous exigiez. `ERR_NETWORK` quand aucune réponse n'est revenue (`status` vaut alors `0`).
+- `HttpError` : `ERR_HTTP` quand le serveur a répondu avec un statut qui n'est pas 2xx, ou avec un corps qui n'est pas le JSON que vous exigiez. `ERR_NETWORK` quand aucune réponse n'est revenue (`status` vaut alors `0`). `ERR_RESPONSE_TOO_LARGE` quand le corps a dépassé `maxResponseSize` (100 Mo par défaut). `ERR_REDIRECT` quand une redirection ne peut pas être suivie : `redirect: "error"`, un schéma autre que `http:` ou `https:`, ou un corps en stream qu'il faudrait envoyer à nouveau. `ERR_TOO_MANY_REDIRECTS` après 20 redirections à la suite. Aucune de ces trois erreurs ne donne lieu à une nouvelle tentative.
 - `JWTError` : `ERR_JWT_MALFORMED`, `ERR_JWT_ALGORITHM`, `ERR_JWT_SIGNATURE`, `ERR_JWT_EXPIRED`, `ERR_JWT_NOT_BEFORE` et `ERR_JWT_CLAIM`.
 - `ProcessError` : `ERR_PROCESS` quand la commande a échoué, `ETIMEDOUT` quand elle a été arrêtée pour avoir dépassé son `timeout`.
 - `ERR_DECRYPT` : le secret est incorrect, ou le texte n'est pas ce que `crypto.encrypt()` a produit. L'erreur arrive sous la forme d'une simple `NodeComfortError`.
+- `ERR_ARGON2_UNAVAILABLE` : un hash Argon2id a été demandé, ou doit être vérifié, sur un Node.js antérieur à 24.7. C'est aussi une simple `NodeComfortError` : mettez Node.js à jour, ou restez sur scrypt sur cette machine.
 
 ## Ce qui n'est pas une NodeComfortError
 
@@ -97,7 +98,7 @@ JSON.stringify(new nc.errors.TimeoutError("Too slow", { timeout: 1000 }));
 res.status(400).json({ error }); // une ValidationError arrive avec ses issues
 ```
 
-Une `cause` est incluse sous la forme de son nom, de son message et de son code. Regardez ce qu'une classe transporte avant de l'envoyer à un client : une `HttpError` contient l'`url`, les `headers` et les `data` de la réponse qu'elle a reçue.
+Une `cause` est incluse sous la forme de son nom, de son message et de son code. Regardez ce qu'une classe transporte avant de l'envoyer à un client : une `HttpError` contient l'`url`, les `headers` et les `data` de la réponse qu'elle a reçue. Son JSON laisse de côté les en-têtes de cookies et d'identifiants, ainsi qu'un corps de plus de 4 Ko, et les valeurs des paramètres de requête qui ont l'air secrètes (`api_key`, `token`, `sig`...) s'affichent `***` dans son message et dans son `url`.
 
 ## Importer les classes
 

@@ -186,7 +186,7 @@ str.words("helloWorld-foo_bar"); // ["hello", "World", "foo", "bar"]
 deburr(input: unknown): string
 ```
 
-Retire les accents (`é` devient `e`) et développe les lettres latines spéciales (`ß` devient `ss`, `æ` devient `ae`).
+Retire les accents (`é` devient `e`) et développe les lettres latines spéciales (`ß` devient `ss`, `æ` devient `ae`). Les variantes d'apparence deviennent aussi des caractères simples (Unicode NFKD), si bien qu'un `＜` pleine chasse devient `<` : retirez les accents avant d'échapper le HTML, jamais après.
 
 ```js
 str.deburr("Crème brûlée"); // "Creme brulee"
@@ -227,7 +227,7 @@ str.squish("  hello \n\t world  "); // "hello world"
 stripTags(input: unknown): string
 ```
 
-Retire les balises HTML et garde le texte. Ce n'est pas un outil d'assainissement : pour afficher du texte non fiable dans du HTML, utilisez `escapeHTML()`.
+Retire les balises HTML et garde le texte. Ce n'est pas un outil d'assainissement : pour afficher du texte non fiable dans du HTML, utilisez `escapeHTML()`. Un balisage cassé peut même laisser une balise derrière lui : `"<<a>script>"` donne `"<script>"`.
 
 ```js
 str.stripTags("<p>Hello <b>world</b></p>"); // "Hello world"
@@ -239,7 +239,7 @@ str.stripTags("<p>Hello <b>world</b></p>"); // "Hello world"
 escapeHTML(input: unknown): string
 ```
 
-Échappe `& < > " '` pour que le texte soit sûr dans du contenu et des attributs HTML.
+Échappe `& < > " '` pour que le texte soit sûr dans du contenu HTML et dans des valeurs d'attributs entre guillemets. Cela ne suffit pas pour un attribut sans guillemets, une URL (`javascript:` reste tel quel), un script ou un style.
 
 ```js
 str.escapeHTML('<a href="x">Tom & Jerry</a>');
@@ -513,12 +513,13 @@ str.reverse("añ👍🏽"); // "👍🏽ña"
 mask(input: unknown, options?: MaskOptions): string
 ```
 
-Masque une partie d'une chaîne, comme un numéro de carte ou un token.
+Masque une partie d'une chaîne, comme un numéro de carte ou un token. Quand `start` et `end` laisseraient tout le texte visible, tout est masqué à la place.
 
 ```js
 str.mask("4242424242424242");                           // "************4242"
 str.mask("4242 4242 4242 4242", { keepSpaces: true });   // "**** **** **** 4242"
 str.mask("secret-token", { start: 2, end: 2, char: "•" }); // "se••••••••en"
+str.mask("1234");                                         // "****"
 ```
 
 ## initials
@@ -560,7 +561,7 @@ str.plural(0, { one: "fichier", other: "fichiers" }, { locale: "fr" });   // "0 
 template(input: unknown, data: Record<string, any>, options?: TemplateOptions): string
 ```
 
-Remplace les `{placeholders}` par des valeurs. Les chemins pointés comme `{user.name}` fonctionnent, et les valeurs manquantes sont laissées telles quelles sauf si vous donnez un `fallback`.
+Remplace les `{placeholders}` par des valeurs. Les chemins pointés comme `{user.name}` fonctionnent, et les valeurs manquantes sont laissées telles quelles sauf si vous donnez un `fallback`. Les valeurs ne sont pas échappées : pour construire du HTML, passez-les d'abord dans `escapeHTML()`.
 
 ```js
 str.template("Hi {name}, you have {count} messages", { name: "Jo", count: 3 });
@@ -635,13 +636,14 @@ str.compare("a", "A", { sensitivity: "base" }); // 0
 ## levenshtein
 
 ```ts
-levenshtein(a: unknown, b: unknown): number
+levenshtein(a: unknown, b: unknown, options?: LevenshteinOptions): number
 ```
 
-Le nombre de modifications d'un seul caractère nécessaires pour transformer `a` en `b`.
+Le nombre de modifications d'un seul caractère nécessaires pour transformer `a` en `b`. Le travail croît avec le produit des deux longueurs : sur des textes longs ou non fiables, définissez `maxDistance`.
 
 ```js
-str.levenshtein("kitten", "sitting"); // 3
+str.levenshtein("kitten", "sitting");                     // 3
+str.levenshtein("kitten", "sitting", { maxDistance: 1 }); // 2, which means "more than 1"
 ```
 
 ## similarity
@@ -701,6 +703,7 @@ Options de `closest()`.
 | --- | --- | --- |
 | `threshold?` | `number` | Similarité minimale (de 0 à 1) pour accepter une correspondance. Par défaut : `0.4`. |
 | `caseSensitive?` | `boolean` | Tient compte de la casse. |
+| `maxDistance?` | `number` | Ignore les candidats à plus de ce nombre de modifications. La recherche est aussi plus rapide. |
 
 ### CompareOptions
 
@@ -711,6 +714,14 @@ Options de `compare()`.
 | `locale?` | `string` | Langue utilisée pour l'ordre alphabétique. Par défaut : celle du système. |
 | `numeric?` | `boolean` | Trie les nombres naturellement, `"file2"` avant `"file10"`. Par défaut : `true`. |
 | `sensitivity?` | `"base" \| "accent" \| "case" \| "variant"` | Les différences qui comptent. `"base"` ignore les accents et la casse. Par défaut : `"variant"`. |
+
+### LevenshteinOptions
+
+Options de `levenshtein()`.
+
+| Propriété | Type | Description |
+| --- | --- | --- |
+| `maxDistance?` | `number` | Arrête de compter au-delà de ce nombre de modifications, ce qui est bien plus rapide sur des textes longs. Une distance plus grande est alors renvoyée sous la forme `maxDistance + 1`. |
 
 ### MaskOptions
 

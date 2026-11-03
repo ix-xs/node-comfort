@@ -188,7 +188,9 @@ deburr(input: unknown): string
 ```
 
 Removes accents (`é` becomes `e`) and spells out special Latin letters
-(`ß` becomes `ss`, `æ` becomes `ae`).
+(`ß` becomes `ss`, `æ` becomes `ae`). Look-alike forms become plain ones
+too (Unicode NFKD), so a fullwidth `＜` becomes `<`: deburr before
+escaping HTML, never after.
 
 ```js
 str.deburr("Crème brûlée"); // "Creme brulee"
@@ -230,7 +232,8 @@ stripTags(input: unknown): string
 ```
 
 Removes HTML tags and keeps the text. This is not a sanitizer: to show
-untrusted text in HTML, use `escapeHTML()`.
+untrusted text in HTML, use `escapeHTML()`. Broken markup can even leave
+a tag behind: `"<<a>script>"` gives `"<script>"`.
 
 ```js
 str.stripTags("<p>Hello <b>world</b></p>"); // "Hello world"
@@ -242,7 +245,9 @@ str.stripTags("<p>Hello <b>world</b></p>"); // "Hello world"
 escapeHTML(input: unknown): string
 ```
 
-Escapes `& < > " '` so the text is safe inside HTML content and attributes.
+Escapes `& < > " '` so the text is safe inside HTML content and quoted
+attribute values. It is not enough for an unquoted attribute, a URL
+(`javascript:` stays as it is), a script or a style.
 
 ```js
 str.escapeHTML('<a href="x">Tom & Jerry</a>');
@@ -524,12 +529,14 @@ str.reverse("añ👍🏽"); // "👍🏽ña"
 mask(input: unknown, options?: MaskOptions): string
 ```
 
-Hides part of a string, like a card number or a token.
+Hides part of a string, like a card number or a token. When `start` and
+`end` would leave the whole text visible, all of it is hidden instead.
 
 ```js
 str.mask("4242424242424242");                           // "************4242"
 str.mask("4242 4242 4242 4242", { keepSpaces: true });   // "**** **** **** 4242"
 str.mask("secret-token", { start: 2, end: 2, char: "•" }); // "se••••••••en"
+str.mask("1234");                                         // "****"
 ```
 
 ## initials
@@ -573,7 +580,8 @@ template(input: unknown, data: Record<string, any>, options?: TemplateOptions): 
 ```
 
 Fills `{placeholders}` with values. Dotted paths like `{user.name}` work,
-and missing values are left alone unless you give a `fallback`.
+and missing values are left alone unless you give a `fallback`. Values
+are not escaped: to build HTML, pass them through `escapeHTML()` first.
 
 ```js
 str.template("Hi {name}, you have {count} messages", { name: "Jo", count: 3 });
@@ -649,13 +657,16 @@ str.compare("a", "A", { sensitivity: "base" }); // 0
 ## levenshtein
 
 ```ts
-levenshtein(a: unknown, b: unknown): number
+levenshtein(a: unknown, b: unknown, options?: LevenshteinOptions): number
 ```
 
 The number of single-character edits needed to turn `a` into `b`.
+The work grows with the product of both lengths: on long or untrusted
+texts, set `maxDistance`.
 
 ```js
-str.levenshtein("kitten", "sitting"); // 3
+str.levenshtein("kitten", "sitting");                     // 3
+str.levenshtein("kitten", "sitting", { maxDistance: 1 }); // 2, which means "more than 1"
 ```
 
 ## similarity
@@ -717,6 +728,7 @@ Options for `closest()`.
 | --- | --- | --- |
 | `threshold?` | `number` | Minimum similarity (0 to 1) to accept a match. Defaults to `0.4`. |
 | `caseSensitive?` | `boolean` | Take case into account. |
+| `maxDistance?` | `number` | Ignore candidates more than this many edits away. The search also gets faster. |
 
 ### CompareOptions
 
@@ -727,6 +739,14 @@ Options for `compare()`.
 | `locale?` | `string` | Language used for alphabetical order. Defaults to the system's. |
 | `numeric?` | `boolean` | Sort numbers naturally, `"file2"` before `"file10"`. Defaults to `true`. |
 | `sensitivity?` | `"base" \| "accent" \| "case" \| "variant"` | Which differences count. `"base"` ignores accents and case. Defaults to `"variant"`. |
+
+### LevenshteinOptions
+
+Options for `levenshtein()`.
+
+| Property | Type | Description |
+| --- | --- | --- |
+| `maxDistance?` | `number` | Stop counting past this many edits, which is much faster on long texts. A larger distance then comes back as `maxDistance + 1`. |
 
 ### MaskOptions
 

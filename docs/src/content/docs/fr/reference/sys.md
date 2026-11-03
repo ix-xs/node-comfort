@@ -36,7 +36,7 @@ Lance un programme sans shell : les arguments sont donc passés tels quels et un
 | `args?` | `string[]` | Par défaut : `[]`. |
 | `options?` | [`RunOptions`](#runoptions) |  |
 
-**Lève** `ProcessError` : S'il ne peut pas démarrer, échoue (sauf avec `reject: false`) ou dépasse le timeout.
+**Lève** `ProcessError` : S'il ne peut pas démarrer, échoue (sauf avec `reject: false`) ou dépasse le timeout. Sous Windows, aussi quand un fichier `.cmd` ou `.bat` recevrait un argument avec un saut de ligne, ou avec un guillemet quand le fichier ne transmet pas ses arguments avec `%*` : cmd.exe ne peut pas les recevoir en toute sécurité.
 
 ```js
 const { stdout } = await sys.run("git", ["log", "-1", "--format=%s"]);
@@ -62,34 +62,46 @@ const { exitCode } = await sys.exec("npm test", { reject: false, stdio: "inherit
 ## which
 
 ```ts
-which(command: string): string | undefined
+which(command: string, options?: WhichOptions): string | undefined
 ```
 
-Trouve un exécutable dans `PATH`, comme la commande `which`.
+Trouve un exécutable dans `PATH`, comme la commande `which`. Un chemin, comme `"./bin/tool"`, est cherché à partir de `cwd` à la place.
 
 ```js
 sys.which("git");  // "/usr/bin/git"
 sys.which("nope"); // undefined
+sys.which("./tool", { cwd: "./app" });
 ```
 
 ## open
 
 ```ts
-open(target: string): boolean
+open(target: string, options?: OpenOptions): boolean
 ```
 
-Ouvre une URL, un fichier ou un dossier avec l'application par défaut.
+Ouvre une URL, un fichier ou un dossier avec l'application par défaut. Seules les URL `http:`, `https:` et `mailto:` sont ouvertes, sauf si vous en autorisez d'autres avec `protocols` ; tout le reste est un chemin, qui doit exister. Un programme est lancé, comme avec un double-clic : ne passez pas un chemin que vous n'avez pas choisi.
+
+| Paramètre | Type | Description |
+| --- | --- | --- |
+| `target` | `string` | Une URL, ou le chemin d'un fichier ou d'un dossier. |
+| `options?` | [`OpenOptions`](#openoptions) |  |
 
 **Renvoie** `boolean` : `true` si le programme d'ouverture a démarré.
 
+**Lève** `TypeError` : Si le schéma de l'URL n'est pas autorisé, si la cible contient un caractère de contrôle (ou un guillemet double, sous Windows), ou si c'est un chemin réseau sans `allowUNC`.
+
+**Lève** `Error` : Si le chemin n'existe pas.
+
 ```js
 sys.open("http://localhost:3000");
+sys.open("./report.html");
+sys.open("vscode://file/C:/app/index.js", { protocols: ["vscode:"] });
 ```
 
 ## onShutdown
 
 ```ts
-onShutdown(handler: (reason: ShutdownReason) => unknown, options?: ShutdownOptions): () => void
+onShutdown(handler: (reason: ShutdownReason) => unknown, options?: ShutdownOptions): (() => void) & Disposable
 ```
 
 Exécute du code de nettoyage quand on demande au processus de s'arrêter (Ctrl+C, `docker stop`, `kill`) : fermer les serveurs, vider les logs, déconnecter les bases de données. Les gestionnaires s'exécutent dans l'ordre inverse, puis le processus se termine. S'ils prennent plus de temps que `timeout`, l'arrêt est forcé ; un second Ctrl+C quitte immédiatement.
@@ -99,7 +111,7 @@ Exécute du code de nettoyage quand on demande au processus de s'arrêter (Ctrl+
 | `handler` | `(reason: `[`ShutdownReason`](#shutdownreason)`) => unknown` | Peut être asynchrone. Reçoit le signal qui a arrêté le processus. |
 | `options?` | [`ShutdownOptions`](#shutdownoptions) |  |
 
-**Renvoie** `() => void` : Retire le gestionnaire.
+**Renvoie** `(() => void) & ``Disposable` : Retire le gestionnaire. Avec `using`, à la fin du bloc.
 
 ```js
 const server = app.listen(3000);
@@ -242,7 +254,16 @@ nc.num.formatBytes(sys.memory().heapUsed); // "42.1 MB"
 
 ## Types
 
-Les types derrière les options et les résultats ci-dessus. En TypeScript, importez-les depuis le paquet : `import type { RunOptions } from "@ix-xs/node-comfort"`.
+Les types derrière les options et les résultats ci-dessus. En TypeScript, importez-les depuis le paquet : `import type { OpenOptions } from "@ix-xs/node-comfort"`.
+
+### OpenOptions
+
+Options de `open()`.
+
+| Propriété | Type | Description |
+| --- | --- | --- |
+| `protocols?` | `string[]` | Les schémas d'URL qui peuvent être ouverts, comme `"https:"` ou `"vscode:"`. Par défaut : `["http:", "https:", "mailto:"]`. `file:`, `search-ms:` et les schémas que d'autres applications enregistrent peuvent lancer des programmes : ils sont donc refusés sauf si vous les nommez. Une URL `file:` autorisée est vérifiée comme un chemin. |
+| `allowUNC?` | `boolean` | Autorise un chemin réseau Windows comme `\\server\share\file`. Par défaut : `false`, car le simple fait d'en consulter un peut envoyer vos identifiants Windows à ce serveur. |
 
 ### RunOptions
 
@@ -252,7 +273,7 @@ Options de `run()` et `exec()`.
 | --- | --- | --- |
 | `cwd?` | `string` | Où lancer la commande. |
 | `env?` | `Record``<string, string \| undefined>` | Variables d'environnement supplémentaires, ajoutées à `process.env`. `undefined` en retire une. |
-| `extendEnv?` | `boolean` | Mettez `false` pour ne passer que `env`, sans `process.env`. |
+| `extendEnv?` | `boolean` | Mettez `false` pour ne passer que `env`, sans `process.env`. Sans `env`, la commande reçoit alors un environnement vide. |
 | `input?` | `string \| ``Buffer``<``ArrayBufferLike``>` | Écrit sur le stdin de la commande. |
 | `timeout?` | `string \| number` | Tue la commande après cette durée, comme `"30s"`. Sous Windows, ce qu'elle a lancé est arrêté avec elle. |
 | `signal?` | `AbortSignal` | Tue la commande quand il est interrompu. Sous Windows, ce qu'elle a lancé est arrêté avec elle. |
@@ -313,3 +334,11 @@ Renvoyé par `info()`.
 | `ci` | `boolean` | Exécution en CI. |
 | `docker` | `boolean` | Exécution dans un conteneur. |
 | `wsl` | `boolean` | Exécution dans WSL. |
+
+### WhichOptions
+
+Options de `which()`.
+
+| Propriété | Type | Description |
+| --- | --- | --- |
+| `cwd?` | `string` | Le dossier à partir duquel un chemin relatif comme `"./bin/tool"`, ou un dossier relatif de `PATH`, est cherché. Par défaut : `process.cwd()`. |
