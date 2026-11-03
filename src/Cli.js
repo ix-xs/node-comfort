@@ -66,8 +66,12 @@ const { AbortError } = require("./errors.js");
  */
 
 /**
- * A spinner. Every method returns it.
- * @typedef {object} Spinner
+ * A spinner. Every method returns it. With `using`, it stops at the end of the block.
+ * @typedef {_SpinnerMethods & Disposable} Spinner
+ */
+
+/**
+ * @typedef {object} _SpinnerMethods
  * @property {(text?: string) => Spinner} start Starts spinning, optionally with new text.
  * @property {() => Spinner} stop Stops and clears the line.
  * @property {(text?: string) => Spinner} succeed Stops with a green `✔`.
@@ -91,8 +95,12 @@ const { AbortError } = require("./errors.js");
  */
 
 /**
- * A progress bar.
- * @typedef {object} ProgressBar
+ * A progress bar. With `using`, it stops at the end of the block.
+ * @typedef {_ProgressBarMethods & Disposable} ProgressBar
+ */
+
+/**
+ * @typedef {object} _ProgressBarMethods
  * @property {(amount?: number, label?: string) => ProgressBar} tick Adds to the value, 1 by default.
  * @property {(value: number, label?: string) => ProgressBar} update Sets the value.
  * @property {() => ProgressBar} stop Draws the final state and frees the line.
@@ -562,6 +570,10 @@ function spinner(text = "", options = {}) {
       return self;
     },
     stop: () => finish("", undefined),
+    [Symbol.dispose]: () => {
+      // Leaving the block early, by an error or a return, stops the spinner: one that already finished stays as it is.
+      if (spinning) finish("", undefined);
+    },
     succeed: (finalText) => finish(_paint(palette, "green", "✔"), finalText),
     fail: (finalText) => finish(_paint(palette, "red", "✖"), finalText),
     warn: (finalText) => finish(_paint(palette, "yellow", "⚠"), finalText),
@@ -697,6 +709,9 @@ function progress(options) {
       stopped = true;
       stream.write(interactive ? `\n${SHOW_CURSOR}` : `${line()}\n`);
       return self;
+    },
+    [Symbol.dispose]() {
+      self.stop();
     },
     get value() {
       return value;

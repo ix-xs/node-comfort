@@ -15,7 +15,7 @@
  */
 
 const { TimeoutError, AbortError } = require("./errors.js");
-const { toMs, setLongTimeout } = require("./internal/shared.js");
+const { toMs, setLongTimeout, disposable } = require("./internal/shared.js");
 
 /**
  * Event names mapped to their arguments, like
@@ -65,11 +65,11 @@ class Emitter {
    * @param {keyof Events} event
    * @param {_StoredListener} stored
    * @param {ListenOptions | undefined} options
-   * @returns {() => void}
+   * @returns {(() => void) & Disposable}
    */
   #add(event, stored, options) {
     const signal = options?.signal;
-    if (signal?.aborted) return () => {};
+    if (signal?.aborted) return disposable(() => {});
     const current = this.#listeners.get(event) ?? NONE;
     if (!current.includes(stored)) this.#listeners.set(event, [...current, stored]);
     const off = () => {
@@ -77,7 +77,7 @@ class Emitter {
       this.#drop(event, stored);
     };
     signal?.addEventListener("abort", off, { once: true });
-    return off;
+    return disposable(off);
   }
 
   /**
@@ -109,7 +109,7 @@ class Emitter {
    * @param {K} event
    * @param {(...args: Events[K]) => unknown} listener
    * @param {ListenOptions} [options]
-   * @returns {() => void} Removes the listener.
+   * @returns {(() => void) & Disposable} Removes the listener. With `using`, at the end of the block.
    */
   on(event, listener, options) {
     return this.#add(event, listener, options);
@@ -122,7 +122,7 @@ class Emitter {
    * @param {K} event
    * @param {(...args: Events[K]) => unknown} listener
    * @param {ListenOptions} [options]
-   * @returns {() => void} Removes the listener if it hasn't run yet.
+   * @returns {(() => void) & Disposable} Removes the listener if it hasn't run yet. With `using`, at the end of the block.
    */
   once(event, listener, options) {
     /** @type {_StoredListener} */
@@ -143,13 +143,13 @@ class Emitter {
    * emitter.onAny((event, ...args) => nc.debug(event, args));
    *
    * @param {(event: keyof Events & string, ...args: any[]) => unknown} listener
-   * @returns {() => void} Removes the listener.
+   * @returns {(() => void) & Disposable} Removes the listener. With `using`, at the end of the block.
    */
   onAny(listener) {
     if (!this.#any.includes(listener)) this.#any = [...this.#any, listener];
-    return () => {
+    return disposable(() => {
       this.#any = this.#any.filter((stored) => stored !== listener);
-    };
+    });
   }
 
   /**

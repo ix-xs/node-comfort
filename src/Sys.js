@@ -18,7 +18,7 @@ const fs = require("node:fs");
 const os = require("node:os");
 const nodePath = require("node:path");
 const { ProcessError, AbortError } = require("./errors.js");
-const { toMs } = require("./internal/shared.js");
+const { toMs, disposable } = require("./internal/shared.js");
 
 // Loaded on first use: most programs never start another one.
 /** @type {typeof import("node:child_process") | undefined} */
@@ -389,7 +389,7 @@ const _shutdownConfig = { timeout: 10_000, exitCode: 0 };
  *
  * @param {(reason: ShutdownReason) => unknown} handler Can be async. Gets the signal that stopped the process.
  * @param {ShutdownOptions} [options]
- * @returns {() => void} Removes the handler.
+ * @returns {(() => void) & Disposable} Removes the handler. With `using`, at the end of the block.
  */
 function onShutdown(handler, options = {}) {
   if (options.timeout !== undefined) _shutdownConfig.timeout = toMs(options.timeout, "timeout");
@@ -407,10 +407,10 @@ function onShutdown(handler, options = {}) {
       // unsupported signal on this platform
     }
   }
-  return () => {
+  return disposable(() => {
     const index = _shutdownHandlers.lastIndexOf(handler);
     if (index !== -1) _shutdownHandlers.splice(index, 1);
-  };
+  });
 }
 
 /**
