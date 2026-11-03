@@ -184,6 +184,13 @@ const Category = s.object({
 });
 ```
 
+A value nested very deeply, like a JSON body of a hundred thousand `[`, would run out of stack. So `parse()`, `safeParse()` and `is()` stop at 1000 levels of objects and arrays, and report a `"too_deep"` issue instead of throwing a `RangeError` from deep inside. Lower the limit with `maxDepth` when you know how deep your data goes:
+
+```js
+const result = Category.safeParse(req.body, { maxDepth: 20 });
+if (!result.success) result.issues; // [{ path: ["children", 0, "children", ...], code: "too_deep", ... }]
+```
+
 ## JSON Schema
 
 `toJSONSchema()` describes what a schema accepts as a JSON Schema (draft 2020-12), for an OpenAPI document or a form generator:

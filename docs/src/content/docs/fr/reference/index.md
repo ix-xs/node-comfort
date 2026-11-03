@@ -1,6 +1,6 @@
 ---
 title: "Tous les exports"
-description: "Tout ce que contient @ix-xs/node-comfort 2.1.1 : 23 espaces de noms et classes, 573 fonctions et méthodes, avec pour chacune une ligne qui dit ce qu'elle fait."
+description: "Tout ce que contient @ix-xs/node-comfort 2.2.0 : 23 espaces de noms et classes, 574 fonctions et méthodes, avec pour chacune une ligne qui dit ce qu'elle fait."
 sidebar:
   label: "Tous les exports"
   order: 0
@@ -89,7 +89,7 @@ Fichiers et dossiers sans try/catch : lire et écrire du texte ou du JSON (de fa
 | [`folderSize()`](/reference/fs/#foldersize) | La taille totale de tous les fichiers d'un dossier. |
 | [`hashFile()`](/reference/fs/#hashfile) | Calcule le hash d'un fichier par morceaux, les très gros fichiers ne posent donc pas de problème. |
 | [`tempFolder()`](/reference/fs/#tempfolder) | Crée un nouveau dossier unique dans le répertoire temporaire du système. |
-| [`sanitizeFilename()`](/reference/fs/#sanitizefilename) | Transforme n'importe quel texte en un nom de fichier valide sous Windows, macOS et Linux : les caractères interdits sont remplacés, les noms réservés comme `CON` sont préfixés, et la longueur est plafonnée. |
+| [`sanitizeFilename()`](/reference/fs/#sanitizefilename) | Transforme n'importe quel texte en un nom de fichier valide sous Windows, macOS et Linux : les caractères interdits sont remplacés, les caractères invisibles et de direction du texte sont retirés, les noms réservés comme `CON`, `NUL .txt` ou `COM¹` sont préfixés, et la longueur est plafonnée. |
 | [`watch()`](/reference/fs/#watch) | Surveille les modifications d'un fichier ou d'un dossier. |
 
 ### nc.checker
@@ -253,7 +253,7 @@ Utilitaires pour les chaînes : conversion de casse, slugs, troncature, gabarits
 | [`slugify()`](/reference/str/#slugify) | Transforme un texte en slug d'URL : sans accents, en minuscules, les mots reliés par des tirets. |
 | [`squish()`](/reference/str/#squish) | Réduit chaque suite d'espaces à un seul espace et retire les espaces au début et à la fin. |
 | [`stripTags()`](/reference/str/#striptags) | Retire les balises HTML et garde le texte. |
-| [`escapeHTML()`](/reference/str/#escapehtml) | Échappe `& < > " '` pour que le texte soit sûr dans du contenu et des attributs HTML. |
+| [`escapeHTML()`](/reference/str/#escapehtml) | Échappe `& < > " '` pour que le texte soit sûr dans du contenu HTML et dans des valeurs d'attributs entre guillemets. |
 | [`unescapeHTML()`](/reference/str/#unescapehtml) | Décode les entités HTML : les entités nommées comme `&amp;` et `&nbsp;`, et les entités numériques comme `&#233;`. |
 | [`escapeRegExp()`](/reference/str/#escaperegexp) | Échappe les caractères spéciaux des expressions régulières pour que le texte soit recherché littéralement. |
 | [`length()`](/reference/str/#length) | Compte les caractères tels que vous les voyez. |
@@ -640,11 +640,12 @@ Un client HTTP construit sur `fetch` : JSON par défaut, objets pour la chaîne 
 
 ### SQLite
 
-SQLite rendu agréable, sur le moteur intégré à Node.js (22.13+) : CRUD avec des filtres riches, colonnes JSON et booléennes, transactions, migrations et sauvegardes. [Référence](/reference/sqlite/) • [Guide](/system/sqlite/)
+SQLite rendu agréable, sur le moteur intégré à Node.js : CRUD avec des filtres riches, colonnes JSON et booléennes, transactions, migrations et sauvegardes. [Référence](/reference/sqlite/) • [Guide](/system/sqlite/)
 
 | Nom | Rôle |
 | --- | --- |
 | [`new SQLite()`](/reference/sqlite/#constructor) | Ouvre une base de données, en créant le fichier et ses dossiers si nécessaire. |
+| [`op`](/reference/sqlite/#op) | Des opérateurs de filtre que seul le code peut créer. |
 | [`exec()`](/reference/sqlite/#exec) | Exécute du SQL qui ne renvoie pas de lignes. |
 | [`queryOne()`](/reference/sqlite/#queryone) | Exécute une requête et renvoie la première ligne. |
 | [`queryAll()`](/reference/sqlite/#queryall) | Exécute une requête et renvoie toutes les lignes. |
@@ -713,7 +714,7 @@ Des couleurs de terminal que vous pouvez chaîner, comme `chalk`. [Référence](
 | [`enabled`](/reference/color/#enabled) | Indique si les couleurs sont émises. |
 | [`create()`](/reference/color/#create) | Une instance séparée avec son propre niveau, pour un autre flux ou pour les tests. |
 | [`detect()`](/reference/color/#detect) | Le niveau de couleur pris en charge par un flux, en tenant compte de `NO_COLOR` et de `FORCE_COLOR`. |
-| [`strip()`](/reference/color/#strip) | Retire les couleurs et les autres codes d'échappement du terminal. |
+| [`strip()`](/reference/color/#strip) | Retire les couleurs, tous les autres codes d'échappement du terminal et tous les caractères de contrôle sauf les tabulations et les retours à la ligne (`\r` et `\b` partent donc aussi). |
 | [`width()`](/reference/color/#width) | Le nombre de colonnes occupées par le texte, sans tenir compte des couleurs et en comptant 2 pour les emoji et les caractères CJK. |
 | [`truncate()`](/reference/color/#truncate) | Coupe le texte à un nombre de colonnes et ajoute `…`. |
 | [`link()`](/reference/color/#link) | Un lien cliquable dans les terminaux qui le prennent en charge, `"text (url)"` ailleurs. |
@@ -744,7 +745,7 @@ Les processus et le système : lancer des commandes et récupérer leur sortie, 
 
 ### nc.crypto
 
-La cryptographie sans les pièges, construite sur `node:crypto` : hashes, HMAC, hachage de mots de passe (scrypt), chiffrement (AES-256-GCM), JWT, codes à deux facteurs (TOTP) et valeurs aléatoires sûres. [Référence](/reference/crypto/) • [Guide](/system/crypto/)
+La cryptographie sans les pièges, construite sur `node:crypto` : hashes, HMAC, hachage de mots de passe (scrypt ou Argon2id), chiffrement (AES-256-GCM), JWT, codes à deux facteurs (TOTP) et valeurs aléatoires sûres. [Référence](/reference/crypto/) • [Guide](/system/crypto/)
 
 | Nom | Rôle |
 | --- | --- |
@@ -752,9 +753,9 @@ La cryptographie sans les pièges, construite sur `node:crypto` : hashes, HMAC, 
 | [`hmac()`](/reference/crypto/#hmac) | Une signature HMAC : un hash calculé avec un secret comme clé. |
 | [`verifyHmac()`](/reference/crypto/#verifyhmac) | Vérifie, en temps constant, une signature HMAC que vous avez reçue. |
 | [`safeEqual()`](/reference/crypto/#safeequal) | Compare deux secrets en temps constant : la comparaison ne peut donc rien laisser fuiter par sa durée, pas même leurs longueurs. |
-| [`hashPassword()`](/reference/crypto/#hashpassword) | Calcule le hash d'un mot de passe avec scrypt et un sel aléatoire. |
-| [`verifyPassword()`](/reference/crypto/#verifypassword) | Vérifie un mot de passe par rapport à un hash stocké, en temps constant. |
-| [`needsRehash()`](/reference/crypto/#needsrehash) | Ce hash a-t-il été créé avec des paramètres plus faibles que les vôtres ? |
+| [`hashPassword()`](/reference/crypto/#hashpassword) | Calcule le hash d'un mot de passe avec un sel aléatoire : scrypt par défaut, ou Argon2id. |
+| [`verifyPassword()`](/reference/crypto/#verifypassword) | Vérifie un mot de passe par rapport à un hash stocké, en temps constant : les hashes scrypt de `hashPassword()`, et les chaînes PHC Argon2 (`$argon2id$`, `$argon2i$`, `$argon2d$`) créées ici ou par une autre bibliothèque. |
+| [`needsRehash()`](/reference/crypto/#needsrehash) | Ce hash a-t-il été créé avec un autre algorithme, ou avec des paramètres plus faibles que les vôtres (coût inférieur, clé de moins de 32 octets, sel de moins de 16) ? |
 | [`generateKey()`](/reference/crypto/#generatekey) | Une clé aléatoire de 256 bits pour `encrypt()`, sous forme de texte que vous pouvez placer dans une variable d'environnement. |
 | [`encrypt()`](/reference/crypto/#encrypt) | Chiffre des données avec AES-256-GCM, qui détecte aussi les altérations. |
 | [`decrypt()`](/reference/crypto/#decrypt) | Déchiffre ce que `encrypt()` a produit. |
@@ -765,6 +766,7 @@ La cryptographie sans les pièges, construite sur `node:crypto` : hashes, HMAC, 
 | [`totpSecret()`](/reference/crypto/#totpsecret) | Un nouveau secret à deux facteurs, au format Base32 attendu par les applications d'authentification. |
 | [`totp()`](/reference/crypto/#totp) | Le code à 6 chiffres en cours pour un secret à deux facteurs, tel que l'affichent les applications d'authentification. |
 | [`verifyTOTP()`](/reference/crypto/#verifytotp) | Vérifie un code saisi par un utilisateur. |
+| [`totpStep()`](/reference/crypto/#totpstep) | Trouve à quel pas de temps appartient un code saisi par un utilisateur. |
 | [`totpURI()`](/reference/crypto/#totpuri) | Le lien `otpauth://` à afficher sous forme de QR code quand un utilisateur active la 2FA. |
 | [`randomBytes()`](/reference/crypto/#randombytes) | Des octets aléatoires sûrs. |
 | [`randomInt()`](/reference/crypto/#randomint) | Un entier aléatoire sûr de `min` à `max`, bornes incluses, sans biais. |

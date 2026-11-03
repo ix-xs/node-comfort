@@ -6,7 +6,9 @@ sidebar:
   order: 1
 ---
 
-Balisage : `<% red bold Error:%> disk is full`. Tous les noms de style fonctionnent, ainsi que `#ff8800`, `bg#1e1e2e`, `rgb(255, 128, 0)` et `bgRgb(...)`.
+Balisage : `<% red bold Error:%> disk is full`. Tous les noms de style fonctionnent, ainsi que `#ff8800`, `bg#1e1e2e`, `rgb(255, 128, 0)` et `bgRgb(...)`. Seul le premier argument, le message, est lu comme du balisage : les valeurs qui suivent sont affichées telles quelles.
+
+Ce sur quoi un terminal pourrait agir est affiché comme du texte (`\x1b`, `\r`) : une valeur écrite dans les logs ne peut donc pas déplacer le curseur, changer le titre ou forger une ligne de log. Les couleurs de `nc.color`, les liens de `color.link()`, les retours à la ligne et les tabulations fonctionnent toujours, et les lignes d'un message après la première sont indentées, sauf avec `log()` quand il n'y a ni scope ni horodatage.
 
 Niveaux, du plus bavard au plus grave : `trace`, `debug`, `info`, `warn`, `error`, `fatal`. Le niveau par défaut est `info` ; `LOG_LEVEL` le change. `DEBUG=1` affiche les messages de débogage, et `DEBUG=db,http:*` uniquement les messages debug et trace des loggers qui ont ces portées. Les avertissements et les erreurs vont sur stderr.
 
@@ -33,7 +35,7 @@ nc.log("<% cyan bold Tip:%> press <% bgWhite black  q  %> to quit");
 log(...args: unknown[]): typeof nc.logger
 ```
 
-Affiche un message sans badge. Les chaînes acceptent le balisage, les objets sont mis en forme, et plusieurs arguments sont joints par des espaces.
+Affiche un message sans badge. Le premier argument, quand c'est une chaîne, accepte le balisage ; les objets sont mis en forme, et plusieurs arguments sont joints par des espaces.
 
 ```js
 nc.log("<% green ✔ Saved%> in <% bold 12ms%>");
@@ -313,6 +315,7 @@ Un message tel que `onLog` le reçoit.
 | `path` | `string` | Le fichier à la suite duquel écrire. Les dossiers sont créés, les couleurs retirées. |
 | `maxSize?` | `string \| number` | Rotation au-delà de cette taille, comme `"10MB"`. |
 | `maxFiles?` | `number` | Nombre de fichiers de rotation à conserver. Par défaut : `5`. |
+| `mode?` | `number` | Les permissions que reçoit un nouveau fichier de logs, comme `0o640`. Par défaut : `0o600`, seul son propriétaire peut le lire. Un fichier qui existe déjà conserve les siennes. Sans effet sous Windows. |
 
 ### Logger
 
@@ -320,7 +323,7 @@ Un logger créé par `createLogger()`. Chaque méthode renvoie le logger, les ap
 
 | Propriété | Type | Description |
 | --- | --- | --- |
-| `log` | `(...args: unknown[]) => `[`Logger`](#logger) | Un message simple, sans badge. Accepte le balisage. |
+| `log` | `(...args: unknown[]) => `[`Logger`](#logger) | Un message simple, sans badge. Son premier argument accepte le balisage. |
 | `trace` | `(...args: unknown[]) => `[`Logger`](#logger) | Diagnostic très détaillé, masqué sauf si le niveau est `trace`. |
 | `debug` | `(...args: unknown[]) => `[`Logger`](#logger) | Diagnostic, masqué sauf si le niveau est `debug` ou inférieur. |
 | `info` | `(...args: unknown[]) => `[`Logger`](#logger) | Un message `ℹ INFO`. |

@@ -31,12 +31,12 @@ new Emitter<Events extends EventMap = EventMap>(): Emitter<Events>
 ## on
 
 ```ts
-on<K extends keyof Events & string>(event: K, listener: (...args: Events[K]) => unknown, options?: ListenOptions): () => void
+on<K extends keyof Events & string>(event: K, listener: (...args: Events[K]) => unknown, options?: ListenOptions): (() => void) & Disposable
 ```
 
 Écoute un événement.
 
-**Renvoie** `() => void` : Retire l'écouteur.
+**Renvoie** `(() => void) & ``Disposable` : Retire l'écouteur. Avec `using`, à la fin du bloc.
 
 ```js
 const off = emitter.on("data", (chunk) => chunks.push(chunk));
@@ -51,22 +51,22 @@ controller.abort(); // retire les deux
 ## once
 
 ```ts
-once<K extends keyof Events & string>(event: K, listener: (...args: Events[K]) => unknown, options?: ListenOptions): () => void
+once<K extends keyof Events & string>(event: K, listener: (...args: Events[K]) => unknown, options?: ListenOptions): (() => void) & Disposable
 ```
 
 Écoute un événement une seule fois.
 
-**Renvoie** `() => void` : Retire l'écouteur s'il n'a pas encore été appelé.
+**Renvoie** `(() => void) & ``Disposable` : Retire l'écouteur s'il n'a pas encore été appelé. Avec `using`, à la fin du bloc.
 
 ## onAny
 
 ```ts
-onAny(listener: (event: keyof Events & string, ...args: any[]) => unknown): () => void
+onAny(listener: (event: keyof Events & string, ...args: any[]) => unknown): (() => void) & Disposable
 ```
 
 Écoute tous les événements ; l'écouteur reçoit d'abord le nom de l'événement. Pratique pour la journalisation.
 
-**Renvoie** `() => void` : Retire l'écouteur.
+**Renvoie** `(() => void) & ``Disposable` : Retire l'écouteur. Avec `using`, à la fin du bloc.
 
 ```js
 emitter.onAny((event, ...args) => nc.debug(event, args));

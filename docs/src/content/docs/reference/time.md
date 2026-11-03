@@ -725,11 +725,12 @@ Options for `cron()` and `nextRun()`.
 
 ### DateInput
 
-A date: a `Date`, a timestamp in ms, or a string `new Date()` understands
-(ISO 8601 is safest).
+A date: a `Date`, a timestamp in ms, a string `new Date()` understands
+(ISO 8601 is safest), or an instant from `Temporal`, like a
+`Temporal.Instant` or a `Temporal.ZonedDateTime`.
 
 ```ts
-type DateInput = Date | number | string
+type DateInput = Date | number | string | { readonly epochMilliseconds: number; }
 ```
 
 ### DateRangeOptions
@@ -801,7 +802,8 @@ Options for `relative()`.
 
 ### ScheduledTask
 
-A schedule returned by `every()` and `cron()`.
+A schedule returned by `every()` and `cron()`. With `using`, it stops at
+the end of the block.
 
 | Property | Type | Description |
 | --- | --- | --- |

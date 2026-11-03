@@ -58,7 +58,7 @@ The color level a stream supports, taking `NO_COLOR` and `FORCE_COLOR` into acco
 strip(text: string): string
 ```
 
-Removes colors and other terminal escape codes.
+Removes colors, every other terminal escape code and every control character but tabs and new lines (so `\r` and `\b` go too).
 
 ## width
 
@@ -82,7 +82,7 @@ Cuts text to a number of columns and adds `…`. Colors are kept and still close
 link(text: string, url: string): string
 ```
 
-A clickable link in terminals that support it, `"text (url)"` elsewhere.
+A clickable link in terminals that support it, `"text (url)"` elsewhere. Control characters are removed from both, so they can't end the link early; the text keeps its colors.
 
 ## gradient
 
@@ -118,10 +118,10 @@ Color helpers.
 | `enabled` | `boolean` | Whether colors are being output. |
 | `create` | `(level?: `[`ColorLevel`](#colorlevel)`) => `[`ColorModule`](#colormodule) | A separate instance with its own level, for another stream or for tests. |
 | `detect` | `(stream?: ``WriteStream`` \| { isTTY?: boolean; } \| undefined) => `[`ColorLevel`](#colorlevel) | The color level a stream supports, taking `NO_COLOR` and `FORCE_COLOR` into account. |
-| `strip` | `(text: string) => string` | Removes colors and other terminal escape codes. |
+| `strip` | `(text: string) => string` | Removes colors, every other terminal escape code and every control character but tabs and new lines (so `\r` and `\b` go too). |
 | `width` | `(text: string) => number` | How many columns the text takes, ignoring colors and counting emoji and CJK as 2. |
 | `truncate` | `(text: string, columns: number, options?: { ellipsis?: string; } \| undefined) => string` | Cuts text to a number of columns and adds `…`. Colors are kept and still closed properly. |
-| `link` | `(text: string, url: string) => string` | A clickable link in terminals that support it, `"text (url)"` elsewhere. |
+| `link` | `(text: string, url: string) => string` | A clickable link in terminals that support it, `"text (url)"` elsewhere. Control characters are removed from both, so they can't end the link early; the text keeps its colors. |
 | `gradient` | `(text: string, colors: string[]) => string` | Colors the text along a gradient of hex colors. |
 
 ### ColorLevel

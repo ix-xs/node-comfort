@@ -23,13 +23,30 @@ const stored = await crypto.hashPassword(password);
 if (!(await crypto.verifyPassword(input, user.passwordHash))) throw new Error("Invalid credentials");
 ```
 
-`verifyPassword` compare en temps constant et renvoie `false` pour un mot de passe erroné ou un hash abîmé ; il ne lève pas d'erreur.
+`verifyPassword` compare en temps constant et renvoie `false` pour un mot de passe erroné ou un hash abîmé. Un hash qui demande plus de travail que permis (plus de 1 Gio de mémoire, par exemple) lève une `RangeError` à la place, sans faire ce travail : ce n'est pas un mauvais mot de passe, mais un hash à remplacer.
 
 La chaîne stockée conserve ses réglages. Quand vous augmentez le coût par la suite, les anciens hashs se vérifient toujours, et `needsRehash` vous indique lesquels mettre à niveau après une connexion réussie :
 
 ```js
 if (await crypto.verifyPassword(input, user.hash) && crypto.needsRehash(user.hash, { cost: 16 })) {
   user.hash = await crypto.hashPassword(input, { cost: 16 });
+}
+```
+
+Avec Node.js 24.7 ou plus récent, vous pouvez aussi hacher avec Argon2id, l'algorithme que recommande l'OWASP :
+
+```js
+const stored = await crypto.hashPassword(password, { algorithm: "argon2id" });
+// "$argon2id$v=19$m=19456,t=2,p=1$Zm9v...$YmFy..."
+```
+
+Le hash est une chaîne PHC standard : les autres bibliothèques Argon2 savent la lire, et `verifyPassword` lit les hashs produits ailleurs. Sur un Node.js plus ancien, hacher ou vérifier un hash Argon2 lève une `NodeComfortError` avec le code `ERR_ARGON2_UNAVAILABLE`. C'est un problème de déploiement, pas un mauvais mot de passe : il n'est donc pas caché derrière `false`.
+
+Pour faire passer vos utilisateurs de scrypt à Argon2id, indiquez à `needsRehash` l'algorithme que vous utilisez désormais. Chaque utilisateur passe au nouveau hash à sa prochaine connexion :
+
+```js
+if (await crypto.verifyPassword(input, user.hash) && crypto.needsRehash(user.hash, { algorithm: "argon2id" })) {
+  user.hash = await crypto.hashPassword(input, { algorithm: "argon2id" });
 }
 ```
 
@@ -76,6 +93,23 @@ try {
 
 `verifyJWT` vérifie l'algorithme, la signature, `exp`, `nbf` et les claims que vous demandez (`issuer`, `audience`, `subject`, `maxAge`). `decodeJWT` lit un token sans le vérifier, ce qui convient pour l'affichage, mais pour rien d'autre.
 
+Un secret `HS*` doit faire au moins 32 octets (RFC 7518) : un secret plus court peut être deviné à partir d'un seul token. Un secret plus court lève une `TypeError`, à la signature comme à la vérification. Générez-en un une fois pour toutes et gardez-le dans une variable d'environnement :
+
+```js
+crypto.generateKey(); // 32 octets aléatoires en Base64URL, parfait pour JWT_SECRET
+```
+
+Tout ce qui ressemble à une clé publique ou privée (du texte PEM, même avec un BOM ou du texte avant son en-tête, ou des octets DER) est refusé comme secret. Sinon, quiconque possède votre clé publique pourrait signer des tokens.
+
+Deux vérifications de plus sont là quand vous en avez besoin. `typ` exige un en-tête `typ`, comme `"at+jwt"` pour les jetons d'accès OAuth : un token fait pour un autre usage est refusé. Un token dont l'en-tête `crit` liste des extensions est refusé, sauf si vous les listez dans `crit`, comme l'exige la RFC 7515 :
+
+```js
+const claims = crypto.verifyJWT(token, process.env.JWT_SECRET, {
+  typ: "at+jwt",
+  clockTolerance: "30s", // des secondes, ou une durée
+});
+```
+
 ## Paires de clés
 
 Avec un secret partagé, tout service capable de vérifier un token peut aussi en émettre un. Avec une paire de clés, la clé privée signe et la clé publique ne fait que vérifier :
@@ -97,7 +131,7 @@ L'algorithme découle de la clé : `HS256` pour un secret, `RS256` pour une clé
 
 `verifyJWT` n'accepte que les algorithmes compatibles avec la clé qu'il a reçue. Un token signé avec HMAC est refusé là où une clé publique est attendue, avec le code `ERR_JWT_ALGORITHM`.
 
-Un problème avec le token lève une `JWTError`. Un problème avec la clé est une erreur dans le code, et lève une `TypeError` : un secret absent ou vide, une clé illisible, une clé publique passée à `signJWT`.
+Un problème avec le token lève une `JWTError`. Un problème avec la clé est une erreur dans le code, et lève une `TypeError` : un secret absent ou de moins de 32 octets, une clé illisible, une clé publique passée à `signJWT`.
 
 ## Authentification à deux facteurs
 
@@ -112,6 +146,18 @@ if (!crypto.verifyTOTP(req.body.code, user.totpSecret)) throw new Error("Invalid
 ```
 
 Les codes fonctionnent avec Google Authenticator, 1Password, Authy et les autres. Les codes des périodes de 30 secondes voisines sont acceptés pour compenser la dérive des horloges.
+
+Un secret doit faire au moins 10 octets (16 caractères Base32), pour que les anciens secrets de 80 bits continuent de fonctionner, et un secret plus court lève une `TypeError`. Créez les nouveaux avec `totpSecret()` : 20 octets par défaut, 16 au minimum. L'option `window`, le nombre de périodes voisines acceptées, va de 0 à 10.
+
+Seul, `verifyTOTP` accepte à nouveau le même code jusqu'à son expiration : un code aperçu par-dessus l'épaule de quelqu'un fonctionne encore pendant une minute. Pour l'éviter, utilisez `totpStep()`, qui donne le pas de temps d'un code valide, et enregistrez ce pas avec l'utilisateur. Passez-le comme `after` la fois suivante : les codes de ce pas ou d'un pas antérieur sont refusés.
+
+```js
+const step = crypto.totpStep(req.body.code, user.totpSecret, { after: user.totpLastStep });
+if (step === undefined) throw new Error("Invalid code");
+user.totpLastStep = step; // enregistrez-le avec l'utilisateur
+```
+
+`verifyTOTP` accepte aussi `after`, si vous conservez le pas autrement.
 
 ## Signatures de webhooks
 
@@ -138,7 +184,7 @@ Si l'autre partie utilise un autre algorithme ou un autre encodage, passez les m
 if (!crypto.safeEqual(req.headers["x-api-key"], process.env.API_KEY)) throw new Error("Forbidden");
 ```
 
-Comparez toujours les secrets avec `safeEqual` plutôt qu'avec `===` : il prend le même temps quelle que soit l'entrée et ne laisse donc rien fuiter. Une valeur absente (`undefined` ou `null`) n'est jamais égale à quoi que ce soit, pas même à une autre valeur absente.
+Comparez toujours les secrets avec `safeEqual` plutôt qu'avec `===` : il prend le même temps quelle que soit l'entrée et ne laisse donc rien fuiter. Une valeur absente (`undefined` ou `null`) ou vide (`""`) n'est jamais égale à quoi que ce soit, pas même à une autre valeur absente ou vide : une `API_KEY` non définie ne peut donc pas correspondre à un en-tête vide.
 
 ## Hashs et valeurs aléatoires
 

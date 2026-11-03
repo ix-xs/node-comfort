@@ -35,6 +35,15 @@ events.clear();               // tout
 
 `off(event, listener)` prend la fonction que vous avez donnée à `on` ou à `once`. Un écouteur ajouté avec `once` peut ainsi être retiré avant de s'être exécuté.
 
+La fonction que renvoient `on`, `once` et `onAny` fonctionne aussi avec `using` (Node.js 24 ou plus récent), qui retire l'écouteur à la fin du bloc :
+
+```js
+{
+  using off = events.on("ready", onReady);
+  await startServer();
+} // l'écouteur n'est plus là
+```
+
 ## Un seul signal pour plusieurs écouteurs
 
 `on` et `once` acceptent un `signal`. Quand il est interrompu, l'écouteur est retiré :

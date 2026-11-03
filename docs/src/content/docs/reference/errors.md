@@ -79,6 +79,10 @@ HttpError: typeof HttpError
 Thrown by `nc.http` when the response status isn't 2xx (unless you pass
 `throwHttpErrors: false`), and for network failures (`status` 0).
 
+The values of query parameters that look secret (`api_key`, `token`,
+`sig`...) read `***` in the message and in `url`, so the error can go to
+logs as it is.
+
 ## JWTError
 
 ```ts

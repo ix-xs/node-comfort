@@ -121,6 +121,8 @@ watcher.stop();
 
 `"error"` vous signale que la surveillance elle-même a échoué, pour que vous puissiez en lancer une nouvelle. Quand le dossier surveillé est supprimé, vous recevez cet événement une seule fois, avec le code `ENOENT`, et la surveillance s'arrête. Sans écouteur, une telle erreur est ignorée. `watch()` renvoie `undefined` quand le chemin n'existe pas.
 
+Avec Node.js 24 ou plus récent, `using watcher = nc.watch(...)` ferme le watcher à la fin du bloc, même quand une erreur le fait quitter plus tôt : voyez [Faire le ménage avec `using`](/recipes/#cleaning-up-with-using).
+
 ## Divers
 
 ```js

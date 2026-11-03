@@ -31,12 +31,12 @@ new Emitter<Events extends EventMap = EventMap>(): Emitter<Events>
 ## on
 
 ```ts
-on<K extends keyof Events & string>(event: K, listener: (...args: Events[K]) => unknown, options?: ListenOptions): () => void
+on<K extends keyof Events & string>(event: K, listener: (...args: Events[K]) => unknown, options?: ListenOptions): (() => void) & Disposable
 ```
 
 Listens to an event.
 
-**Returns** `() => void`: Removes the listener.
+**Returns** `(() => void) & ``Disposable`: Removes the listener. With `using`, at the end of the block.
 
 ```js
 const off = emitter.on("data", (chunk) => chunks.push(chunk));
@@ -51,23 +51,23 @@ controller.abort(); // removes both
 ## once
 
 ```ts
-once<K extends keyof Events & string>(event: K, listener: (...args: Events[K]) => unknown, options?: ListenOptions): () => void
+once<K extends keyof Events & string>(event: K, listener: (...args: Events[K]) => unknown, options?: ListenOptions): (() => void) & Disposable
 ```
 
 Listens to an event once.
 
-**Returns** `() => void`: Removes the listener if it hasn't run yet.
+**Returns** `(() => void) & ``Disposable`: Removes the listener if it hasn't run yet. With `using`, at the end of the block.
 
 ## onAny
 
 ```ts
-onAny(listener: (event: keyof Events & string, ...args: any[]) => unknown): () => void
+onAny(listener: (event: keyof Events & string, ...args: any[]) => unknown): (() => void) & Disposable
 ```
 
 Listens to every event; the listener gets the event name first. Handy for
 logging.
 
-**Returns** `() => void`: Removes the listener.
+**Returns** `(() => void) & ``Disposable`: Removes the listener. With `using`, at the end of the block.
 
 ```js
 emitter.onAny((event, ...args) => nc.debug(event, args));

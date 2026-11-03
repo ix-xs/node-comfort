@@ -73,6 +73,8 @@ HttpError: typeof HttpError
 
 Levée par `nc.http` quand le statut de la réponse n'est pas 2xx (sauf si vous passez `throwHttpErrors: false`), et pour les échecs réseau (`status` 0).
 
+Les valeurs des paramètres de requête qui semblent secrètes (`api_key`, `token`, `sig`...) apparaissent comme `***` dans le message et dans `url` : l'erreur peut donc aller dans les logs telle quelle.
+
 ## JWTError
 
 ```ts

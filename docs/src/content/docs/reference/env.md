@@ -36,10 +36,15 @@ parse(content: string, options?: EnvParseOptions): Record<string, string>
 
 Parses the text of a `.env` file: quotes, multi-line values, `export`,
 comments, escapes, and `${VAR}` expansion (except in single quotes).
+References resolve from the text itself and from `env`, never from
+`process.env` unless you pass it.
+
+**Throws** `RangeError`: If references make one value grow past 64 KB, as with variables that each use the one before several times.
 
 ```js
 env.parse('PORT=3000\nURL="http://localhost:${PORT}"');
 // { PORT: "3000", URL: "http://localhost:3000" }
+env.parse("HOME_COPY=${HOME}", { env: process.env });
 ```
 
 ## load
@@ -52,6 +57,20 @@ Loads `.env` files into `process.env`. The first file to set a variable
 wins, and variables that are already set are kept, unless you pass
 `override`. The `.env` loaded by itself at startup doesn't count as
 already set: `.env.local` wins over it, as you'd expect.
+
+The load at startup leaves out the variables that can run code or weaken
+TLS, and says so on stderr: `NODE_OPTIONS`, `NODE_TLS_REJECT_UNAUTHORIZED`,
+`NODE_EXTRA_CA_CERTS`, `NODE_PATH`, `NODE_REDIRECT_WARNINGS`,
+`NODE_REPL_EXTERNAL_MODULE`, `NODE_USE_ENV_PROXY`, `LD_PRELOAD`,
+`LD_LIBRARY_PATH`, `LD_AUDIT`,
+`DYLD_*`, `GIT_SSH_COMMAND`, `GIT_SSH`, `GIT_ASKPASS`, `GIT_EXEC_PATH`,
+`GIT_CONFIG*`, `GIT_PROXY_COMMAND`, `GIT_EXTERNAL_DIFF`, `GIT_TEMPLATE_DIR`,
+`GIT_PAGER`, `GIT_EDITOR`, `GIT_SEQUENCE_EDITOR`, `PAGER`, `EDITOR`,
+`VISUAL`, `SSH_ASKPASS`, `PATH`, `PATHEXT`,
+`ComSpec`, `BASH_ENV`, `PROMPT_COMMAND`, `PERL5OPT`,
+`PYTHONSTARTUP`, `PYTHONPATH`, `RUBYOPT`, `JAVA_TOOL_OPTIONS` and
+`_JAVA_OPTIONS`. A call to `load()` loads them all: don't make one on a
+file you don't trust, such as the `.env` of a repository someone sent you.
 
 | Parameter | Type | Description |
 | --- | --- | --- |
@@ -355,7 +374,7 @@ Options for `parse()`.
 | Property | Type | Description |
 | --- | --- | --- |
 | `expand?` | `boolean` | Replace `$VAR`, `${VAR}` and `${VAR:-default}`. Defaults to `true`. |
-| `env?` | `Record``<string, string \| undefined>` | Other variables usable in expansions. Defaults to `process.env`. |
+| `env?` | `Record``<string, string \| undefined>` | Other variables usable in expansions. Defaults to none: a reference resolves only from the text itself, so parsing a file you don't trust can't copy your secrets into it. Pass `process.env` to read from it. |
 
 ### EnvVarSpec
 

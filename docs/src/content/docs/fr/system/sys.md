@@ -19,7 +19,9 @@ await nc.sys.run("npm", ["install"], { cwd: "./app", stdio: "inherit" }); // sor
 await nc.sys.run("ffmpeg", ["-i", input, output], { timeout: "5m", onStderr: (line) => nc.debug(line) });
 ```
 
-Sous Windows, `run("npm", ...)` trouve `npm.cmd` et échappe correctement les arguments, ce que le `spawn` de Node ne fait pas tout seul.
+Sous Windows, `run("npm", ...)` trouve `npm.cmd` et échappe correctement les arguments, ce que le `spawn` de Node ne fait pas tout seul. Un fichier `.cmd` ou `.bat` passe par `cmd.exe`, qui lit `%`, `&` ou `^` dans un argument comme une partie de commande, et les relit dans chaque `.cmd` auquel les arguments sont transmis (comme les raccourcis des paquets npm globaux). Les arguments sont donc échappés deux fois, et une valeur comme `"&calc"` reste une valeur. Certaines choses ne peuvent pas être échappées pour `cmd.exe` : un saut de ligne dans un argument, ou un guillemet donné à un fichier batch qui ne transmet pas ses arguments avec `%*`, entraîne un rejet avec une `ProcessError` avant que rien ne s'exécute.
+
+Une commande relative, comme `"./bin/tool"`, est cherchée depuis `cwd`, et non depuis le dossier où votre programme a démarré.
 
 `exec` passe par le shell, pour les pipes et `&&`. Ne construisez jamais sa commande à partir d'une saisie non fiable.
 
@@ -47,7 +49,7 @@ try {
 
 Un timeout illisible, comme `"soon"`, entraîne un rejet avec une `TypeError` avant que quoi que ce soit ne démarre : une faute de frappe ne lance donc jamais une commande sans limite.
 
-Autres options : `env` (ajouté à `process.env`), `input` (écrit sur stdin), `onStdout` et `onStderr` (appelés pour chaque ligne) et `trim`. La [référence](/reference/sys/) en donne la liste complète.
+Autres options : `env` (ajouté à `process.env`, ou utilisé seul avec `extendEnv: false` : la commande ne reçoit alors rien d'autre, et un environnement vide sans `env`), `input` (écrit sur stdin), `onStdout` et `onStderr` (appelés pour chaque ligne) et `trim`. La [référence](/reference/sys/) en donne la liste complète.
 
 ## Trouver et ouvrir
 
@@ -57,7 +59,19 @@ nc.sys.open("http://localhost:3000"); // navigateur par défaut
 nc.sys.open("./report.html");
 ```
 
-`which` retient ce qu'il a trouvé : vous pouvez donc l'appeler aussi souvent que vous voulez.
+`which` retient ce qu'il a trouvé : vous pouvez donc l'appeler aussi souvent que vous voulez. Un chemin, comme `"./bin/tool"`, est cherché depuis `cwd` au lieu de `PATH` :
+
+```js
+nc.sys.which("./node_modules/.bin/eslint", { cwd: "./app" });
+```
+
+`open` lance un programme, comme le ferait un double clic : par défaut, il n'ouvre donc que ce qui est sans danger, à savoir les URL `http:`, `https:` et `mailto:`, et les chemins qui existent. Les autres schémas (`file:`, `search-ms:` et ceux que les autres applications enregistrent) peuvent lancer des programmes : ils lèvent donc une `TypeError`, sauf si vous les listez dans `protocols`. Un chemin qui n'existe pas lève une `Error`. Sous Windows, un chemin réseau comme `\\server\share\file` est refusé sauf si vous passez `allowUNC: true`, car le simple fait de le consulter peut envoyer vos identifiants Windows à ce serveur.
+
+```js
+nc.sys.open("vscode://file/C:/app/index.js", { protocols: ["vscode:"] });
+```
+
+Ne passez pas à `open` un chemin ou une URL que vous n'avez pas choisi.
 
 ## Ports et adresses
 
@@ -83,7 +97,7 @@ nc.sys.onShutdown(() => db.close());
 nc.sys.onShutdown((reason) => nc.info(`Stopping (${reason})`));
 ```
 
-Les gestionnaires s'exécutent dans l'ordre inverse (le dernier enregistré passe en premier), puis le processus se termine. Chacun reçoit la raison : le signal, comme `"SIGINT"` ou `"SIGTERM"`, ou `"shutdown"` quand vous l'avez demandé vous-même. S'ils prennent plus de 10 secondes (à changer avec `{ timeout: "30s" }`), la sortie est forcée. Un second Ctrl+C quitte immédiatement. `onShutdown` renvoie une fonction qui retire le gestionnaire.
+Les gestionnaires s'exécutent dans l'ordre inverse (le dernier enregistré passe en premier), puis le processus se termine. Chacun reçoit la raison : le signal, comme `"SIGINT"` ou `"SIGTERM"`, ou `"shutdown"` quand vous l'avez demandé vous-même. S'ils prennent plus de 10 secondes (à changer avec `{ timeout: "30s" }`), la sortie est forcée. Un second Ctrl+C quitte immédiatement. `onShutdown` renvoie une fonction qui retire le gestionnaire. Avec Node.js 24 ou plus récent, déclarez-la avec `using` pour retirer le gestionnaire à la fin d'un bloc ([en savoir plus sur `using`](/recipes/#cleaning-up-with-using)).
 
 Pour arrêter de vous-même, appelez `shutdown` plutôt que `process.exit()`, qui sauterait les gestionnaires :
 

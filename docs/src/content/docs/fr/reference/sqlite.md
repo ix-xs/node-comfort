@@ -1,6 +1,6 @@
 ---
 title: "SQLite"
-description: "SQLite rendu agréable, sur le moteur intégré à Node.js (22.13+) : CRUD avec des filtres riches, colonnes JSON et booléennes, transactions, migrations et sauvegardes. Les méthodes sont synchrones, comme le moteur, mais `await` fonctionne quand même. Les erreurs sont des `SQLiteError`. Les valeurs sont toujours liées comme paramètres et les noms sont vérifiés, aucune injection SQL ne peut donc passer par eux."
+description: "SQLite rendu agréable, sur le moteur intégré à Node.js : CRUD avec des filtres riches, colonnes JSON et booléennes, transactions, migrations et sauvegardes. Les méthodes sont synchrones, comme le moteur, mais `await` fonctionne quand même. Les erreurs sont des `SQLiteError`. Les valeurs sont toujours liées comme paramètres et les noms sont vérifiés, aucune injection SQL ne peut donc passer par eux."
 sidebar:
   label: "SQLite"
   order: 19
@@ -26,6 +26,10 @@ db.createTable({
 });
 db.insert("users", { email: "ada@example.com", settings: { theme: "dark" } });
 db.getAll("users", { email: { like: "%@example.com" } }, { orderBy: "email", limit: 20 });
+
+// Values from a request can't turn into operators:
+const safe = new nc.SQLite("data/app.sqlite", { operators: "tagged" });
+safe.getAll("users", { age: nc.SQLite.op.gte(18), role: nc.SQLite.op.in(["admin", "editor"]) });
 ```
 
 ## constructor
@@ -48,6 +52,14 @@ const db = new nc.SQLite();                                  // ./db.sqlite
 const app = new nc.SQLite("data/app.sqlite", { dates: true });
 const mem = new nc.SQLite(":memory:");
 ```
+
+## op
+
+```ts
+op: OperatorHelpers
+```
+
+Des opérateurs de filtre que seul le code peut créer. Les objets simples comme `{ gte: 18 }` fonctionnent toujours, sauf si la base a été ouverte avec `operators: "tagged"` : seuls ceux-ci sont alors des opérateurs, et une valeur venue d'une requête HTTP reste une valeur.
 
 ## exec
 
@@ -79,7 +91,7 @@ db.exec(`
 queryOne<T = R>(sql: string, params?: string | number | bigint | boolean | unknown[] | Record<string, unknown> | Date | null): T | undefined
 ```
 
-Exécute une requête et renvoie la première ligne. Les colonnes JSON et booléennes sont converties comme dans `get()`, jointures et colonnes renommées comprises. Sur Node.js avant 22.16, cela ne fonctionne que pour une requête sur une seule table.
+Exécute une requête et renvoie la première ligne. Les colonnes JSON et booléennes sont converties comme dans `get()`, jointures et colonnes renommées comprises.
 
 **Lève** `SQLiteError`
 
@@ -326,7 +338,7 @@ db.insertMany("tags", labels.map((label) => ({ label })), { onConflict: "ignore"
 update(tableName: string, data: Partial<R> & Record<string, unknown>, where: Where<R>): ChangeResult
 ```
 
-Met à jour les lignes qui correspondent. Le filtre est obligatoire, une condition oubliée ne peut donc pas réécrire toute la table.
+Met à jour les lignes qui correspondent. Le filtre est obligatoire, pour qu'une condition oubliée ne puisse pas réécrire toute la table : une valeur `undefined` dans le filtre, un `$and` ou un `$or` vide, ou un filtre qui correspond à toutes les lignes lève une erreur.
 
 | Paramètre | Type | Description |
 | --- | --- | --- |
@@ -376,7 +388,7 @@ Met à jour la ligne correspondant à `where` (ou `{ id: data.id }`), ou l'insè
 delete(tableName: string, where: Where<R>): ChangeResult
 ```
 
-Supprime les lignes qui correspondent. Le filtre est obligatoire ; `clearTable()` supprime tout, volontairement.
+Supprime les lignes qui correspondent. Le filtre est obligatoire ; `clearTable()` supprime tout, volontairement. Une valeur `undefined` dans le filtre, un `$and` ou un `$or` vide, ou un filtre qui correspond à toutes les lignes lève une erreur.
 
 **Lève** `SQLiteError`
 
@@ -390,7 +402,7 @@ db.delete("sessions", { expires_at: { lt: new Date() } });
 increment(tableName: string, amounts: Partial<Record<keyof R & string, number>> & Record<string, number>, where: Where<R>): ChangeResult
 ```
 
-Ajoute aux colonnes numériques en une seule instruction, deux requêtes simultanées comptent donc toutes les deux. Lire la valeur, l'augmenter puis la réécrire ferait perdre l'une des deux. Les nombres négatifs soustraient ; une colonne vide compte pour 0.
+Ajoute aux colonnes numériques en une seule instruction, deux requêtes simultanées comptent donc toutes les deux. Lire la valeur, l'augmenter puis la réécrire ferait perdre l'une des deux. Les nombres négatifs soustraient ; une colonne vide compte pour 0. Le filtre est vérifié comme celui de `update()`.
 
 | Paramètre | Type | Description |
 | --- | --- | --- |
@@ -591,7 +603,7 @@ Une colonne.
 | `defaultValue?` | `unknown` | Les objets fonctionnent pour les colonnes JSON, les booléens pour les colonnes BOOLEAN. `"CURRENT_TIMESTAMP"`, `"CURRENT_DATE"` et `"CURRENT_TIME"` désignent le moment de l'insertion. |
 | `defaultExpression?` | `string` | Une valeur par défaut calculée par SQLite, comme `"(unixepoch())"` ou `"(lower(hex(randomblob(16))))"`. Écrite telle quelle dans la table : ne la construisez jamais à partir d'une saisie utilisateur. |
 | `values?` | `unknown[]` | Valeurs autorisées. |
-| `check?` | `string` | Une expression `CHECK`, comme `"price >= 0"`. |
+| `check?` | `string` | Une expression `CHECK`, comme `"price >= 0"`. Elle est écrite telle quelle dans la table : ne la construisez jamais à partir d'une saisie utilisateur. |
 | `references?` | `{ table: string; column: string; }` | Cible de la clé étrangère. |
 | `onDelete?` | [`ForeignKeyAction`](#foreignkeyaction) | Quand la ligne référencée est supprimée. |
 | `onUpdate?` | [`ForeignKeyAction`](#foreignkeyaction) | Quand la clé référencée change. |
@@ -633,7 +645,7 @@ Un index.
 | `columns` | `string[]` | Plusieurs colonnes forment un index composite. |
 | `unique?` | `boolean` |  |
 | `name?` | `string` | Par défaut : `idx_<table>_<columns>`. |
-| `where?` | `string` | En fait un index partiel, comme `"deleted_at IS NULL"`. |
+| `where?` | `string` | En fait un index partiel, comme `"deleted_at IS NULL"`. L'expression est écrite telle quelle dans l'index : ne la construisez jamais à partir d'une saisie utilisateur. |
 
 ### InsertOptions
 
@@ -660,6 +672,27 @@ Une migration : du SQL (plusieurs instructions sont possibles), ou une fonction 
 ```ts
 type Migration = string | ((db: SQLite<any>) => void)
 ```
+
+### OperatorHelpers
+
+Les fonctions de `SQLite.op`, une par opérateur de filtre.
+
+| Propriété | Type | Description |
+| --- | --- | --- |
+| `eq` | `(value: unknown) => ``Readonly``<`[`WhereOperators`](#whereoperators)`>` | Égal. `null` signifie `IS NULL`. |
+| `ne` | `(value: unknown) => ``Readonly``<`[`WhereOperators`](#whereoperators)`>` | Différent. Les lignes où la colonne vaut `NULL` correspondent aussi. |
+| `gt` | `(value: string \| number \| bigint \| ``Date``) => ``Readonly``<`[`WhereOperators`](#whereoperators)`>` | Supérieur à. |
+| `gte` | `(value: string \| number \| bigint \| ``Date``) => ``Readonly``<`[`WhereOperators`](#whereoperators)`>` | Supérieur ou égal. |
+| `lt` | `(value: string \| number \| bigint \| ``Date``) => ``Readonly``<`[`WhereOperators`](#whereoperators)`>` | Inférieur à. |
+| `lte` | `(value: string \| number \| bigint \| ``Date``) => ``Readonly``<`[`WhereOperators`](#whereoperators)`>` | Inférieur ou égal. |
+| `in` | `(values: readonly unknown[]) => ``Readonly``<`[`WhereOperators`](#whereoperators)`>` | L'une de ces valeurs. |
+| `notIn` | `(values: readonly unknown[]) => ``Readonly``<`[`WhereOperators`](#whereoperators)`>` | Aucune de ces valeurs. |
+| `like` | `(pattern: string) => ``Readonly``<`[`WhereOperators`](#whereoperators)`>` | Un motif `LIKE` : `%` pour un texte quelconque, `_` pour un caractère. |
+| `notLike` | `(pattern: string) => ``Readonly``<`[`WhereOperators`](#whereoperators)`>` |  |
+| `glob` | `(pattern: string) => ``Readonly``<`[`WhereOperators`](#whereoperators)`>` | Un motif sensible à la casse : `*` pour un texte quelconque, `?` pour un caractère. |
+| `between` | `(min: unknown, max: unknown) => ``Readonly``<`[`WhereOperators`](#whereoperators)`>` | De `min` à `max`, bornes comprises. |
+| `isNull` | `() => ``Readonly``<`[`WhereOperators`](#whereoperators)`>` | `IS NULL`. |
+| `notNull` | `() => ``Readonly``<`[`WhereOperators`](#whereoperators)`>` | `IS NOT NULL`. |
 
 ### PaginateOptions
 
@@ -707,10 +740,11 @@ Options de `new SQLite()`.
 | `busyTimeout?` | `string \| number` | Durée d'attente d'un verrou détenu par une autre connexion, en ms ou sous la forme `"5s"`. Par défaut : 5 secondes. |
 | `synchronous?` | `"``OFF``" \| "``NORMAL``" \| "``FULL``" \| "``EXTRA``"` | Avec quelle insistance SQLite pousse chaque commit vers le disque. Avec `wal`, `"NORMAL"` écrit plusieurs fois plus vite et ne peut pas corrompre le fichier ; une coupure de courant peut annuler les derniers commits. Par défaut : le réglage de SQLite lui-même, `"FULL"`. |
 | `readOnly?` | `boolean` |  |
+| `operators?` | `"plain" \| "tagged"` | Ce qui fait d'un objet d'un filtre un opérateur. `"plain"`, par défaut : tout objet avec une clé d'opérateur, comme `{ gte: 18 }`, et un tableau signifie « l'une de ». `"tagged"` : seulement les opérateurs créés par `SQLite.op`, tout autre objet ou tableau est une valeur comparée sous forme de texte JSON, de sorte qu'une valeur venue d'une requête HTTP ne peut jamais devenir un opérateur. |
 
 ### TableConstraint
 
-Une contrainte sur plusieurs colonnes.
+Une contrainte sur plusieurs colonnes. L'`expression` d'un `check` est écrite telle quelle dans la table : ne la construisez jamais à partir d'une saisie utilisateur.
 
 ```ts
 type TableConstraint = { type: "unique"; columns: string[]; } | { type: "primaryKey"; columns: string[]; } | { type: "check"; expression: string; } | { type: "foreignKey"; columns: string[]; references: { table: string; columns: string[]; }; onDelete?: ForeignKeyAction; onUpdate?: ForeignKeyAction; }
@@ -748,6 +782,14 @@ Des raccourcis liés à une table, créés par `table()`.
 | `exists` | `(where?: `[`Where`](#where)`<``R``>) => boolean` | Au moins une ligne correspond-elle ? |
 | `clear` | `() => { ok: true; }` | Supprime toutes les lignes. |
 
+### TaggedOperator
+
+Un opérateur créé par `SQLite.op`. Il porte une marque que JSON ne peut pas produire : c'est donc aussi un opérateur avec `operators: "tagged"`. Plusieurs peuvent être étalés dans un même objet : `{ ...op.gte(18), ...op.lt(65) }`.
+
+```ts
+type TaggedOperator = Readonly<WhereOperators>
+```
+
 ### TransactionOptions
 
 Options de `transaction()`.
@@ -759,6 +801,10 @@ Options de `transaction()`.
 ### Where
 
 Un filtre. Chaque clé est une colonne : une valeur signifie « égal à », `null` signifie `IS NULL`, un tableau signifie « l'une de », et un objet utilise des opérateurs. Les clés se combinent avec AND ; utilisez `$or` et `$and` pour le reste.
+
+Une valeur venue d'une requête HTTP doit d'abord être vérifiée (du JSON analysé comme `{ "ne": "" }` agirait comme un opérateur), ou la base ouverte avec `operators: "tagged"`, où seul `SQLite.op` crée des opérateurs.
+
+En lecture, une valeur absente fait disparaître sa condition : vérifiez d'abord les valeurs obligatoires (les écritures, et les lectures avec `operators: "tagged"`, lèvent une erreur à la place).
 
 Une clé avec des points regarde à l'intérieur d'une colonne JSON : `"settings.theme"` est la clé `theme` de la colonne `settings`, `"tags.0"` le premier élément de `tags`.
 
@@ -791,5 +837,5 @@ Opérateurs pour une colonne dans un filtre.
 La condition pour une colonne : une valeur, `null`, un tableau, ou des opérateurs.
 
 ```ts
-type WhereValue = null | string | number | bigint | boolean | Date | Uint8Array | readonly unknown[] | WhereOperators
+type WhereValue = null | string | number | bigint | boolean | Date | Uint8Array | readonly unknown[] | WhereOperators | TaggedOperator
 ```

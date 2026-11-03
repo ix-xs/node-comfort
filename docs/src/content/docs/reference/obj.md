@@ -30,6 +30,8 @@ Deep copy. Unlike `structuredClone`, it keeps functions and class
 instances (with their prototype), and it's faster on plain data. Shared
 references and cycles are preserved.
 
+**Throws** `RangeError`: If the value is nested too deeply to walk, thousands of levels.
+
 ```js
 const copy = obj.clone({ a: { b: [1, 2] }, when: new Date() });
 copy.a.b.push(3); // the original is untouched
@@ -47,6 +49,8 @@ merge(...sources: object[]): Record<string, any>
 Deep-merges objects into a new one. Later objects win, nested objects are
 merged, arrays are replaced. See `mergeWith()` to join arrays instead.
 
+**Throws** `RangeError`: If an object is nested too deeply to walk, thousands of levels.
+
 ```js
 obj.merge({ db: { host: "localhost", port: 5432 } }, { db: { port: 6543 } });
 // { db: { host: "localhost", port: 6543 } }
@@ -59,6 +63,8 @@ mergeWith(options: MergeOptions, ...sources: object[]): Record<string, any>
 ```
 
 Like `merge()`, with a choice of what happens to arrays and `undefined`.
+
+**Throws** `RangeError`: If an object is nested too deeply to walk, thousands of levels.
 
 ```js
 obj.mergeWith({ arrays: "unique" }, { tags: ["a", "b"] }, { tags: ["b", "c"] });
@@ -81,6 +87,8 @@ even `null` or `0`, are kept.
 | `target` | `T` |  |
 | `...sources` | `...``D` | The first one has the highest priority. |
 
+**Throws** `RangeError`: If an object is nested too deeply to walk, thousands of levels.
+
 ```js
 obj.defaults({ port: 8080, db: { user: "me" } }, { port: 80, db: { user: "root", pass: "" } });
 // { port: 8080, db: { user: "me", pass: "" } }
@@ -94,6 +102,8 @@ equal(a: unknown, b: unknown): boolean
 
 Deep equality. Knows about arrays, dates, regexes, maps, sets, typed
 arrays, `NaN` and circular references.
+
+**Throws** `RangeError`: If the values are nested too deeply to walk, thousands of levels.
 
 ```js
 obj.equal({ a: [1, { b: 2 }] }, { a: [1, { b: 2 }] }); // true
@@ -112,6 +122,8 @@ partial updates.
 
 **Returns** [`Change`](#change)`[]`: Empty when nothing changed.
 
+**Throws** `RangeError`: If the values are nested too deeply to walk, thousands of levels.
+
 ```js
 obj.diff({ name: "Ada", tags: ["a"] }, { name: "Ada L.", tags: ["a", "b"] });
 // [
@@ -128,7 +140,8 @@ get<T, P extends string, F>(object: T, path: P | readonly (string | number)[] | 
 ```
 
 Reads a nested value from a dotted path. Your editor completes the paths
-and knows the type of the result.
+and knows the type of the result. What a plain object inherits is not
+read: `obj.get({}, "toString")` is `undefined`.
 
 | Parameter | Type | Description |
 | --- | --- | --- |
@@ -150,7 +163,8 @@ set<T>(object: T, path: PathInput<T>, value: unknown): T
 ```
 
 Returns a copy with a nested value set. Missing levels are created
-(arrays when the next key is a number).
+(arrays when the next key is a number up to 10000, objects otherwise, so
+a key like `"a.4000000000"` can't make a huge array).
 
 ```js
 obj.set({}, "a.b.c", 1);            // { a: { b: { c: 1 } } }
@@ -304,6 +318,8 @@ compact<T extends object>(object: T, options?: CompactOptions): Partial<T>
 
 Removes `null` and `undefined` values, and optionally empty ones.
 
+**Throws** `RangeError`: With `deep`, if the object is nested too deeply to walk, thousands of levels.
+
 ```js
 obj.compact({ a: 1, b: null, c: undefined });                          // { a: 1 }
 obj.compact({ a: { b: null, c: "" } }, { deep: true, removeEmpty: true }); // {}
@@ -322,6 +338,8 @@ Flattens nested objects into dotted keys. Arrays stay as values.
 | `object` | `object` |  |
 | `prefix?` | `string` | Added in front of every key. Defaults to `""`. |
 
+**Throws** `RangeError`: If the object is nested too deeply to walk, thousands of levels.
+
 ```js
 obj.flatten({ db: { host: "x", port: 5432 } }); // { "db.host": "x", "db.port": 5432 }
 ```
@@ -333,6 +351,7 @@ unflatten(object: Record<string, unknown>): Record<string, any>
 ```
 
 Rebuilds nested objects from dotted keys. The opposite of `flatten()`.
+A number key up to 10000 makes an array, as in `set()`.
 
 ```js
 obj.unflatten({ "db.host": "x", "db.port": 5432 }); // { db: { host: "x", port: 5432 } }
@@ -359,6 +378,8 @@ sortKeys<T>(object: T, options?: SortKeysOptions): T
 A copy with its keys in order, nested objects included. Two objects with
 the same content then give the same JSON, which makes stable hashes,
 cache keys and readable diffs.
+
+**Throws** `RangeError`: If the object is nested too deeply to walk, thousands of levels.
 
 ```js
 obj.sortKeys({ b: 1, a: { d: 1, c: 2 } }); // { a: { c: 2, d: 1 }, b: 1 }
@@ -436,6 +457,8 @@ Freezes an object and everything inside it. Good for configuration and
 constants.
 
 **Returns** [`DeepReadonly`](#deepreadonly)`<``T``>`: The same object.
+
+**Throws** `RangeError`: If the object is nested too deeply to walk, thousands of levels. What was reached by then stays frozen.
 
 ```js
 const CONFIG = obj.deepFreeze({ db: { host: "localhost" } });

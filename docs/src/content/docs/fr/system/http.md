@@ -50,7 +50,7 @@ await nc.http.get(`${api}/users/:id/files/:name`, { params: { id: 42, name: "rep
 // .../users/42/files/report%202026.pdf
 ```
 
-`params` remplit les parties `:name` du chemin et encode les valeurs. Un nom absent de `params` lève une `TypeError`, et rien n'est envoyé.
+`params` remplit les parties `:name` du chemin et encode les valeurs. Un nom absent de `params` lève une `TypeError`, et rien n'est envoyé. C'est aussi le cas d'une valeur `.` ou `..`, qui remonterait dans le chemin.
 
 Une chaîne de requête peut être un objet. `null` et `undefined` sont ignorés, les tableaux répètent la clé et les dates sont envoyées au format ISO :
 
@@ -89,7 +89,7 @@ try {
 }
 ```
 
-Passez `throwHttpErrors: false` pour recevoir la réponse à la place. Une panne réseau donne une `HttpError` avec `status: 0` et le code `ERR_NETWORK`. Une requête trop lente lève une `TimeoutError`, et une requête annulée une `AbortError`.
+Passez `throwHttpErrors: false` pour recevoir la réponse à la place. Une panne réseau donne une `HttpError` avec `status: 0` et le code `ERR_NETWORK`. Une requête trop lente lève une `TimeoutError`, et une requête annulée une `AbortError`. Un corps qui dépasse la limite de taille donne une `HttpError` avec le code `ERR_RESPONSE_TOO_LARGE`, et une redirection impossible à suivre une `HttpError` avec `ERR_REDIRECT` ou `ERR_TOO_MANY_REDIRECTS` (voir plus bas). Ces trois-là ne sont pas relancées.
 
 Le corps d'une réponse d'erreur est toujours lu, même avec `responseType: "stream"` : `error.data` contient donc ce que le serveur a répondu.
 
@@ -98,6 +98,39 @@ Le corps d'une réponse d'erreur est toujours lu, même avec `responseType: "str
 `nc.http` utilise le `fetch()` intégré à Node.js : il dépend donc de la version de Node.js que vous faites tourner. Avant 22.23.4, 24.22.1 et 26.12.1, une seule réponse malveillante peut arrêter votre programme ([GHSA-xjj6-f33q-929c](https://github.com/advisories/GHSA-xjj6-f33q-929c)) : la requête échoue avec une `HttpError` que vous pouvez attraper, puis le processus plante quand même. Aucun code dans un paquet ne peut l'empêcher, et Node.js 25 n'a pas de correctif.
 
 Si votre programme appelle des adresses fournies par vos utilisateurs, des webhooks ou n'importe quel serveur que vous ne contrôlez pas, utilisez l'une de ces versions ou une version plus récente.
+
+## Taille des réponses
+
+Un corps lu en mémoire est limité à 100 Mo, comptés une fois décompressé. Au-delà, la requête est annulée et une `HttpError` avec le code `ERR_RESPONSE_TOO_LARGE` est levée. Sans limite, une petite réponse gzip pourrait remplir la mémoire une fois décompressée. Fixez votre propre limite avec `maxResponseSize`, en octets ou sous forme de texte :
+
+```js
+await nc.http.get(url, { maxResponseSize: "5MB" });
+await nc.http.get(url, { maxResponseSize: Infinity }); // pas de limite
+```
+
+Un stream (`responseType: "stream"`) et le fichier de `download()` ne sont pas gardés en mémoire : ils ne sont donc pas limités.
+
+## Redirections
+
+Le client suit lui-même les redirections, jusqu'à 20, et décide donc des en-têtes qui les accompagnent. Quand une redirection mène vers une autre origine (un passage de `https` à `http` en est une), `authorization`, `cookie` et `proxy-authorization` restent en route, de même que les en-têtes de `sensitiveHeaders` : par défaut `x-api-key`, `x-auth-token` et `api-key`. Une liste que vous donnez remplace celle par défaut : gardez-y donc ces noms si vous les utilisez.
+
+```js
+const api = nc.http.create({
+  baseURL: "https://api.example.com/",
+  headers: { "x-api-key": process.env.API_KEY, "x-tenant-secret": process.env.TENANT_SECRET },
+  sensitiveHeaders: ["x-api-key", "x-tenant-secret"],
+});
+```
+
+`redirect` indique quoi faire d'une redirection :
+
+| Valeur | Ce qui se passe |
+| --- | --- |
+| `"follow"` (par défaut) | La suit. Plus de 20 à la suite lèvent `ERR_TOO_MANY_REDIRECTS`. |
+| `"manual"` | Renvoie la réponse 3xx telle quelle. Lisez vous-même `res.headers.location`. |
+| `"error"` | Lève une `HttpError` avec le code `ERR_REDIRECT`. |
+
+Une redirection vers autre chose que `http:` ou `https:`, ou une redirection qui obligerait à envoyer une seconde fois un corps en stream, lève aussi `ERR_REDIRECT`.
 
 ## Timeouts et nouvelles tentatives
 
@@ -139,6 +172,20 @@ const admin = api.extend({ headers: { "x-admin": "1" } });
 Ce qu'un appel passe s'ajoute aux valeurs par défaut du client. Ses `query` et ses `headers` rejoignent ceux du client, et une clé donnée à nouveau remplace celle par défaut. Pour écarter un en-tête par défaut le temps d'un appel, donnez-lui la valeur `undefined`.
 
 `auth` accepte aussi `{ username, password }` pour l'authentification basique.
+
+`baseURL` est une frontière. Un chemin qui en sortirait lève une `TypeError` avant tout envoi : un chemin construit à partir d'une donnée extérieure ne peut donc pas emporter l'en-tête `auth` du client vers un autre hôte.
+
+```js
+await api.get(`users/${req.params.name}`);  // très bien pour "ada"
+await api.get("../admin");                  // TypeError
+await api.get("https://evil.example/");     // TypeError
+```
+
+Pour appeler une autre adresse volontairement, passez `allowAbsoluteUrls: true`. Seul ce que l'appel fournit y part : les `auth`, `headers` et `query` du client restent avec l'origine de base.
+
+```js
+await api.get("https://cdn.example.com/logo.png", { allowAbsoluteUrls: true, responseType: "buffer" });
+```
 
 ## Hooks
 

@@ -1,6 +1,6 @@
 ---
 title: "SQLite"
-description: "`nc.SQLite` wraps the SQLite engine that ships with Node.js 22.13+. There's no native module to compile, and you get CRUD helpers, rich filters, JSON columns, transactions, migrations and backups."
+description: "`nc.SQLite` wraps the SQLite engine that ships with Node.js. There's no native module to compile, and you get CRUD helpers, rich filters, JSON columns, transactions, migrations and backups."
 sidebar:
   order: 2
 ---
@@ -114,6 +114,22 @@ db.getAll("users", { "settings.theme": "dark", "settings.langs.0": "en" }, { ord
 
 `"settings.theme"` is the `theme` key of the `settings` column, and `"settings.langs.0"` the first item of its `langs` array. Operators work on these keys too, and `orderBy` accepts them.
 
+### Values from a request
+
+By default, any object with an operator key is an operator. That's a trap when a value comes from a JSON body: if `req.body.token` is `{ "ne": "" }`, then `{ token: req.body.token }` matches every row whose token isn't empty, instead of the one row with that token.
+
+Check such values first (with `nc.schema`, for example), or open the database with `operators: "tagged"`. Then only the operators made by `SQLite.op` count, and any other object or array is a value, compared as JSON text:
+
+```js
+const { op } = nc.SQLite;
+const db = new nc.SQLite("data/app.sqlite", { operators: "tagged" });
+
+db.getAll("users", { age: op.between(18, 65), role: op.in(["admin", "editor"]), deleted_at: op.isNull() });
+db.get("users", { email, token: req.body.token }); // { "ne": "" } is compared as text, a missing token throws
+```
+
+`SQLite.op` has one helper per operator (`op.gte(18)`, `op.like("%@acme.com")`, `op.notNull()`...). Its operators carry a mark that JSON can't produce, and they also work without `"tagged"`. Several can be spread into one object: `{ ...op.gte(18), ...op.lt(65) }`. With `"tagged"`, an array is a value too, so write `op.in([...])` for "one of". And a read throws on an `undefined` value, as writes always do: in the default mode, a missing value just drops its condition, so check required values first.
+
 ## Writing
 
 ```js
@@ -125,7 +141,12 @@ db.upsert("settings", { user_id: 1, key: "theme", value: "dark" }, ["user_id", "
 db.delete("sessions", { expires_at: { lt: new Date() } });
 ```
 
-Objects and arrays are stored as JSON, booleans as 1 and 0, and dates as ISO strings. `update`, `increment` and `delete` refuse an empty filter, so a forgotten condition can't wipe a table; `clearTable()` does that on purpose.
+Objects and arrays are stored as JSON, booleans as 1 and 0, and dates as ISO strings. `update`, `increment`, `delete` and `set` refuse a filter that would reach every row, so a forgotten condition can't wipe a table. That covers an empty filter, but also `{ id: undefined }` (a variable that was never set), an empty `$or` or `$and`, and `{ id: { notIn: [] } }`. They throw a `SQLiteError` instead. To empty a table on purpose, use `clearTable()`:
+
+```js
+db.delete("sessions", { user_id: req.user?.id }); // throws if req.user is missing
+db.clearTable("sessions");                         // deletes every row, keeps the table
+```
 
 `increment` adds to number columns in a single statement, so two requests that arrive together both count. Reading the value, adding to it and writing it back would lose one of them. Negative numbers subtract, and an empty column counts as 0.
 

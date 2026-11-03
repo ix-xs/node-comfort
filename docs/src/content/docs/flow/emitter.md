@@ -35,6 +35,15 @@ events.clear();               // everything
 
 `off(event, listener)` takes the function you gave to `on` or `once`. A listener added with `once` can be removed this way before it has run.
 
+The function that `on`, `once` and `onAny` return also works with `using` (Node.js 24 and later), which removes the listener at the end of the block:
+
+```js
+{
+  using off = events.on("ready", onReady);
+  await startServer();
+} // the listener is gone here
+```
+
 ## One signal for many listeners
 
 `on` and `once` accept a `signal`. When it aborts, the listener is removed:

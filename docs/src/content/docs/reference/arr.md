@@ -443,7 +443,8 @@ arr.flatten([1, [2, [3, [4]]]], Infinity); // [1, 2, 3, 4]
 zip<T>(...arrays: (readonly T[])[]): (T | undefined)[][]
 ```
 
-Pairs items by position. Shorter arrays leave `undefined` holes.
+Pairs items by position. Shorter arrays leave `undefined` holes, and
+values that are not arrays count as empty ones.
 
 ```js
 arr.zip(["a", "b"], [1, 2]); // [["a", 1], ["b", 2]]
@@ -455,7 +456,8 @@ arr.zip(["a", "b"], [1, 2]); // [["a", 1], ["b", 2]]
 unzip<T>(tuples: readonly (readonly T[])[]): (T | undefined)[][]
 ```
 
-The opposite of `zip()`: rows become columns.
+The opposite of `zip()`: rows become columns. Rows that are not arrays
+count as empty ones.
 
 ```js
 arr.unzip([["a", 1], ["b", 2]]); // [["a", "b"], [1, 2]]

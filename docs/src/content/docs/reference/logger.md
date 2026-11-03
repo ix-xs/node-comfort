@@ -7,7 +7,15 @@ sidebar:
 ---
 
 Markup: `<% red bold Error:%> disk is full`. Any style name works, plus
-`#ff8800`, `bg#1e1e2e`, `rgb(255, 128, 0)` and `bgRgb(...)`.
+`#ff8800`, `bg#1e1e2e`, `rgb(255, 128, 0)` and `bgRgb(...)`. Only the
+first argument, the message, is read as markup: the values after it are
+printed as they are.
+
+What a terminal could act on is shown as text (`\x1b`, `\r`), so a logged
+value can't move the cursor, change the title or forge a log line. Colors
+from `nc.color`, links from `color.link()`, new lines and tabs still work,
+and the lines of a message after its first one are indented, except with
+`log()` when there is no scope and no timestamp.
 
 Levels, from chatty to severe: `trace`, `debug`, `info`, `warn`, `error`,
 `fatal`. The default is `info`; `LOG_LEVEL` changes it. `DEBUG=1` shows
@@ -37,8 +45,9 @@ nc.log("<% cyan bold Tip:%> press <% bgWhite black  q  %> to quit");
 log(...args: unknown[]): typeof nc.logger
 ```
 
-Prints a message without a badge. Strings support markup, objects are
-pretty-printed, and several arguments are joined with spaces.
+Prints a message without a badge. The first argument, when it's a string,
+supports markup; objects are pretty-printed, and several arguments are
+joined with spaces.
 
 ```js
 nc.log("<% green ✔ Saved%> in <% bold 12ms%>");
@@ -323,6 +332,7 @@ Writing logs to a file.
 | `path` | `string` | The file to append to. Folders are created, colors removed. |
 | `maxSize?` | `string \| number` | Rotate past this size, like `"10MB"`. |
 | `maxFiles?` | `number` | How many rotated files to keep. Defaults to `5`. |
+| `mode?` | `number` | The permissions a new log file gets, like `0o640`. Defaults to `0o600`: only its owner can read it. A file that already exists keeps its own. Ignored on Windows. |
 
 ### Logger
 
@@ -330,7 +340,7 @@ A logger from `createLogger()`. Every method returns the logger, so calls chain.
 
 | Property | Type | Description |
 | --- | --- | --- |
-| `log` | `(...args: unknown[]) => `[`Logger`](#logger) | A plain message, no badge. Supports markup. |
+| `log` | `(...args: unknown[]) => `[`Logger`](#logger) | A plain message, no badge. Its first argument supports markup. |
 | `trace` | `(...args: unknown[]) => `[`Logger`](#logger) | Very detailed diagnostics, hidden unless the level is `trace`. |
 | `debug` | `(...args: unknown[]) => `[`Logger`](#logger) | Diagnostics, hidden unless the level is `debug` or lower. |
 | `info` | `(...args: unknown[]) => `[`Logger`](#logger) | An `ℹ INFO` message. |

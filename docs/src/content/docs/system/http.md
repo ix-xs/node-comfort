@@ -50,7 +50,7 @@ await nc.http.get(`${api}/users/:id/files/:name`, { params: { id: 42, name: "rep
 // .../users/42/files/report%202026.pdf
 ```
 
-`params` fills the `:name` parts of the path and encodes the values. A name that's missing from `params` throws a `TypeError`, and nothing is sent.
+`params` fills the `:name` parts of the path and encodes the values. A name that's missing from `params` throws a `TypeError`, and nothing is sent. So does a value of `.` or `..`, which would move up the path.
 
 Query strings can be objects. `null` and `undefined` are skipped, arrays repeat the key, and dates are sent in ISO format:
 
@@ -89,7 +89,7 @@ try {
 }
 ```
 
-Pass `throwHttpErrors: false` to get the response instead. A network failure is an `HttpError` with `status: 0` and code `ERR_NETWORK`. A slow request throws a `TimeoutError`, and a cancelled one an `AbortError`.
+Pass `throwHttpErrors: false` to get the response instead. A network failure is an `HttpError` with `status: 0` and code `ERR_NETWORK`. A slow request throws a `TimeoutError`, and a cancelled one an `AbortError`. A body over the size limit is an `HttpError` with the code `ERR_RESPONSE_TOO_LARGE`, and a redirect that can't be followed one with `ERR_REDIRECT` or `ERR_TOO_MANY_REDIRECTS` (see below). These three aren't retried.
 
 The body of an error response is always read, even with `responseType: "stream"`, so `error.data` holds what the server said.
 
@@ -98,6 +98,39 @@ The body of an error response is always read, even with `responseType: "stream"`
 `nc.http` uses the `fetch()` built into Node.js, so it depends on the version of Node.js you run. Before 22.23.4, 24.22.1 and 26.12.1, a single malicious response can stop your program ([GHSA-xjj6-f33q-929c](https://github.com/advisories/GHSA-xjj6-f33q-929c)): the request fails with an `HttpError` you can catch, then the process crashes anyway. No code in a package can prevent it, and Node.js 25 has no fix.
 
 If your program calls addresses given by your users, webhooks or any server you don't control, use one of these versions or a later one.
+
+## Response size
+
+A body read into memory is limited to 100 MB, counted once decompressed. Past that, the request is cancelled and an `HttpError` with the code `ERR_RESPONSE_TOO_LARGE` is thrown. Without a limit, a small gzip answer could fill the memory once unpacked. Set your own limit with `maxResponseSize`, in bytes or as text:
+
+```js
+await nc.http.get(url, { maxResponseSize: "5MB" });
+await nc.http.get(url, { maxResponseSize: Infinity }); // no limit
+```
+
+A stream (`responseType: "stream"`) and the file of `download()` aren't held in memory, so they aren't limited.
+
+## Redirects
+
+The client follows redirects itself, up to 20, so it decides which headers go along. When a redirect leads to another origin (an `https` to `http` move counts as one), `authorization`, `cookie` and `proxy-authorization` are left behind, and so are the headers of `sensitiveHeaders`: by default `x-api-key`, `x-auth-token` and `api-key`. A list you give replaces the default one, so keep these in it if you use them:
+
+```js
+const api = nc.http.create({
+  baseURL: "https://api.example.com/",
+  headers: { "x-api-key": process.env.API_KEY, "x-tenant-secret": process.env.TENANT_SECRET },
+  sensitiveHeaders: ["x-api-key", "x-tenant-secret"],
+});
+```
+
+`redirect` says what to do with a redirect:
+
+| Value | What happens |
+| --- | --- |
+| `"follow"` (default) | Follows it. More than 20 in a row throw `ERR_TOO_MANY_REDIRECTS`. |
+| `"manual"` | Returns the 3xx response as it is. Read `res.headers.location` yourself. |
+| `"error"` | Throws an `HttpError` with the code `ERR_REDIRECT`. |
+
+A redirect to something other than `http:` or `https:`, or one that would need a stream body sent a second time, throws `ERR_REDIRECT` too.
 
 ## Timeouts and retries
 
@@ -139,6 +172,20 @@ const admin = api.extend({ headers: { "x-admin": "1" } });
 What a call passes is added to the client's defaults. Its `query` and `headers` join the client's, and a key given again replaces the default one. To leave a default header out of one call, set it to `undefined`.
 
 `auth` also takes `{ username, password }` for basic authentication.
+
+`baseURL` is a boundary. A path that would leave it throws a `TypeError` before anything is sent, so a path built from outside input can't take the client's `auth` header to another host:
+
+```js
+await api.get(`users/${req.params.name}`);  // fine for "ada"
+await api.get("../admin");                  // TypeError
+await api.get("https://evil.example/");     // TypeError
+```
+
+To call another address on purpose, pass `allowAbsoluteUrls: true`. Only what the call gives goes there: the client's `auth`, `headers` and `query` stay with the base origin.
+
+```js
+await api.get("https://cdn.example.com/logo.png", { allowAbsoluteUrls: true, responseType: "buffer" });
+```
 
 ## Hooks
 

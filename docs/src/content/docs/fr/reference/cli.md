@@ -6,6 +6,8 @@ sidebar:
   order: 20
 ---
 
+Les tableaux, cadres, arbres et menus affichent comme du texte ce sur quoi un terminal pourrait agir (`\x1b`, `\r`) : une valeur ne peut donc pas déplacer le curseur ou casser la mise en page. Les couleurs et les liens qu'ils contiennent fonctionnent toujours.
+
 ```js
 const { cli } = require("@ix-xs/node-comfort");
 // ou seul, ce qui ne charge rien d'autre
@@ -381,7 +383,7 @@ type ParsedFlags = { [K in keyof S]: S[K] extends { multiple: true; } ? Array<Fl
 
 ### ProgressBar
 
-Une barre de progression.
+Une barre de progression. Avec `using`, elle s'arrête à la fin du bloc.
 
 | Propriété | Type | Description |
 | --- | --- | --- |
@@ -431,7 +433,7 @@ Options de `select()` et `multiselect()`.
 
 ### Spinner
 
-Un spinner. Chaque méthode le renvoie.
+Un spinner. Chaque méthode le renvoie. Avec `using`, il s'arrête à la fin du bloc.
 
 | Propriété | Type | Description |
 | --- | --- | --- |

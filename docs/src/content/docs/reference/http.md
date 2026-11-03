@@ -124,7 +124,9 @@ download(url: string | URL, destination: string, options?: HttpOptions): Promise
 Downloads to a file as a stream, so memory stays flat whatever the size.
 Folders are created. The data goes to a temporary file that takes the
 final name once complete, so a failed or interrupted download never
-leaves half a file where you expect a whole one.
+leaves half a file where you expect a whole one. That temporary file has
+a random name and is only readable and writable by you (mode `0o600`),
+which the final file keeps. `maxResponseSize` doesn't apply here.
 
 `timeout` is how long the server gets to start answering; the transfer
 itself can take as long as it needs. Use `signal` to put a limit on it.
@@ -165,6 +167,10 @@ HttpError: typeof HttpError
 
 Thrown by `nc.http` when the response status isn't 2xx (unless you pass
 `throwHttpErrors: false`), and for network failures (`status` 0).
+
+The values of query parameters that look secret (`api_key`, `token`,
+`sig`...) read `***` in the message and in `url`, so the error can go to
+logs as it is.
 
 ## Types
 
@@ -228,9 +234,10 @@ Request options.
 | Property | Type | Description |
 | --- | --- | --- |
 | `method?` | [`HttpMethod`](#httpmethod) | Defaults to `"GET"`. |
-| `baseURL?` | `string` | Prefix for relative URLs. |
+| `baseURL?` | `string` | Prefix for relative URLs. It's a boundary: a path that would leave it, like `"../admin"`, `"//other.host"` or an absolute URL to another place, throws a `TypeError` (see `allowAbsoluteUrls`). |
+| `allowAbsoluteUrls?` | `boolean` | With a `baseURL`, let an absolute URL go elsewhere: `api.get("https://cdn.example.com/x", { allowAbsoluteUrls: true })`. The client's own `auth`, `headers` and `query` still stay with the base origin, only those of the call go there. Defaults to `false`, so a URL built from outside input can't take the client's credentials to another host. |
 | `headers?` | [`HttpHeaders`](#httpheaders) | Set a header to `undefined` to remove a default one. |
-| `params?` | `Record``<string, string \| number \| boolean>` | Values for the `:name` parts of the URL: `"users/:id"` with `{ id: 42 }` gives `users/42`. They're encoded for you. |
+| `params?` | `Record``<string, string \| number \| boolean>` | Values for the `:name` parts of the URL: `"users/:id"` with `{ id: 42 }` gives `users/42`. They're encoded for you, and `"."` or `".."` throws a `TypeError`, since they would move up the path. |
 | `query?` | `URLSearchParams`` \| `[`QueryParams`](#queryparams) | Added to the URL's own query string, and to the client's default query. |
 | `json?` | `unknown` | Sent as JSON. |
 | `form?` | `Record``<string, string \| number \| boolean>` | Sent as a URL-encoded form. |
@@ -244,7 +251,9 @@ Request options.
 | `signal?` | `AbortSignal` | Cancels the request. |
 | `hooks?` | [`HttpHooks`](#httphooks) |  |
 | `onDownloadProgress?` | `((progress: { loaded: number; total: number \| undefined; percent: number \| undefined; }) => void)` | Called while the body downloads. |
-| `redirect?` | `"error" \| "follow" \| "manual"` | Defaults to `"follow"`. |
+| `maxResponseSize?` | `string \| number` | Largest body read into memory, in bytes or like `"50MB"`, counted once decompressed. Past it, the request is cancelled and an `HttpError` with the code `ERR_RESPONSE_TOO_LARGE` is thrown, so a huge or zip bomb answer can't fill the memory. Defaults to `"100MB"`, `Infinity` turns it off. A stream (`responseType: "stream"`) and the file of `download()` aren't held in memory, so they aren't limited. |
+| `redirect?` | `"error" \| "follow" \| "manual"` | `"follow"` (the default) follows up to 20 redirects, `"manual"` returns the 3xx response as it is, `"error"` throws an `HttpError` with the code `ERR_REDIRECT`. When a redirect goes to another origin, `authorization`, `cookie`, `proxy-authorization` and the `sensitiveHeaders` are left behind. |
+| `sensitiveHeaders?` | `string[]` | Headers dropped when a redirect goes to another origin, on top of `authorization`, `cookie` and `proxy-authorization`. Names are case-insensitive. Defaults to `["x-api-key", "x-auth-token", "api-key"]`; a list you give replaces it, so add these to it if you use them. |
 
 ### HttpOptionsOf
 

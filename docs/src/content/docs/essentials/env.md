@@ -111,6 +111,16 @@ nc.env.load([".env.local", ".env"]);
 
 The `.env` loaded at startup is the exception: what it set has the lowest priority, so a file you load yourself wins over it. `nc.env.load(".env.local")` does what you expect, with nothing to turn off. The real environment still wins over every file.
 
+### What the automatic load leaves out
+
+The `.env` loaded at startup is read from the working directory, which may be a repository someone sent you. So it never sets the variables that can run code in the programs your app starts, or turn off TLS checks: `NODE_OPTIONS`, `NODE_TLS_REJECT_UNAUTHORIZED`, `NODE_EXTRA_CA_CERTS`, `NODE_PATH`, `LD_PRELOAD`, `DYLD_*`, `GIT_SSH_COMMAND`, `GIT_CONFIG*`, `PATH`, `EDITOR`, `PAGER` and a few others of the same kind (the [reference](/reference/env/) has the full list). When it leaves one out, it says so once on stderr.
+
+If you do want one of them from a file you trust, load it yourself: an explicit `nc.env.load()` sets them all.
+
+```js
+nc.env.load(".env"); // your own file: NODE_OPTIONS and the rest are set too
+```
+
 A reference such as `${HOST}` uses the final value of `HOST`. If the environment or `.env.local` sets `HOST`, a `URL=http://${HOST}` in `.env` follows it.
 
 `load()` returns everything it read from the files. Missing files are skipped, unless you pass `required: true`.
@@ -141,7 +151,14 @@ PRIVATE_KEY="-----BEGIN KEY-----
 GREETING='single quotes keep ${THIS} as is'
 ```
 
-`nc.env.parse(text)` parses without touching `process.env`.
+`nc.env.parse(text)` parses without touching `process.env`, and without reading it either: a `${VAR}` reference only uses the variables of the text itself and those of the `env` option. Pass `process.env` to use the real environment:
+
+```js
+nc.env.parse('PORT=3000\nURL="http://localhost:${PORT}"'); // { PORT: "3000", URL: "http://localhost:3000" }
+nc.env.parse("TMP_COPY=${TMP}", { env: process.env });       // TMP from the real environment
+```
+
+A value that grows past 64 KB through references (variables that each use the one before several times) throws a `RangeError`.
 
 ## Modes
 

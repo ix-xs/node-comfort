@@ -698,10 +698,10 @@ Options de `cron()` et `nextRun()`.
 
 ### DateInput
 
-Une date : une `Date`, un horodatage en ms, ou une chaîne que `new Date()` comprend (ISO 8601 est le plus sûr).
+Une date : une `Date`, un horodatage en ms, une chaîne que `new Date()` comprend (ISO 8601 est le plus sûr), ou un instant de `Temporal`, comme un `Temporal.Instant` ou un `Temporal.ZonedDateTime`.
 
 ```ts
-type DateInput = Date | number | string
+type DateInput = Date | number | string | { readonly epochMilliseconds: number; }
 ```
 
 ### DateRangeOptions
@@ -773,7 +773,7 @@ Options de `relative()`.
 
 ### ScheduledTask
 
-Une planification renvoyée par `every()` et `cron()`.
+Une planification renvoyée par `every()` et `cron()`. Avec `using`, elle s'arrête à la fin du bloc.
 
 | Propriété | Type | Description |
 | --- | --- | --- |
