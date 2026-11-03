@@ -114,10 +114,10 @@ const { segmenter, graphemes } = require("./internal/shared.js");
  * @property {boolean} enabled Whether colors are being output.
  * @property {(level?: ColorLevel) => ColorModule} create A separate instance with its own level, for another stream or for tests.
  * @property {(stream?: NodeJS.WriteStream | { isTTY?: boolean }) => ColorLevel} detect The color level a stream supports, taking `NO_COLOR` and `FORCE_COLOR` into account.
- * @property {(text: string) => string} strip Removes colors and other terminal escape codes.
+ * @property {(text: string) => string} strip Removes colors, every other terminal escape code and every control character but tabs and new lines (so `\r` and `\b` go too).
  * @property {(text: string) => number} width How many columns the text takes, ignoring colors and counting emoji and CJK as 2.
  * @property {(text: string, columns: number, options?: { ellipsis?: string }) => string} truncate Cuts text to a number of columns and adds `…`. Colors are kept and still closed properly.
- * @property {(text: string, url: string) => string} link A clickable link in terminals that support it, `"text (url)"` elsewhere.
+ * @property {(text: string, url: string) => string} link A clickable link in terminals that support it, `"text (url)"` elsewhere. Control characters are removed from both, so they can't end the link early; the text keeps its colors.
  * @property {(text: string, colors: string[]) => string} gradient Colors the text along a gradient of hex colors.
  */
 
@@ -142,7 +142,16 @@ for (const [name, [open, close]] of Object.entries(_CODES)) _STYLES[name] = { op
  * @typedef {{ open: string, close: string } | { rgb: [number, number, number], bg: boolean } | { ansi256: number, bg: boolean }} StyleEntry
  */
 
-const _ANSI_REGEX = /[\u001b\u009b](?:\][^\u0007\u001b]*(?:\u0007|\u001b\\)|[[\]()#;?]*(?:\d{1,4}(?:[;:]\d{0,4})*)?[\dA-PR-TZcf-nq-uy=><~])/g;
+// Terminal sequences, by kind. The string ones (OSC, DCS, APC, PM, SOS) end
+// at their terminator, or at the next ESC, as a terminal reads them. Their
+// body also stops at a string introducer, so the scan stays linear.
+const _STRING_SEQUENCES = /(?:\x1b[\]P^_X]|[\x90\x98\x9d\x9e\x9f])[^\x07\x1b\x90\x98\x9c-\x9f]*(?:\x07|\x1b\\|\x9c)/g;
+const _CSI_SEQUENCES = /(?:\x1b\[|\x9b)[0-?]*[ -/]*[@-~]/g;
+const _SHORT_SEQUENCES = /\x1b[ -/]*[0-~]/g;
+const _ANSI_REGEX = /(?:\x1b[\]P^_X]|[\x90\x98\x9d\x9e\x9f])[^\x07\x1b\x90\x98\x9c-\x9f]*(?:\x07|\x1b\\|\x9c)|(?:\x1b\[|\x9b)[0-?]*[ -/]*[@-~]|\x1b[ -/]*[0-~]/g;
+// Every control character but tab and new line: C0, DEL and C1.
+const _CONTROLS = /[\x00-\x08\x0b-\x1f\x7f-\x9f]/g;
+const _HAS_CONTROL = /[\x00-\x08\x0b-\x1f\x7f-\x9f]/;
 
 /**
  * @param {string} hex
@@ -302,7 +311,10 @@ const _charWidth = (grapheme) => {
  */
 const strip = (text) => {
   const value = typeof text === "string" ? text : String(text);
-  return value.indexOf("\u001b") === -1 && value.indexOf("\u009b") === -1 ? value : value.replace(_ANSI_REGEX, "");
+  if (!_HAS_CONTROL.test(value)) return value;
+  // One kind at a time, then every control character left: no ESC remains to
+  // rebuild a sequence from the pieces around it.
+  return value.replace(_STRING_SEQUENCES, "").replace(_CSI_SEQUENCES, "").replace(_SHORT_SEQUENCES, "").replace(_CONTROLS, "");
 };
 
 /**
@@ -383,6 +395,16 @@ const _supportsHyperlinks = () => {
   if (env.VTE_VERSION && Number(env.VTE_VERSION) >= 5000) return true;
   return false;
 };
+
+const _LINK_CONTROLS = /[\x00-\x1f\x7f-\x9f]/g;
+const _HAS_LINK_CONTROL = /[\x00-\x1f\x7f-\x9f]/;
+const _LINK_TEXT = /(\x1b\[[\d;:]*m)|(?:\x1b[\]P^_X]|[\x90\x98\x9d\x9e\x9f])[^\x07\x1b\x90\x98\x9c-\x9f]*(?:\x07|\x1b\\|\x9c)|(?:\x1b\[|\x9b)[0-?]*[ -/]*[@-~]|\x1b[ -/]*[0-~]|[\x00-\x1f\x7f-\x9f]/g;
+
+/**
+ * The text of a link: colors stay, any other sequence or control character goes.
+ * @param {string} text
+ */
+const _linkText = (text) => (_HAS_LINK_CONTROL.test(text) ? text.replace(_LINK_TEXT, (match, style) => style ?? "") : text);
 
 /** @param {number} value */
 const _byte = (value) => (value > 0 ? (value < 255 ? Math.round(value) : 255) : 0);
@@ -542,8 +564,12 @@ const _createModule = (forcedLevel) => {
     truncate: { enumerable: true, value: truncate },
     link: {
       enumerable: true,
-      value: (/** @type {string} */ text, /** @type {string} */ url) =>
-        currentLevel() > 0 && _supportsHyperlinks() ? `\u001b]8;;${url}\u0007${text}\u001b]8;;\u0007` : `${text} (${url})`,
+      value: (/** @type {string} */ text, /** @type {string} */ url) => {
+        // A control character would end the link early and start something else.
+        const label = _linkText(String(text));
+        const target = String(url).replace(_LINK_CONTROLS, "");
+        return currentLevel() > 0 && _supportsHyperlinks() ? `\u001b]8;;${target}\u0007${label}\u001b]8;;\u0007` : `${label} (${target})`;
+      },
     },
     gradient: { enumerable: true, value: gradient },
   });

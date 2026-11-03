@@ -106,7 +106,8 @@ describe("str: transforms", () => {
     assert.equal(str.mask("4242424242424242"), "************4242");
     assert.equal(str.mask("4242 4242 4242 4242", { keepSpaces: true }), "**** **** **** 4242");
     assert.equal(str.mask("secret-token", { start: 2, end: 2, char: "•" }), "se••••••••en");
-    assert.equal(str.mask("abc"), "abc");
+    // too short to show anything: all of it is hidden
+    assert.equal(str.mask("abc"), "***");
   });
 
   it("initials", () => {

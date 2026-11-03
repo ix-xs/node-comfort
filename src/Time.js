@@ -392,6 +392,11 @@ const _addMonths = (d, months, timeZone) => {
   return _instantOf(year, month, Math.min(at.day, _daysIn(year, month)), at.hour, at.minute, at.second, at.ms, timeZone);
 };
 
+const _MAX_DURATION_TEXT = 256;
+
+// One "1.5h" of a text duration, with the spaces, commas and "and" around it.
+const _DURATION_TOKEN = /(?:[\s,]|and)*([-+]?(?:\d+(?:\.\d+)?|\.\d+))\s*([a-zA-Z]+)(?:[\s,]|and)*/y;
+
 /**
  * Adds a duration written as text: a fixed one (`"1h30m"`) or one with
  * calendar units (`"1 month"`, `"2y 3d"`).
@@ -402,16 +407,21 @@ const _addMonths = (d, months, timeZone) => {
  * @returns {Date}
  */
 const _addText = (d, text, sign, timeZone) => {
+  // No duration is that long: a longer text is refused before any regex reads it.
+  if (text.length > _MAX_DURATION_TEXT && text.trim().length > _MAX_DURATION_TEXT) throw new TypeError(`Invalid duration: longer than ${_MAX_DURATION_TEXT} characters`);
   const fixed = shared.parseDuration(text);
   // Under a day there is no calendar to follow.
   if (fixed !== null && Math.abs(fixed) < MS.d) return new Date(d.getTime() + sign * fixed);
-  const regex = /([-+]?\d*\.?\d+)\s*([a-zA-Z]+)/g;
   let months = 0;
   let days = 0;
   let ms = 0;
-  let consumed = "";
-  let match;
-  while ((match = regex.exec(text)) !== null) {
+  let tokens = 0;
+  let at = 0;
+  // Sticky: the tokens must follow each other and cover the whole text.
+  while (at < text.length) {
+    _DURATION_TOKEN.lastIndex = at;
+    const match = _DURATION_TOKEN.exec(text);
+    if (match === null) break;
     const unit = _unit(match[2]);
     if (!unit) break;
     const amount = Number(match[1]);
@@ -419,9 +429,10 @@ const _addText = (d, text, sign, timeZone) => {
     else if (unit === "y") months += amount * 12;
     else if ((unit === "d" || unit === "w") && Number.isInteger(amount)) days += unit === "w" ? amount * 7 : amount;
     else ms += amount * MS[unit];
-    consumed += match[0];
+    tokens++;
+    at = _DURATION_TOKEN.lastIndex;
   }
-  if (!consumed || consumed.replace(/\s+/g, "") !== text.replace(/[\s,]+|and/g, "")) {
+  if (!tokens || at !== text.length) {
     // A bare number of milliseconds, as text.
     if (fixed !== null) return new Date(d.getTime() + sign * fixed);
     throw new TypeError(`Invalid duration: ${JSON.stringify(text)}`);
@@ -857,7 +868,11 @@ function parse(text, pattern, options = {}) {
       if (expression.startsWith("(")) tokens.push(compiled[i]);
       source += expression + escape(compiled[i + 1]);
     }
-    parser = { regex: new RegExp(`^\\s*${source}\\s*$`), tokens };
+    // Spaces at the ends of the text are allowed. Next to a pattern that starts or ends with a space,
+    // that "\s*" would make "\s+\s*", which takes a time that grows with the square of a run of spaces.
+    const lead = source.startsWith("\\s+") ? "" : "\\s*";
+    const trail = source.endsWith("\\s+") ? "" : "\\s*";
+    parser = { regex: new RegExp(`^${lead}${source}${trail}$`), tokens };
     if (_parsers.size >= 200) _parsers.clear();
     _parsers.set(pattern, parser);
   }

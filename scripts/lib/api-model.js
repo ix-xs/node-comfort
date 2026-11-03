@@ -229,10 +229,13 @@ function buildModel() {
       if (symbol.getName().startsWith("_")) continue;
       const declared = checker.getDeclaredTypeOfSymbol(target);
       const decl = target.declarations?.[0];
-      const isObjectLiteral = decl && ts.isTypeAliasDeclaration(decl) && ts.isTypeLiteralNode(decl.type);
+      // `_WatcherMethods & Disposable` reads like an object too: its members are listed, not that line.
+      const isMethodsAndDisposable =
+        decl && ts.isTypeAliasDeclaration(decl) && ts.isIntersectionTypeNode(decl.type) && decl.type.types.every((t) => ts.isTypeReferenceNode(t) && /^(_\w+|Disposable)$/.test(t.typeName.getText()));
+      const isObjectLiteral = (decl && ts.isTypeAliasDeclaration(decl) && ts.isTypeLiteralNode(decl.type)) || isMethodsAndDisposable;
       const definition = isObjectLiteral ? "" : decl && ts.isTypeAliasDeclaration(decl) ? clean(decl.type.getText().replace(/\/\*[\s\S]*?\*\//g, "").replace(/\s+/g, " ")) : clean(checker.typeToString(declared, undefined, FORMAT));
       const properties = isObjectLiteral
-        ? checker.getPropertiesOfType(declared).map((p) => ({
+        ? checker.getPropertiesOfType(declared).filter((p) => !p.getName().startsWith("__@")).map((p) => ({
             name: p.getName(),
             type: clean(checker.typeToString(checker.getTypeOfSymbolAtLocation(p, /** @type {ts.Node} */ (decl)), undefined, FORMAT)).replace(/ \| undefined$/, ""),
             optional: Boolean(p.flags & ts.SymbolFlags.Optional),
@@ -272,6 +275,12 @@ function buildModel() {
       if (construct) {
         const sig = signatureOf(construct, `new ${key}`);
         members.push({ name: "constructor", qualified: `new nc.${key}()`, kind: "constructor", description: sig.description, signatures: [sig] });
+      }
+      // What the class itself carries, like SQLite.op.
+      for (const name of Object.getOwnPropertyNames(value)) {
+        if (name === "length" || name === "name" || name === "prototype") continue;
+        const prop = classType.getProperty(name);
+        if (prop) members.push(memberOf(name, `nc.${key}.${name}`, prop, "static"));
       }
       const instance = checker.getDeclaredTypeOfSymbol(target);
       const variable = INSTANCE[key] ?? key.toLowerCase();

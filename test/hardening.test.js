@@ -896,14 +896,14 @@ describe("crypto", () => {
     assert.throws(() => crypto.signJWT({}, ""), TypeError);
     assert.throws(() => crypto.signJWT({}, /** @type {any} */ (undefined)), TypeError);
     assert.throws(() => crypto.signJWT(/** @type {any} */ ("text"), "secret"), TypeError);
-    assert.throws(() => crypto.signJWT({}, "secret", { expiresIn: "soon" }), TypeError);
-    const token = crypto.signJWT({ sub: "1" }, "a-long-shared-secret");
+    assert.throws(() => crypto.signJWT({}, "a-long-shared-secret-of-32-bytes", { expiresIn: "soon" }), TypeError);
+    const token = crypto.signJWT({ sub: "1" }, "a-long-shared-secret-of-32-bytes");
     assert.throws(() => crypto.verifyJWT(token, ""), TypeError);
-    assert.equal(codeOf(() => crypto.verifyJWT(crypto.signJWT({ exp: "never" }, "a-long-shared-secret"), "a-long-shared-secret")), "ERR_JWT_CLAIM");
-    assert.equal(codeOf(() => crypto.verifyJWT(`${token}x`, "a-long-shared-secret")), "ERR_JWT_SIGNATURE");
+    assert.equal(codeOf(() => crypto.verifyJWT(crypto.signJWT({ exp: "never" }, "a-long-shared-secret-of-32-bytes"), "a-long-shared-secret-of-32-bytes")), "ERR_JWT_CLAIM");
+    assert.equal(codeOf(() => crypto.verifyJWT(`${token}x`, "a-long-shared-secret-of-32-bytes")), "ERR_JWT_SIGNATURE");
     const unsigned = `${Buffer.from('{"alg":"none"}').toString("base64url")}.${Buffer.from('{"sub":"admin"}').toString("base64url")}.`;
-    assert.equal(codeOf(() => crypto.verifyJWT(unsigned, "a-long-shared-secret", { algorithms: /** @type {any} */ (["none"]) })), "ERR_JWT_ALGORITHM");
-    assert.deepEqual(crypto.decodeJWT(crypto.signJWT({}, "secret-secret", { header: { kid: "k1" }, noTimestamp: true })).header, { typ: "JWT", kid: "k1", alg: "HS256" });
+    assert.equal(codeOf(() => crypto.verifyJWT(unsigned, "a-long-shared-secret-of-32-bytes", { algorithms: /** @type {any} */ (["none"]) })), "ERR_JWT_ALGORITHM");
+    assert.deepEqual(crypto.decodeJWT(crypto.signJWT({}, "a-long-shared-secret-of-32-bytes", { header: { kid: "k1" }, noTimestamp: true })).header, { typ: "JWT", kid: "k1", alg: "HS256" });
   });
 
   it("signs with a private key and verifies with the public one", async () => {

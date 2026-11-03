@@ -305,17 +305,192 @@ const _write = (target, content, options) => {
       mode = undefined;
     }
   }
-  const temp = `${target}.${process.pid}.${Date.now().toString(36)}${Math.random().toString(36).slice(2, 8)}.tmp`;
+  // A name nobody can guess, created only if nothing is there ("wx"): a link planted in advance can't redirect the write.
+  const temp = `${target}.${require("node:crypto").randomBytes(8).toString("hex")}.tmp`;
+  /** @type {number | undefined} */
+  let fd;
+  let created = false;
   try {
-    /** @type {fs.WriteFileOptions} */
-    const writeOptions = { encoding, flush: options.fsync ?? false };
-    if (mode !== undefined) writeOptions.mode = mode;
-    fs.writeFileSync(temp, content, writeOptions);
+    // Created with its final permissions (the umask applies, as for any new file), never wider.
+    fd = fs.openSync(temp, "wx", mode ?? 0o666);
+    created = true;
+    fs.writeFileSync(fd, content, { encoding });
+    if (options.fsync) fs.fsyncSync(fd);
+    fs.closeSync(fd);
+    fd = undefined;
     _rename(temp, target);
   } catch (error) {
-    fs.rmSync(temp, { force: true });
+    if (fd !== undefined) fs.closeSync(fd);
+    if (created) fs.rmSync(temp, { force: true });
     throw error;
   }
+};
+
+/**
+ * Does something exist at this path, a broken link included?
+ * @param {string} path
+ * @returns {boolean}
+ */
+const _lexists = (path) => {
+  try {
+    fs.lstatSync(path);
+    return true;
+  } catch {
+    return false;
+  }
+};
+
+/**
+ * The real path of a path that may not exist yet: the part that exists is
+ * resolved, the rest is added as it is.
+ * @param {string} path Absolute.
+ * @returns {string}
+ */
+const _realTarget = (path) => {
+  /** @type {string[]} */
+  const rest = [];
+  let existing = path;
+  while (!fs.existsSync(existing)) {
+    const parent = nodePath.dirname(existing);
+    if (parent === existing) return path;
+    rest.unshift(nodePath.basename(existing));
+    existing = parent;
+  }
+  return nodePath.join(_realPath(existing), ...rest);
+};
+
+/**
+ * Do both paths lead to the same file or folder? Links, short names and,
+ * on Windows, letter case don't fool it.
+ * @param {string} a
+ * @param {string} b
+ * @returns {boolean}
+ */
+const _sameEntry = (a, b) => {
+  let x;
+  let y;
+  try {
+    x = fs.statSync(a, { bigint: true });
+    y = fs.statSync(b, { bigint: true });
+  } catch {
+    // one of them doesn't exist
+    return false;
+  }
+  // some file systems have no file ids: compare the real paths then
+  if (x.ino !== 0n || y.ino !== 0n) return x.dev === y.dev && x.ino === y.ino;
+  const [ra, rb] = [_realPath(a), _realPath(b)];
+  return process.platform === "win32" ? ra.toLowerCase() === rb.toLowerCase() : ra === rb;
+};
+
+/**
+ * Is `src` a link to `dest`? Renaming it there would put the link in place
+ * of the real file. The link itself under another letter case is not.
+ * @param {string} src
+ * @param {string} dest
+ * @returns {boolean}
+ */
+const _linkOnto = (src, dest) => {
+  let link;
+  let other;
+  try {
+    link = fs.lstatSync(src, { bigint: true });
+    if (!link.isSymbolicLink()) return false;
+    other = fs.lstatSync(dest, { bigint: true });
+  } catch {
+    // no link, or nothing at dest to lose
+    return false;
+  }
+  if (link.ino !== 0n && other.dev === link.dev && other.ino === link.ino) return false;
+  const [ra, rb] = [_realPath(src), _realPath(dest)];
+  return process.platform === "win32" ? ra.toLowerCase() === rb.toLowerCase() : ra === rb;
+};
+
+/**
+ * Is `child` the folder `parent` itself, or somewhere inside it, once links
+ * are resolved? Copying or moving a folder there would destroy it.
+ * @param {string} child Absolute, may not exist yet.
+ * @param {string} parent Absolute, exists.
+ * @returns {boolean}
+ */
+const _within = (child, parent) => {
+  if (_sameEntry(child, parent)) return true;
+  // path.relative ignores letter case on Windows
+  const rel = nodePath.relative(_realPath(parent), _realTarget(child));
+  return rel === "" || (rel !== ".." && !rel.startsWith(`..${nodePath.sep}`) && !nodePath.isAbsolute(rel));
+};
+
+/**
+ * Would copying the files of `root` into `dest` copy them onto themselves,
+ * or into the tree being read?
+ * @param {string} root
+ * @param {string} dest
+ * @param {boolean} recursive
+ * @returns {boolean}
+ */
+const _filesInItself = (root, dest, recursive) => (recursive ? _within(dest, root) : _sameEntry(dest, root));
+
+/**
+ * Copies a link as a link, never what it points to. On Windows a link to a
+ * folder becomes a junction, which needs no special rights. A link that
+ * can't be made is left out.
+ * @param {string} from
+ * @param {string} to
+ * @param {boolean} overwrite
+ */
+const _copyLink = (from, to, overwrite) => {
+  try {
+    if (_lexists(to)) {
+      // a real file or folder in the way is kept: only a link is replaced by a link
+      if (!overwrite || !fs.lstatSync(to).isSymbolicLink()) return;
+      fs.unlinkSync(to);
+    }
+    const target = fs.readlinkSync(from);
+    /** @type {"junction" | "file" | undefined} */
+    let type;
+    if (process.platform === "win32") {
+      try {
+        type = fs.statSync(from).isDirectory() ? "junction" : "file";
+      } catch {
+        type = "file";
+      }
+    }
+    fs.symlinkSync(target, to, type);
+  } catch {
+    // left out, never followed
+  }
+};
+
+/**
+ * `fs.cpSync()` that copies the links inside the tree as links: a junction
+ * or a link to a folder outside never brings that folder's files along.
+ * Elsewhere than on Windows, `fs.cpSync()` already copies links as links.
+ * @param {string} src Absolute.
+ * @param {string} dest Absolute.
+ * @param {{ force?: boolean, errorOnExist?: boolean, preserveTimestamps?: boolean, filter?: (source: string, destination: string) => boolean }} [options]
+ */
+const _copyTree = (src, dest, options = {}) => {
+  const overwrite = options.force ?? true;
+  fs.cpSync(src, dest, {
+    recursive: true,
+    dereference: false,
+    force: overwrite,
+    errorOnExist: options.errorOnExist ?? false,
+    preserveTimestamps: options.preserveTimestamps ?? false,
+    filter: process.platform !== "win32" ? options.filter : (s, d) => {
+      if (options.filter && !options.filter(s, d)) return false;
+      // the source itself was named by the caller: only links inside it are kept as links
+      if (nodePath.resolve(s) === src) return true;
+      let link;
+      try {
+        link = fs.lstatSync(s).isSymbolicLink();
+      } catch {
+        return false;
+      }
+      if (!link) return true;
+      _copyLink(s, d, overwrite);
+      return false;
+    },
+  });
 };
 
 /**
@@ -685,6 +860,13 @@ function find(name, options = {}) {
 }
 
 /**
+ * Does this relative path leave its base folder?
+ * @param {string} rel From `path.relative()`, which ignores letter case on Windows.
+ * @returns {boolean}
+ */
+const _outside = (rel) => rel === ".." || rel.startsWith(`..${nodePath.sep}`) || nodePath.isAbsolute(rel);
+
+/**
  * Looks for a file or folder in a folder, then in its parent, and so on up
  * to the root. It's how you find the `package.json` or the `.git` a file
  * belongs to.
@@ -695,13 +877,16 @@ function find(name, options = {}) {
  * nc.findUp(["pnpm-lock.yaml", "yarn.lock", "package-lock.json"]);
  *
  * @param {string | string[]} name One name, or several to try in each folder, in this order.
- * @param {{ cwd?: string, type?: "file" | "folder" | "any", stopAt?: string }} [options] Where to start (the working directory by default), what to look for (`"any"` by default), and a folder not to go above.
+ * @param {{ cwd?: string, type?: "file" | "folder" | "any", stopAt?: string }} [options] Where to start (the working directory by default), what to look for (`"any"` by default), and a folder not to go above: the search ends there, or as soon as it's outside of it.
  * @returns {string | undefined} The absolute path.
  */
 function findUp(name, options = {}) {
   const names = Array.isArray(name) ? name : [name];
   const type = options.type ?? "any";
-  const stopAt = options.stopAt === undefined ? undefined : _abs(options.stopAt);
+  // resolve() drops a trailing separator; relative() ignores letter case on Windows
+  const stopAt = options.stopAt === undefined ? undefined : nodePath.resolve(_abs(options.stopAt));
+  // a link, a junction or /var vs /private/var can lead to stopAt another way
+  const realStop = stopAt === undefined ? undefined : _realPath(stopAt);
   let dir = _abs(options.cwd);
   for (;;) {
     for (const candidate of names) {
@@ -709,7 +894,14 @@ function findUp(name, options = {}) {
       if (found) return found;
     }
     const parent = nodePath.dirname(dir);
-    if (parent === dir || dir === stopAt) return undefined;
+    if (parent === dir) return undefined;
+    if (stopAt !== undefined && realStop !== undefined) {
+      const rel = nodePath.relative(stopAt, dir);
+      const realRel = nodePath.relative(realStop, _realPath(dir));
+      // at stopAt by either path, or outside of it by both
+      if (rel === "" || realRel === "") return undefined;
+      if (_outside(rel) && _outside(realRel)) return undefined;
+    }
     dir = parent;
   }
 }
@@ -1067,15 +1259,17 @@ function deleteFilesIn(path, recursive = false, filter = () => true) {
 }
 
 /**
- * Deletes everything inside a folder, keeping the folder.
+ * Deletes everything inside a folder, keeping the folder. A link to a folder
+ * (a junction on Windows) is refused: what it points to is left alone.
  *
  * @param {string} path
- * @returns {boolean | undefined} `undefined` if it doesn't exist.
+ * @returns {boolean | undefined} `undefined` if it doesn't exist, `false` if it's a link or something couldn't be deleted.
  */
 function emptyFolder(path) {
   const target = _existing(path, "folder");
   if (!target) return undefined;
   try {
+    if (fs.lstatSync(target).isSymbolicLink()) return false;
     for (const entry of fs.readdirSync(target)) fs.rmSync(nodePath.join(target, entry), { recursive: true, force: true });
     return true;
   } catch {
@@ -1084,7 +1278,9 @@ function emptyFolder(path) {
 }
 
 /**
- * Copies a file or a whole folder, like `cp -r`.
+ * Copies a file or a whole folder, like `cp -r`. Links inside the folder
+ * are copied as links (junctions on Windows), never followed: files outside
+ * the folder are never brought along.
  *
  * @example
  * nc.copy("./templates", "./dist/templates");
@@ -1093,29 +1289,28 @@ function emptyFolder(path) {
  * @param {string} source
  * @param {string} destination
  * @param {CopyOptions} [options]
- * @returns {boolean} `false` if the source is missing or the copy failed.
+ * @returns {boolean} `false` if the source is missing, if the destination is the source or inside it, or if the copy failed.
  */
 function copy(source, destination, options = {}) {
   const src = _existing(source, "any");
   if (!src) return false;
   try {
     const dest = _abs(destination);
+    if (_within(dest, src)) return false;
     fs.mkdirSync(nodePath.dirname(dest), { recursive: true });
-    fs.cpSync(src, dest, {
-      recursive: true,
-      force: options.overwrite ?? true,
-      errorOnExist: false,
-      preserveTimestamps: options.preserveTimestamps ?? false,
-      filter: options.filter ? (s, d) => /** @type {Function} */ (options.filter)(s, d) : undefined,
-    });
+    _copyTree(src, dest, { force: options.overwrite ?? true, preserveTimestamps: options.preserveTimestamps, filter: options.filter });
     return true;
   } catch {
     return false;
   }
 }
 
+// what a rename says when something is in the way of the destination
+const _IN_THE_WAY = new Set(["EEXIST", "ENOTEMPTY", "EISDIR", "ENOTDIR"]);
+
 /**
- * Moves or renames a file or folder, across drives too.
+ * Moves or renames a file or folder, across drives too. A destination in the
+ * way is put aside first, and put back if the move fails.
  *
  * @example
  * nc.move("./report.pdf", "./archive/2024/report.pdf");
@@ -1123,31 +1318,56 @@ function copy(source, destination, options = {}) {
  * @param {string} source
  * @param {string} destination
  * @param {{ overwrite?: boolean }} [options] `overwrite` replaces an existing destination. Defaults to `true`.
- * @returns {boolean}
+ * @returns {boolean} `false` if the source is missing, if the destination is inside it, if the source is a link to the destination, or if the move failed.
  */
 function move(source, destination, options = {}) {
   const src = _existing(source, "any");
   if (!src) return false;
   const dest = _abs(destination);
   try {
-    if (options.overwrite === false && fs.existsSync(dest)) return false;
+    // the link would take the place of the file it leads to
+    if (_linkOnto(src, dest)) return false;
+    if (_sameEntry(src, dest)) {
+      // the same file: only its name can change, like its letter case on Windows
+      fs.renameSync(src, dest);
+      return true;
+    }
+    if (_within(dest, src)) return false;
+    if (options.overwrite === false && _lexists(dest)) return false;
     fs.mkdirSync(nodePath.dirname(dest), { recursive: true });
+    let crossDevice = false;
     try {
       // A rename replaces a file in one step: the destination is never missing, not even for an instant.
       fs.renameSync(src, dest);
+      return true;
     } catch (error) {
-      const code = /** @type {NodeJS.ErrnoException} */ (error).code;
-      if (code === "EXDEV") {
-        // another drive: copy, then delete
-        fs.rmSync(dest, { recursive: true, force: true });
-        fs.cpSync(src, dest, { recursive: true });
-        fs.rmSync(src, { recursive: true, force: true });
-      } else {
-        // a folder in the way, or a file where a folder goes
-        fs.rmSync(dest, { recursive: true, force: true });
-        _rename(src, dest);
+      const code = /** @type {NodeJS.ErrnoException} */ (error).code ?? "";
+      crossDevice = code === "EXDEV";
+      // Windows says EPERM or EACCES for a folder in the way
+      const inTheWay = _IN_THE_WAY.has(code) || (process.platform === "win32" && (code === "EPERM" || code === "EACCES"));
+      if (!crossDevice && !(inTheWay && _lexists(dest))) throw error;
+    }
+    // Put what's in the way aside, and back if the move fails.
+    const backup = _lexists(dest) ? `${dest}.${require("node:crypto").randomBytes(6).toString("hex")}.bak` : undefined;
+    if (backup) _rename(dest, backup);
+    try {
+      // another drive: copy, and delete the source once the copy is complete
+      if (crossDevice) _copyTree(src, dest);
+      else _rename(src, dest);
+    } catch (error) {
+      // a half-made copy is ours to remove, nothing else is
+      if (crossDevice) fs.rmSync(dest, { recursive: true, force: true });
+      if (backup) _rename(backup, dest);
+      throw error;
+    }
+    if (backup) {
+      try {
+        fs.rmSync(backup, { recursive: true, force: true });
+      } catch {
+        // the move is done: a leftover of the old destination is better than an error
       }
     }
+    if (crossDevice) fs.rmSync(src, { recursive: true, force: true });
     return true;
   } catch {
     return false;
@@ -1159,12 +1379,13 @@ function move(source, destination, options = {}) {
  * for most cases.
  *
  * @param {CopyFoldersOptions} options
- * @returns {number | undefined} How many were copied.
+ * @returns {number | undefined} How many were copied: `0` when `dest` is the source folder or inside it.
  */
 function copyFoldersIn(options) {
   const root = _existing(options.path, "folder");
   if (!root || !options.dest) return undefined;
   const dest = _abs(options.dest);
+  if (_within(dest, root)) return 0;
   const recursive = options.recursive ?? true;
   const filter = typeof options.filter === "function" ? options.filter : () => true;
   let copied = 0;
@@ -1186,12 +1407,13 @@ function copyFoldersIn(options) {
  * folder is created; `copy()` copies everything in one call.
  *
  * @param {CopyFolderOptions} options
- * @returns {boolean | undefined}
+ * @returns {boolean | undefined} `false` when `dest` is the source folder or inside it.
  */
 function copyFolder(options) {
   const root = _existing(options.path, "folder");
   if (!root || !options.dest) return undefined;
   const dest = _abs(options.dest);
+  if (_within(dest, root)) return false;
   try {
     if (options.force && fs.existsSync(dest)) fs.rmSync(dest, { recursive: true, force: true });
     fs.mkdirSync(dest, { recursive: true });
@@ -1216,13 +1438,14 @@ function copyFolder(options) {
  * nc.copyFilesIn({ path: "./src", dest: "./dist", filter: (file) => file.endsWith(".css") });
  *
  * @param {CopyFilesOptions} options
- * @returns {number | undefined} How many were copied.
+ * @returns {number | undefined} How many were copied: `0` when `dest` is the source folder, or inside it with `recursive`.
  */
 function copyFilesIn(options) {
   const root = _existing(options.path, "folder");
   if (!root || !options.dest) return undefined;
   const dest = _abs(options.dest);
   const recursive = options.recursive ?? true;
+  if (_filesInItself(root, dest, recursive)) return 0;
   const filter = typeof options.filter === "function" ? options.filter : () => true;
   let copied = 0;
   for (const file of getFilesIn(root, recursive) ?? []) {
@@ -1237,6 +1460,26 @@ function copyFilesIn(options) {
 }
 
 /**
+ * Where a file goes: into `dest` under its own name if `dest` ends with `/`
+ * or is a folder, else `dest` itself.
+ * @param {string} src
+ * @param {string} dest
+ * @returns {string}
+ */
+const _fileDest = (src, dest) => {
+  const abs = _abs(dest);
+  let intoFolder = /[\\/]$/.test(dest);
+  if (!intoFolder) {
+    try {
+      intoFolder = fs.statSync(abs).isDirectory();
+    } catch {
+      // nothing there yet
+    }
+  }
+  return intoFolder ? nodePath.join(abs, nodePath.basename(src)) : abs;
+};
+
+/**
  * Copies one file. If `dest` ends with `/`, the file keeps its name inside
  * that folder.
  *
@@ -1244,13 +1487,14 @@ function copyFilesIn(options) {
  * nc.copyFile({ path: "./src/index.js", dest: "./dist/" });
  *
  * @param {CopyFileOptions} options
- * @returns {boolean | undefined}
+ * @returns {boolean | undefined} `false` when `dest` is the file itself.
  */
 function copyFile(options) {
   const src = _existing(options.path, "file");
   if (!src || !options.dest) return undefined;
-  const intoFolder = /[\\/]$/.test(options.dest) || (fs.existsSync(_abs(options.dest)) && fs.statSync(_abs(options.dest)).isDirectory());
-  const dest = intoFolder ? nodePath.join(_abs(options.dest), nodePath.basename(src)) : _abs(options.dest);
+  const dest = _fileDest(src, options.dest);
+  // with force, the copy would delete its own source
+  if (_sameEntry(src, dest)) return false;
   try {
     if (options.force && fs.existsSync(dest)) fs.rmSync(dest, { force: true });
     fs.mkdirSync(nodePath.dirname(dest), { recursive: true });
@@ -1265,10 +1509,12 @@ function copyFile(options) {
  * Moves the folders inside a folder.
  *
  * @param {CopyFoldersOptions} options
- * @returns {number | undefined} How many were moved.
+ * @returns {number | undefined} How many were moved: `0` when `dest` is the source folder or inside it.
  */
 function moveFoldersIn(options) {
   const root = _existing(options.path, "folder");
+  // the folders are deleted after the copy: they must not hold it
+  if (root && options.dest && _within(_abs(options.dest), root)) return 0;
   const copied = copyFoldersIn(options);
   if (copied === undefined || !root) return copied;
   const filter = typeof options.filter === "function" ? options.filter : () => true;
@@ -1282,7 +1528,7 @@ function moveFoldersIn(options) {
  * Moves a folder.
  *
  * @param {CopyFolderOptions & { path: string }} options
- * @returns {boolean | undefined}
+ * @returns {boolean | undefined} `false` when `dest` is the source folder or inside it.
  */
 function moveFolder(options) {
   const root = _existing(options.path, "folder");
@@ -1292,19 +1538,40 @@ function moveFolder(options) {
 }
 
 /**
- * Moves the files inside a folder.
+ * Moves the files inside a folder. A file that can't be copied stays where
+ * it is, and isn't counted.
  *
  * @param {CopyFilesOptions} options
- * @returns {number | undefined} How many were moved.
+ * @returns {number | undefined} How many were moved: `0` when `dest` is the source folder, or inside it with `recursive`.
  */
 function moveFilesIn(options) {
   const root = _existing(options.path, "folder");
   if (!root || !options.dest) return undefined;
+  const dest = _abs(options.dest);
+  const recursive = options.recursive ?? true;
+  // the files are deleted after the copy: they must not be the copy
+  if (_filesInItself(root, dest, recursive)) return 0;
   const filter = typeof options.filter === "function" ? options.filter : () => true;
-  const files = new Set((getFilesIn(root, options.recursive ?? true) ?? []).filter(filter));
-  const copied = copyFilesIn({ ...options, path: root, filter: (file) => files.has(file) });
-  for (const file of files) fs.rmSync(file, { force: true });
-  return copied;
+  let moved = 0;
+  for (const file of getFilesIn(root, recursive) ?? []) {
+    if (!filter(file)) continue;
+    const target = nodePath.join(dest, recursive ? nodePath.relative(root, file) : nodePath.basename(file));
+    try {
+      if (options.force && fs.existsSync(target)) fs.rmSync(target, { force: true });
+      fs.mkdirSync(nodePath.dirname(target), { recursive: true });
+      fs.copyFileSync(file, target);
+    } catch {
+      // not copied: the source stays where it is
+      continue;
+    }
+    try {
+      fs.rmSync(file, { force: true });
+      moved++;
+    } catch {
+      // copied but still there: not moved
+    }
+  }
+  return moved;
 }
 
 /**
@@ -1314,12 +1581,26 @@ function moveFilesIn(options) {
  * nc.moveFile({ path: "./logs/app.log", dest: "./logs/archive/" });
  *
  * @param {CopyFileOptions} options
- * @returns {boolean | undefined}
+ * @returns {boolean | undefined} `false` when `dest` is the file itself under the same name, or when the file is a link to `dest`.
  */
 function moveFile(options) {
   const src = _existing(options.path, "file");
+  if (!src || !options.dest) return undefined;
+  const dest = _fileDest(src, options.dest);
+  // the link would take the place of the file it leads to
+  if (_linkOnto(src, dest)) return false;
+  if (_sameEntry(src, dest)) {
+    // the same file: only its name can change, like its letter case on Windows
+    if (nodePath.basename(src) === nodePath.basename(dest)) return false;
+    try {
+      fs.renameSync(src, dest);
+      return true;
+    } catch {
+      return false;
+    }
+  }
   const moved = copyFile(options);
-  if (moved && src) fs.rmSync(src, { force: true });
+  if (moved) fs.rmSync(src, { force: true });
   return moved;
 }
 
@@ -1454,8 +1735,9 @@ function tempFolder(prefix = "nc-") {
 
 /**
  * Turns any text into a file name that works on Windows, macOS and Linux:
- * forbidden characters are replaced, reserved names like `CON` are
- * prefixed, and the length is capped.
+ * forbidden characters are replaced, invisible and text direction
+ * characters are removed, reserved names like `CON`, `NUL .txt` or
+ * `COM¹` are prefixed, and the length is capped.
  *
  * @example
  * nc.sanitizeFilename('Report: Q1/Q2 "final"?.pdf'); // "Report_ Q1_Q2 _final__.pdf"
@@ -1467,8 +1749,13 @@ function tempFolder(prefix = "nc-") {
  */
 function sanitizeFilename(name, options = {}) {
   const replacement = options.replacement ?? "_";
-  let clean = String(name).replace(/[<>:"/\\|?*\u0000-\u001f\u007f]/g, replacement).replace(/[. ]+$/, "");
-  if (/^(con|prn|aux|nul|com[0-9]|lpt[0-9])(\..*)?$/i.test(clean)) clean = `_${clean}`;
+  let clean = String(name)
+    // invisible characters, and the ones that reverse the text so that "exe.txt" reads "txt.exe"
+    .replace(/[​-‏‪-‮⁠⁦-⁩﻿]/g, "")
+    .replace(/[<>:"/\\|?*\u0000-\u001f\u007f]/g, replacement)
+    .replace(/[. ]+$/, "");
+  // Windows ignores the extension and the spaces before it: "NUL .txt" is still the NUL device
+  if (/^(con|prn|aux|nul|conin\$|conout\$|com[0-9¹²³]|lpt[0-9¹²³])$/i.test(clean.split(".")[0].replace(/ +$/, ""))) clean = `_${clean}`;
   if (clean === "." || clean === "..") clean = replacement;
   if (Buffer.byteLength(clean) > 255) {
     // File systems count bytes, and a character cut in two would be broken.

@@ -38,7 +38,7 @@ const { parseDuration } = require("./internal/shared.js");
  * Options for `parse()`.
  * @typedef {object} EnvParseOptions
  * @property {boolean} [expand] Replace `$VAR`, `${VAR}` and `${VAR:-default}`. Defaults to `true`.
- * @property {Record<string, string | undefined>} [env] Other variables usable in expansions. Defaults to `process.env`.
+ * @property {Record<string, string | undefined>} [env] Other variables usable in expansions. Defaults to none: a reference resolves only from the text itself, so parsing a file you don't trust can't copy your secrets into it. Pass `process.env` to read from it.
  */
 
 /**
@@ -197,20 +197,27 @@ const _REFERENCE = /\\\$|\$\{([\w.]+)(?::?-([^}]*))?\}|\$([A-Za-z_]\w*)/g;
 /** @type {Record<string, string>} */
 const _ESCAPED = { n: "\n", r: "\r", t: "\t" };
 
+/** How long one value may grow through `${VAR}` references. */
+const _MAX_EXPANDED = 64 * 1024;
+
 /**
  * Parses the text of a `.env` file: quotes, multi-line values, `export`,
  * comments, escapes, and `${VAR}` expansion (except in single quotes).
+ * References resolve from the text itself and from `env`, never from
+ * `process.env` unless you pass it.
  *
  * @example
  * env.parse('PORT=3000\nURL="http://localhost:${PORT}"');
  * // { PORT: "3000", URL: "http://localhost:3000" }
+ * env.parse("HOME_COPY=${HOME}", { env: process.env });
  *
  * @param {string} content
  * @param {EnvParseOptions} [options]
  * @returns {Record<string, string>}
+ * @throws {RangeError} If references make one value grow past 64 KB, as with variables that each use the one before several times.
  */
 function parse(content, options = {}) {
-  return _parse(content, options);
+  return _parse(content, { ...options, env: options.env ?? {} });
 }
 
 /**
@@ -235,13 +242,18 @@ function _parse(content, options, wins) {
       if (quote === "'") literal.add(key);
       else literal.delete(key);
     } else {
-      value = (bare ?? "").replace(/(?:^|[ \t]+)#.*$/, "").trim();
+      // One blank before the #, not a run of them: a long run would make the regex quadratic.
+      value = (bare ?? "").replace(/(?:^|[ \t])#.*$/, "").trim();
       literal.delete(key);
     }
     out.set(key, value);
   }
   if (options.expand !== false) {
-    const base = options.env ?? process.env;
+    const base = options.env ?? {};
+    // Each variable is expanded once: variables that repeat each other would
+    // otherwise take exponential time.
+    /** @type {Map<string, string>} */
+    const done = new Map();
     /**
      * @param {string} name
      * @param {string[]} seen The variables being expanded, to stop at a loop.
@@ -251,8 +263,20 @@ function _parse(content, options, wins) {
       if (seen.includes(name)) return "";
       const winner = wins?.(name);
       if (winner !== undefined) return winner;
-      const own = out.get(name);
-      return own !== undefined ? expand(own, [...seen, name], name) : _raw(base, name) ?? "";
+      return out.has(name) ? final(name, [...seen, name]) : _raw(base, name) ?? "";
+    };
+    /**
+     * @param {string} key
+     * @param {string[]} seen
+     * @returns {string}
+     */
+    const final = (key, seen) => {
+      let value = done.get(key);
+      if (value === undefined) {
+        value = expand(/** @type {string} */ (out.get(key)), seen, key);
+        done.set(key, value);
+      }
+      return value;
     };
     /**
      * @param {string} value
@@ -262,13 +286,19 @@ function _parse(content, options, wins) {
      */
     const expand = (value, seen, key) => {
       if (literal.has(key) || !value.includes("$")) return value;
+      const limit = Math.max(_MAX_EXPANDED, value.length);
+      let size = value.length;
       return value.replace(_REFERENCE, (match, braced, fallback, plain) => {
         if (match === "\\$") return "$";
         const resolved = resolve(braced ?? plain, seen);
-        return resolved === "" && fallback !== undefined ? fallback : resolved;
+        const result = resolved === "" && fallback !== undefined ? fallback : resolved;
+        size += result.length - match.length;
+        if (size > limit) throw new RangeError(`Environment variable ${key} expands to more than 64 KB: check for variables that each use the one before several times`);
+        return result;
       });
     };
-    for (const [key, value] of out) out.set(key, expand(value, [key], key));
+    for (const key of [...out.keys()]) final(key, [key]);
+    for (const [key, value] of done) out.set(key, value);
   }
   return Object.fromEntries(out);
 }
@@ -283,6 +313,34 @@ const _automatic = new Map();
 let _loadingAutomatically = false;
 
 /**
+ * Variables the automatic load never takes from a `.env` file: they run
+ * code in the programs started afterwards, or turn off TLS checks. A `.env`
+ * in a cloned repository is not to be trusted with those.
+ */
+const _DANGEROUS = new Set([
+  "NODE_OPTIONS", "NODE_TLS_REJECT_UNAUTHORIZED", "NODE_EXTRA_CA_CERTS", "NODE_PATH", "NODE_REDIRECT_WARNINGS", "NODE_REPL_EXTERNAL_MODULE",
+  "LD_PRELOAD", "LD_LIBRARY_PATH", "LD_AUDIT",
+  "NODE_USE_ENV_PROXY",
+  "GIT_SSH_COMMAND", "GIT_SSH", "GIT_ASKPASS", "GIT_EXEC_PATH", "GIT_CONFIG", "GIT_PROXY_COMMAND", "SSH_ASKPASS",
+  "GIT_EXTERNAL_DIFF", "GIT_TEMPLATE_DIR", "GIT_PAGER", "GIT_EDITOR", "GIT_SEQUENCE_EDITOR", "PAGER", "EDITOR", "VISUAL",
+  "PATH", "PATHEXT", "ComSpec", "COMSPEC", "BASH_ENV", "PROMPT_COMMAND",
+  "PERL5OPT", "PYTHONSTARTUP", "PYTHONPATH", "RUBYOPT", "JAVA_TOOL_OPTIONS", "_JAVA_OPTIONS",
+]);
+const _DANGEROUS_UPPER = new Set([..._DANGEROUS].map((name) => name.toUpperCase()));
+
+/**
+ * @param {string} key
+ * @returns {boolean}
+ */
+const _dangerous = (key) => {
+  // Windows reads Path and PATH as one variable.
+  const name = process.platform === "win32" ? key.toUpperCase() : key;
+  return (process.platform === "win32" ? _DANGEROUS_UPPER : _DANGEROUS).has(name) || name.startsWith("DYLD_") || name.startsWith("GIT_CONFIG_");
+};
+
+const _WARNED = Symbol.for("@ix-xs/node-comfort/env-dangerous-warned");
+
+/**
  * The files that go with a `.env` file, most specific first.
  * @param {string} file
  * @param {string} mode
@@ -295,6 +353,20 @@ const _cascade = (file, mode) => [`${file}.${mode}.local`, ...(mode === "test" ?
  * wins, and variables that are already set are kept, unless you pass
  * `override`. The `.env` loaded by itself at startup doesn't count as
  * already set: `.env.local` wins over it, as you'd expect.
+ *
+ * The load at startup leaves out the variables that can run code or weaken
+ * TLS, and says so on stderr: `NODE_OPTIONS`, `NODE_TLS_REJECT_UNAUTHORIZED`,
+ * `NODE_EXTRA_CA_CERTS`, `NODE_PATH`, `NODE_REDIRECT_WARNINGS`,
+ * `NODE_REPL_EXTERNAL_MODULE`, `NODE_USE_ENV_PROXY`, `LD_PRELOAD`,
+ * `LD_LIBRARY_PATH`, `LD_AUDIT`,
+ * `DYLD_*`, `GIT_SSH_COMMAND`, `GIT_SSH`, `GIT_ASKPASS`, `GIT_EXEC_PATH`,
+ * `GIT_CONFIG*`, `GIT_PROXY_COMMAND`, `GIT_EXTERNAL_DIFF`, `GIT_TEMPLATE_DIR`,
+ * `GIT_PAGER`, `GIT_EDITOR`, `GIT_SEQUENCE_EDITOR`, `PAGER`, `EDITOR`,
+ * `VISUAL`, `SSH_ASKPASS`, `PATH`, `PATHEXT`,
+ * `ComSpec`, `BASH_ENV`, `PROMPT_COMMAND`, `PERL5OPT`,
+ * `PYTHONSTARTUP`, `PYTHONPATH`, `RUBYOPT`, `JAVA_TOOL_OPTIONS` and
+ * `_JAVA_OPTIONS`. A call to `load()` loads them all: don't make one on a
+ * file you don't trust, such as the `.env` of a repository someone sent you.
  *
  * @example
  * env.load();                                // ./.env
@@ -344,12 +416,22 @@ function load(files = ".env", options = {}) {
       }
     }
   }
+  /** @type {string[]} */
+  const skipped = [];
   for (const [key, value] of loaded) {
     if (kept(key) !== undefined) continue;
+    if (own && _loadingAutomatically && _dangerous(key)) {
+      skipped.push(key);
+      continue;
+    }
     target[key] = value;
     if (!own) continue;
     if (_loadingAutomatically) _automatic.set(key, value);
     else _automatic.delete(key);
+  }
+  if (skipped.length && !(/** @type {any} */ (process)[_WARNED])) {
+    /** @type {any} */ (process)[_WARNED] = true;
+    process.stderr.write(`[@ix-xs/node-comfort] Left out of the automatic .env load, as they can run code or weaken TLS: ${skipped.join(", ")}. Call env.load() to load them on purpose.\n`);
   }
   return Object.fromEntries(loaded);
 }

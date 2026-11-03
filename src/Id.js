@@ -77,6 +77,44 @@ const POOL_SIZE = 4096;
 /** @type {Buffer | undefined} */
 let _pool;
 let _poolAt = POOL_SIZE;
+// `process` is a getter on the global object: a local copy is faster to read.
+const _process = process;
+// The process that filled the pool. Another one (a fork, or a process started
+// from a startup snapshot) must not hand out the same bytes again.
+let _poolPid = -1;
+
+// State of the generators that count up within a process.
+let _v7LastMs = 0;
+let _v7Counter = 0;
+let _v7Head = "";
+let _ulidLastMs = -1;
+let _ulidHead = "";
+const _ulidRandom = new Uint8Array(16);
+let _oidProcess = "";
+let _oidCounter = 0;
+
+/** Forgets the pool and the generator state, as in a new process. */
+const _reset = () => {
+  _poolAt = POOL_SIZE;
+  _poolPid = -1;
+  _v7LastMs = 0;
+  _v7Counter = 0;
+  _v7Head = "";
+  _ulidLastMs = -1;
+  _ulidHead = "";
+  _oidProcess = "";
+  _oidCounter = 0;
+};
+
+/** Refills the pool, and starts over first when the process changed. */
+const _refill = () => {
+  if (_poolPid !== _process.pid) {
+    _reset();
+    _poolPid = _process.pid;
+  }
+  _crypto().randomFillSync((_pool ??= Buffer.allocUnsafeSlow(POOL_SIZE)));
+  _poolAt = 0;
+};
 
 /**
  * Reserves `count` fresh random bytes in the pool.
@@ -84,14 +122,23 @@ let _poolAt = POOL_SIZE;
  * @returns {number} Where they start.
  */
 const _take = (count) => {
-  if (_poolAt + count > POOL_SIZE) {
-    _crypto().randomFillSync((_pool ??= Buffer.allocUnsafeSlow(POOL_SIZE)));
-    _poolAt = 0;
-  }
+  if (_poolAt + count > POOL_SIZE || _poolPid !== _process.pid) _refill();
   const at = _poolAt;
   _poolAt += count;
   return at;
 };
+
+// A startup snapshot (`node --build-snapshot`, single executable apps) would
+// freeze the pool and the state, so every process started from it would print
+// the same ids. The pid check above misses a reused pid, this doesn't.
+const _snapshot = require("node:v8").startupSnapshot;
+if (_snapshot?.isBuildingSnapshot?.()) {
+  _snapshot.addSerializeCallback(() => {
+    _pool?.fill(0);
+    _reset();
+  });
+  _snapshot.addDeserializeCallback(_reset);
+}
 
 /**
  * @param {number} size
@@ -237,10 +284,6 @@ function uuidv5(name, namespace) {
   return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20)}`;
 }
 
-let _v7LastMs = 0;
-let _v7Counter = 0;
-let _v7Head = "";
-
 /**
  * A UUID v7: it starts with a timestamp, so ids sort by creation time.
  * That keeps database indexes compact, which makes them great primary
@@ -271,10 +314,6 @@ function uuidv7() {
     HEX[pool[at + 2]] + HEX[pool[at + 3]] + HEX[pool[at + 4]] + HEX[pool[at + 5]] + HEX[pool[at + 6]] + HEX[pool[at + 7]]
   );
 }
-
-let _ulidLastMs = -1;
-let _ulidHead = "";
-const _ulidRandom = new Uint8Array(16);
 
 /**
  * @param {number} ms
@@ -311,6 +350,7 @@ function ulid(time) {
     for (let i = at; i < at + 16; i++) out += CROCKFORD[pool[i] & 31];
     return out;
   }
+  if (_poolPid !== _process.pid) _refill();
   const now = Date.now();
   if (now > _ulidLastMs) {
     _ulidLastMs = now;
@@ -330,9 +370,6 @@ function ulid(time) {
   return out;
 }
 
-let _oidProcess = "";
-let _oidCounter = 0;
-
 /**
  * A MongoDB-style ObjectId: 24 hex characters that start with the time, in
  * seconds, and increase within the process.
@@ -347,6 +384,7 @@ let _oidCounter = 0;
  * @throws {RangeError} If the time is not a valid timestamp.
  */
 function objectId(time) {
+  if (_poolPid !== _process.pid) _refill();
   if (!_oidProcess) {
     const at = _take(8);
     const pool = /** @type {Buffer} */ (_pool);

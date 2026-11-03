@@ -70,9 +70,10 @@ const { toMs, setLongTimeout, sleep } = require("./internal/shared.js");
  * Request options.
  * @typedef {object} HttpOptions
  * @property {HttpMethod} [method] Defaults to `"GET"`.
- * @property {string} [baseURL] Prefix for relative URLs.
+ * @property {string} [baseURL] Prefix for relative URLs. It's a boundary: a path that would leave it, like `"../admin"`, `"//other.host"` or an absolute URL to another place, throws a `TypeError` (see `allowAbsoluteUrls`).
+ * @property {boolean} [allowAbsoluteUrls] With a `baseURL`, let an absolute URL go elsewhere: `api.get("https://cdn.example.com/x", { allowAbsoluteUrls: true })`. The client's own `auth`, `headers` and `query` still stay with the base origin, only those of the call go there. Defaults to `false`, so a URL built from outside input can't take the client's credentials to another host.
  * @property {HttpHeaders} [headers] Set a header to `undefined` to remove a default one.
- * @property {Record<string, string | number | boolean>} [params] Values for the `:name` parts of the URL: `"users/:id"` with `{ id: 42 }` gives `users/42`. They're encoded for you.
+ * @property {Record<string, string | number | boolean>} [params] Values for the `:name` parts of the URL: `"users/:id"` with `{ id: 42 }` gives `users/42`. They're encoded for you, and `"."` or `".."` throws a `TypeError`, since they would move up the path.
  * @property {QueryParams | URLSearchParams} [query] Added to the URL's own query string, and to the client's default query.
  * @property {unknown} [json] Sent as JSON.
  * @property {Record<string, string | number | boolean>} [form] Sent as a URL-encoded form.
@@ -86,7 +87,9 @@ const { toMs, setLongTimeout, sleep } = require("./internal/shared.js");
  * @property {AbortSignal} [signal] Cancels the request.
  * @property {HttpHooks} [hooks]
  * @property {(progress: { loaded: number, total: number | undefined, percent: number | undefined }) => void} [onDownloadProgress] Called while the body downloads.
- * @property {"follow" | "error" | "manual"} [redirect] Defaults to `"follow"`.
+ * @property {number | string} [maxResponseSize] Largest body read into memory, in bytes or like `"50MB"`, counted once decompressed. Past it, the request is cancelled and an `HttpError` with the code `ERR_RESPONSE_TOO_LARGE` is thrown, so a huge or zip bomb answer can't fill the memory. Defaults to `"100MB"`, `Infinity` turns it off. A stream (`responseType: "stream"`) and the file of `download()` aren't held in memory, so they aren't limited.
+ * @property {"follow" | "error" | "manual"} [redirect] `"follow"` (the default) follows up to 20 redirects, `"manual"` returns the 3xx response as it is, `"error"` throws an `HttpError` with the code `ERR_REDIRECT`. When a redirect goes to another origin, `authorization`, `cookie`, `proxy-authorization` and the `sensitiveHeaders` are left behind.
+ * @property {string[]} [sensitiveHeaders] Headers dropped when a redirect goes to another origin, on top of `authorization`, `cookie` and `proxy-authorization`. Names are case-insensitive. Defaults to `["x-api-key", "x-auth-token", "api-key"]`; a list you give replaces it, so add these to it if you use them.
  */
 
 /**
@@ -134,7 +137,19 @@ const { toMs, setLongTimeout, sleep } = require("./internal/shared.js");
 const RETRY_STATUSES = [408, 413, 429, 500, 502, 503, 504];
 const RETRY_METHODS = ["GET", "HEAD", "OPTIONS", "PUT", "DELETE"];
 const DEFAULT_TIMEOUT = 30_000;
+const DEFAULT_MAX_RESPONSE_SIZE = 100 * 1024 * 1024;
+// What an error body gets when a stream was asked for: enough to tell what went wrong.
+const ERROR_BODY_LIMIT = 1024 * 1024;
+const MAX_REDIRECTS = 20;
+const REDIRECT_STATUSES = new Set([301, 302, 303, 307, 308]);
+// Always left behind when a redirect changes origin, whatever `sensitiveHeaders` says.
+const CREDENTIAL_HEADERS = ["authorization", "cookie", "proxy-authorization"];
+const SENSITIVE_HEADERS = ["x-api-key", "x-auth-token", "api-key"];
+// What describes a body, dropped with it when a redirect turns the request into a GET.
+const BODY_HEADERS = ["content-type", "content-length", "content-encoding", "content-language", "content-location"];
 const ABSOLUTE = /^[a-z][a-z\d+.-]*:/i;
+// The URL parser skips these at the start and reads "\" as "/", so " //host" or "\\host" would leave the base URL.
+const LEADING = /^[\s\x00-\x1f/\\]+/;
 // ":name" right after a slash, which leaves "http://host:3000" alone
 const PARAM = /(?<=\/):([A-Za-z_]\w*)/g;
 
@@ -195,6 +210,13 @@ const _appendQuery = (params, query) => {
 };
 
 /**
+ * A URL for an error message: without its query, which can hold a key.
+ * @param {unknown} url
+ * @returns {string}
+ */
+const _shown = (url) => String(url).replace(/[?#][\s\S]*$/, "");
+
+/**
  * @template T
  * @param {T[] | undefined} a
  * @param {T[] | undefined} b
@@ -229,12 +251,18 @@ const _mergeOptions = (base, extra) => {
 };
 
 /**
+ * The URL a request goes to, query not added yet. With a `baseURL`, it has
+ * to stay under it: same origin, same path prefix. Only an absolute URL
+ * passed with `allowAbsoluteUrls` may go elsewhere, and then `foreign` says
+ * it left the base origin.
  * @param {string | URL} input
  * @param {HttpOptions} options
- * @returns {string}
+ * @returns {{ url: URL, foreign: boolean }}
  */
-const _buildURL = (input, options) => {
+const _resolve = (input, options) => {
+  const base = options.baseURL ? new URL(String(options.baseURL).replace(/\/*$/, "/")) : undefined;
   let url;
+  let absolute = true;
   if (typeof input !== "string") {
     url = new URL(String(input));
   } else {
@@ -242,14 +270,67 @@ const _buildURL = (input, options) => {
     const path = !params ? input : input.replace(PARAM, (_, name) => {
       const value = Object.hasOwn(params, name) ? params[name] : undefined;
       if (value === undefined || value === null) throw new TypeError(`Missing URL parameter "${name}" for ${input}`);
-      return encodeURIComponent(String(value));
+      const text = String(value);
+      // Encoding can't help: the URL parser reads "%2e%2e" as "..".
+      if (text === "." || text === "..") throw new TypeError(`URL parameter "${name}" can't be "${text}" for ${input}: it would move up the path`);
+      return encodeURIComponent(text);
     });
-    if (ABSOLUTE.test(path)) url = new URL(path);
-    else if (options.baseURL) url = new URL(path.replace(/^\/+/, ""), String(options.baseURL).replace(/\/*$/, "/"));
-    else throw new TypeError(`Invalid URL "${input}": use an absolute URL or set baseURL`);
+    absolute = ABSOLUTE.test(path);
+    if (!base) {
+      if (!absolute) throw new TypeError(`Invalid URL "${input}": use an absolute URL or set baseURL`);
+      url = new URL(path);
+    } else {
+      url = absolute && options.allowAbsoluteUrls ? new URL(path) : new URL(path.replace(LEADING, ""), base);
+    }
   }
-  _appendQuery(url.searchParams, options.query);
-  return url.href;
+  if (!base) return { url, foreign: false };
+  // The base path ends with "/", so the prefix stops at a segment: "/v1/" takes "/v1" and "/v1/x", not "/v10".
+  if (url.origin === base.origin && (url.pathname.startsWith(base.pathname) || `${url.pathname}/` === base.pathname)) return { url, foreign: false };
+  if (absolute && options.allowAbsoluteUrls) return { url, foreign: url.origin !== base.origin };
+  throw new TypeError(`URL "${String(input)}" leaves the base URL ${base.href}: pass allowAbsoluteUrls: true to send an absolute URL elsewhere on purpose`);
+};
+
+/**
+ * @param {number | string | undefined} value
+ * @returns {number}
+ */
+const _maxSize = (value) => {
+  if (value === undefined) return DEFAULT_MAX_RESPONSE_SIZE;
+  const bytes = typeof value === "number" ? value : require("./Num.js").parseBytes(value);
+  if (!(bytes >= 0)) throw new TypeError(`Invalid maxResponseSize: ${String(value)}`);
+  return bytes;
+};
+
+/**
+ * The headers of a request, from its options, with lower-cased names.
+ * @param {HttpOptions} options
+ * @returns {Record<string, string>}
+ */
+const _headersOf = (options) => {
+  /** @type {Record<string, string>} */
+  const headers = { accept: "application/json, text/plain, */*" };
+  const given = _headerRecord(options.headers);
+  for (const key of Object.keys(given)) {
+    const value = given[key];
+    if (value === undefined) delete headers[key];
+    else headers[key] = value;
+  }
+  if (options.auth) {
+    headers.authorization = "bearer" in options.auth
+      ? `Bearer ${options.auth.bearer}`
+      : `Basic ${Buffer.from(`${options.auth.username}:${options.auth.password}`).toString("base64")}`;
+  }
+  return headers;
+};
+
+/**
+ * @param {Record<string, string>} headers Changed in place.
+ * @param {Iterable<string>} names Lower-cased.
+ */
+const _dropHeaders = (headers, names) => {
+  const drop = new Set(names);
+  // A hook may have set a header with capitals in its name.
+  for (const key of Object.keys(headers)) if (drop.has(key.toLowerCase())) delete headers[key];
 };
 
 /** @param {unknown} body */
@@ -257,27 +338,58 @@ const _isStream = (body) =>
   body !== null && typeof body === "object" && (typeof (/** @type {any} */ (body).pipe) === "function" || typeof (/** @type {any} */ (body).getReader) === "function");
 
 /**
+ * How `_readBody()` reads.
+ * @typedef {object} _ReadSettings
+ * @property {HttpOptions["responseType"]} type
+ * @property {HttpOptions["onDownloadProgress"]} onProgress
+ * @property {number} limit Most bytes kept, once decompressed.
+ * @property {boolean} truncate Past the limit, keep the start instead of throwing.
+ * @property {string} method For the error message.
+ * @property {() => void} abort Cancels the request.
+ */
+
+/**
  * @param {Response} res
- * @param {HttpOptions["responseType"]} type
- * @param {HttpOptions["onDownloadProgress"]} onProgress
+ * @param {_ReadSettings} settings
  * @returns {Promise<unknown>}
  */
-const _readBody = async (res, type = "auto", onProgress) => {
-  let buffer;
-  if (onProgress && res.body) {
-    const total = Number(res.headers.get("content-length")) || undefined;
-    /** @type {Buffer[]} */
-    const chunks = [];
-    let loaded = 0;
-    for await (const chunk of /** @type {AsyncIterable<Uint8Array>} */ (/** @type {unknown} */ (res.body))) {
-      chunks.push(Buffer.from(chunk.buffer, chunk.byteOffset, chunk.byteLength));
-      loaded += chunk.length;
-      onProgress({ loaded, total, percent: total ? Math.min(100, (loaded / total) * 100) : undefined });
+const _readBody = async (res, { type = "auto", onProgress, limit, truncate, method, abort }) => {
+  const total = Number(res.headers.get("content-length")) || undefined;
+  const tooLarge = () => {
+    abort();
+    return new HttpError(`Response larger than the ${limit} bytes allowed by maxResponseSize: ${method} ${res.url}`, {
+      status: res.status, statusText: res.statusText, url: res.url, method, headers: Object.fromEntries(res.headers), code: "ERR_RESPONSE_TOO_LARGE",
+    });
+  };
+  if (!truncate && total !== undefined && total > limit) throw tooLarge();
+  /** @type {Buffer[]} */
+  const chunks = [];
+  let loaded = 0;
+  if (res.body) {
+    // Read piece by piece and count what comes out of the decompression, so a zip bomb stops at the limit.
+    const reader = res.body.getReader();
+    try {
+      for (;;) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        if (loaded + value.byteLength > limit) {
+          if (!truncate) throw tooLarge();
+          chunks.push(Buffer.from(value.buffer, value.byteOffset, limit - loaded));
+          loaded = limit;
+          reader.cancel().catch(() => {});
+          break;
+        }
+        chunks.push(Buffer.from(value.buffer, value.byteOffset, value.byteLength));
+        loaded += value.byteLength;
+        onProgress?.({ loaded, total, percent: total ? Math.min(100, (loaded / total) * 100) : undefined });
+      }
+    } catch (error) {
+      // A callback that throws or a failed read must not leave the connection open.
+      reader.cancel().catch(() => {});
+      throw error;
     }
-    buffer = Buffer.concat(chunks);
-  } else {
-    buffer = Buffer.from(await res.arrayBuffer());
   }
+  const buffer = Buffer.concat(chunks, loaded);
   if (type === "buffer") return buffer;
   const text = buffer.toString("utf8");
   const contentType = res.headers.get("content-type") ?? "";
@@ -308,12 +420,59 @@ const _retryAfter = (value) => {
 };
 
 /**
+ * Sends one attempt and follows its redirects, like `fetch` would, but
+ * without taking secret headers to another origin.
+ * @param {HttpRequestConfig} config
+ * @param {{ method: string, body: HttpBody | undefined, redirect: NonNullable<HttpOptions["redirect"]>, sensitive: string[], signal: AbortSignal }} settings
+ * @returns {Promise<Response>}
+ */
+const _follow = async (config, { method, body, redirect, sensitive, signal }) => {
+  let url = config.url;
+  const headers = { ...config.headers };
+  for (let hops = 0; ; hops++) {
+    /** @type {any} */
+    const init = { method, headers, body, signal, redirect: "manual" };
+    if (_isStream(body)) init.duplex = "half";
+    const res = await fetch(url, init);
+    const location = redirect !== "manual" && REDIRECT_STATUSES.has(res.status) ? res.headers.get("location") : null;
+    if (location === null) return res;
+    res.body?.cancel().catch(() => {});
+    /** @param {string} why */
+    const fail = (why) => new HttpError(`${why}: ${config.method} ${config.url}`, {
+      status: res.status, statusText: res.statusText, url, method: config.method, headers: Object.fromEntries(res.headers), code: hops >= MAX_REDIRECTS ? "ERR_TOO_MANY_REDIRECTS" : "ERR_REDIRECT",
+    });
+    if (redirect === "error") throw fail(`Redirected with status ${res.status} while redirect is "error"`);
+    if (hops >= MAX_REDIRECTS) throw fail(`More than ${MAX_REDIRECTS} redirects`);
+    /** @type {URL} */
+    let next;
+    try {
+      next = new URL(location, url);
+    } catch {
+      throw fail(`Redirected to an invalid URL "${location}"`);
+    }
+    if (next.protocol !== "http:" && next.protocol !== "https:") throw fail(`Redirected to a ${next.protocol} URL`);
+    if (((res.status === 301 || res.status === 302) && method === "POST") || (res.status === 303 && method !== "GET" && method !== "HEAD")) {
+      // What fetch does: the redirect is fetched with GET, without the body.
+      method = "GET";
+      body = undefined;
+      _dropHeaders(headers, BODY_HEADERS);
+    } else if (_isStream(body)) {
+      throw fail(`Can't follow the ${res.status} redirect: the body is a stream, already sent`);
+    }
+    // Another origin (an https to http downgrade is one too) gets no credentials.
+    if (next.origin !== new URL(url).origin) _dropHeaders(headers, sensitive);
+    url = next.href;
+  }
+};
+
+/**
  * The engine behind every method.
  * @param {string | URL} input
- * @param {HttpOptions} options
+ * @param {HttpOptions} options Everything, the client's defaults included.
+ * @param {HttpOptions} [own] Only what the call gave, when it comes from a client.
  * @returns {Promise<HttpResponse<any>>}
  */
-const _send = async (input, options) => {
+const _send = async (input, options, own) => {
   const started = Date.now();
   const method = String(options.method ?? "GET").toUpperCase();
   const signal = options.signal;
@@ -321,20 +480,16 @@ const _send = async (input, options) => {
   const retry = typeof options.retry === "object" && options.retry !== null ? options.retry : {};
   const statuses = retry.statuses ?? RETRY_STATUSES;
   const timeoutMs = _timeout(options.timeout);
+  const maxSize = _maxSize(options.maxResponseSize);
+  const redirect = options.redirect ?? "follow";
+  const sensitive = [...CREDENTIAL_HEADERS, ...(options.sensitiveHeaders ?? SENSITIVE_HEADERS).map((name) => String(name).toLowerCase())];
 
-  /** @type {Record<string, string>} */
-  const headers = { accept: "application/json, text/plain, */*" };
-  const given = _headerRecord(options.headers);
-  for (const key of Object.keys(given)) {
-    const value = given[key];
-    if (value === undefined) delete headers[key];
-    else headers[key] = value;
-  }
-  if (options.auth) {
-    headers.authorization = "bearer" in options.auth
-      ? `Bearer ${options.auth.bearer}`
-      : `Basic ${Buffer.from(`${options.auth.username}:${options.auth.password}`).toString("base64")}`;
-  }
+  const { url: target, foreign } = _resolve(input, options);
+  // Away from the base origin, the client's credentials, headers and query stay home: only the call's go.
+  const scoped = foreign && own ? own : options;
+  _appendQuery(target.searchParams, scoped.query);
+  const href = target.href;
+  const headers = _headersOf(scoped);
   /** @type {HttpBody | undefined} */
   let body = options.body;
   if (options.json !== undefined) {
@@ -353,9 +508,9 @@ const _send = async (input, options) => {
 
   for (let attempt = 1; ; attempt++) {
     /** @type {HttpRequestConfig} */
-    const config = { url: _buildURL(input, options), method, headers: { ...headers }, body, attempt };
+    const config = { url: href, method, headers: { ...headers }, body, attempt };
     if (hooks?.beforeRequest) for (const hook of hooks.beforeRequest) await hook(config);
-    if (signal?.aborted) throw new AbortError(`Request aborted: ${method} ${config.url}`, { cause: signal.reason });
+    if (signal?.aborted) throw new AbortError(`Request aborted: ${method} ${_shown(config.url)}`, { cause: signal.reason });
 
     const controller = new AbortController();
     let timedOut = false;
@@ -381,12 +536,11 @@ const _send = async (input, options) => {
     let data;
     let streaming = false;
     try {
-      const sent = method === "GET" || method === "HEAD" ? undefined : config.body;
-      /** @type {any} */
-      const init = { method, headers: config.headers, body: sent, signal: controller.signal, redirect: options.redirect ?? "follow" };
-      if (_isStream(sent)) init.duplex = "half";
-      res = await fetch(config.url, init);
-      // An error status is read whole, so the error can show what the server said.
+      res = await _follow(config, {
+        method, redirect, sensitive, signal: controller.signal,
+        body: method === "GET" || method === "HEAD" ? undefined : config.body,
+      });
+      // An error status is read, so the error can show what the server said.
       streaming = options.responseType === "stream" && (res.ok || options.throwHttpErrors === false);
       if (method === "HEAD") {
         data = undefined;
@@ -398,13 +552,22 @@ const _send = async (input, options) => {
         stream.once("close", release);
         data = stream;
       } else {
-        data = await _readBody(res, options.responseType === "stream" ? "auto" : options.responseType, options.onDownloadProgress);
+        // An error answer to a stream request: only its start, the rest could be any size.
+        const errorOnly = options.responseType === "stream";
+        data = await _readBody(res, {
+          type: errorOnly ? "auto" : options.responseType,
+          onProgress: options.onDownloadProgress,
+          limit: errorOnly ? Math.min(ERROR_BODY_LIMIT, maxSize) : maxSize,
+          truncate: errorOnly,
+          method,
+          abort: () => controller.abort(),
+        });
       }
     } catch (error) {
       release();
-      if (signal?.aborted) throw new AbortError(`Request aborted: ${method} ${config.url}`, { cause: signal.reason });
+      if (signal?.aborted) throw new AbortError(`Request aborted: ${method} ${_shown(config.url)}`, { cause: signal.reason });
       if (timedOut) {
-        failure = new TimeoutError(`Request timed out after ${timeoutMs}ms: ${method} ${config.url}`, { timeout: timeoutMs, cause: error });
+        failure = new TimeoutError(`Request timed out after ${timeoutMs}ms: ${method} ${_shown(config.url)}`, { timeout: timeoutMs, cause: error });
       } else if (error instanceof HttpError) {
         throw error;
       } else {
@@ -455,7 +618,7 @@ const _send = async (input, options) => {
     try {
       await sleep(wait, signal);
     } catch (error) {
-      throw new AbortError(`Request aborted: ${method} ${config.url}`, { cause: signal?.reason ?? error });
+      throw new AbortError(`Request aborted: ${method} ${_shown(config.url)}`, { cause: signal?.reason ?? error });
     }
   }
 };
@@ -479,14 +642,15 @@ const _client = (defaults) => {
   const merged = (/** @type {HttpOptions | undefined} */ options) => (options ? _mergeOptions(defaults, options) : defaults);
   /** @type {HttpClient} */
   const client = {
-    request: (url, options) => _send(url, merged(options)),
-    get: (url, options) => _send(url, { ...merged(options), method: "GET" }),
-    head: (url, options) => _send(url, { ...merged(options), method: "HEAD" }),
-    delete: (url, options) => _send(url, { ...merged(options), method: "DELETE" }),
-    post: (url, data, options) => _send(url, { ..._withData(data, merged(options)), method: "POST" }),
-    put: (url, data, options) => _send(url, { ..._withData(data, merged(options)), method: "PUT" }),
-    patch: (url, data, options) => _send(url, { ..._withData(data, merged(options)), method: "PATCH" }),
-    download: (url, destination, options) => download(url, destination, merged(options)),
+    // The call's own options go along too: they alone may leave the base origin.
+    request: (url, options) => _send(url, merged(options), options ?? {}),
+    get: (url, options) => _send(url, { ...merged(options), method: "GET" }, options ?? {}),
+    head: (url, options) => _send(url, { ...merged(options), method: "HEAD" }, options ?? {}),
+    delete: (url, options) => _send(url, { ...merged(options), method: "DELETE" }, options ?? {}),
+    post: (url, data, options) => _send(url, { ..._withData(data, merged(options)), method: "POST" }, options ?? {}),
+    put: (url, data, options) => _send(url, { ..._withData(data, merged(options)), method: "PUT" }, options ?? {}),
+    patch: (url, data, options) => _send(url, { ..._withData(data, merged(options)), method: "PATCH" }, options ?? {}),
+    download: (url, destination, options) => _download(url, destination, merged(options), options ?? {}),
     extend: (more) => _client(_mergeOptions(defaults, more)),
     defaults: Object.freeze({ ...defaults }),
   };
@@ -617,7 +781,9 @@ function del(url, options = {}) {
  * Downloads to a file as a stream, so memory stays flat whatever the size.
  * Folders are created. The data goes to a temporary file that takes the
  * final name once complete, so a failed or interrupted download never
- * leaves half a file where you expect a whole one.
+ * leaves half a file where you expect a whole one. That temporary file has
+ * a random name and is only readable and writable by you (mode `0o600`),
+ * which the final file keeps. `maxResponseSize` doesn't apply here.
  *
  * `timeout` is how long the server gets to start answering; the transfer
  * itself can take as long as it needs. Use `signal` to put a limit on it.
@@ -633,16 +799,28 @@ function del(url, options = {}) {
  * @returns {Promise<{ path: string, size: number }>} The absolute path and size in bytes.
  * @throws {HttpError | TimeoutError | AbortError}
  */
-async function download(url, destination, options = {}) {
+function download(url, destination, options = {}) {
+  return _download(url, destination, options);
+}
+
+/**
+ * @param {string | URL} url
+ * @param {string} destination
+ * @param {HttpOptions} options
+ * @param {HttpOptions} [own] Only what the call gave, when it comes from a client.
+ * @returns {Promise<{ path: string, size: number }>}
+ */
+const _download = async (url, destination, options, own) => {
   const fs = require("node:fs");
   const nodePath = require("node:path");
   const { Transform } = require("node:stream");
   const { pipeline } = require("node:stream/promises");
   const target = nodePath.resolve(destination);
   fs.mkdirSync(nodePath.dirname(target), { recursive: true });
-  const res = await _send(url, { ...options, responseType: "stream", throwHttpErrors: true, onDownloadProgress: undefined, schema: undefined });
+  const res = await _send(url, { ...options, responseType: "stream", throwHttpErrors: true, onDownloadProgress: undefined, schema: undefined }, own);
   const total = Number(res.headers["content-length"]) || undefined;
-  const partial = `${target}.${process.pid}-${Date.now().toString(36)}.part`;
+  // A name nobody can guess, created by us alone ("wx"): a link planted there can't make us write elsewhere.
+  const partial = `${target}.${require("node:crypto").randomBytes(8).toString("hex")}.part`;
   let size = 0;
   const counter = new Transform({
     transform(chunk, _encoding, callback) {
@@ -651,12 +829,18 @@ async function download(url, destination, options = {}) {
       callback(null, chunk);
     },
   });
+  const file = fs.createWriteStream(partial, { flags: "wx", mode: 0o600 });
+  let created = false;
+  file.once("open", () => {
+    created = true;
+  });
   try {
-    await pipeline(/** @type {import("node:stream").Readable} */ (res.data), counter, fs.createWriteStream(partial), { signal: options.signal });
+    await pipeline(/** @type {import("node:stream").Readable} */ (res.data), counter, file, { signal: options.signal });
     fs.renameSync(partial, target);
   } catch (error) {
-    fs.rmSync(partial, { force: true });
-    if (options.signal?.aborted) throw new AbortError(`Download aborted: ${String(url)}`, { cause: error });
+    // A file that was already there isn't ours to remove.
+    if (created) fs.rmSync(partial, { force: true });
+    if (options.signal?.aborted) throw new AbortError(`Download aborted: ${_shown(url)}`, { cause: error });
     /** @type {any} */
     const cause = error;
     // What went wrong on the disk names a file and stays as it is; the rest is the connection.
@@ -664,7 +848,7 @@ async function download(url, destination, options = {}) {
     throw new HttpError(`Download interrupted (${cause?.cause?.code ?? cause?.code ?? cause?.message ?? String(error)}): ${res.url}`, { status: 0, url: res.url, method: "GET", code: "ERR_NETWORK", cause: error });
   }
   return { path: target, size };
-}
+};
 
 /**
  * Creates a client with default options. Options passed to each call are

@@ -65,6 +65,9 @@ const { intl, preciseSum } = require("./internal/shared.js");
 const _fn = (iteratee) => {
   if (typeof iteratee === "function") return /** @type {(item: any, index: number) => any} */ (iteratee);
   if (typeof iteratee === "string" || typeof iteratee === "number" || typeof iteratee === "symbol") {
+    // Members of Object.prototype (`__proto__`, `constructor`...) are not data, unless the item has its own.
+    // Getters of a class still work.
+    if (iteratee in Object.prototype) return (item) => (item == null || !Object.hasOwn(item, iteratee) ? undefined : item[iteratee]);
     return (item) => (item == null ? undefined : item[iteratee]);
   }
   return (item) => item;
@@ -384,6 +387,7 @@ function partition(array, predicate) {
  * @returns {Array<T[K]>}
  */
 function pluck(array, key) {
+  if (key in Object.prototype) return array.map(_fn(key));
   return array.map((item) => (item == null ? /** @type {T[K]} */ (/** @type {unknown} */ (undefined)) : item[key]));
 }
 
@@ -729,7 +733,8 @@ function flatten(array, depth) {
 }
 
 /**
- * Pairs items by position. Shorter arrays leave `undefined` holes.
+ * Pairs items by position. Shorter arrays leave `undefined` holes, and
+ * values that are not arrays count as empty ones.
  *
  * @example
  * arr.zip(["a", "b"], [1, 2]); // [["a", 1], ["b", 2]]
@@ -743,7 +748,8 @@ function zip(...arrays) {
 }
 
 /**
- * The opposite of `zip()`: rows become columns.
+ * The opposite of `zip()`: rows become columns. Rows that are not arrays
+ * count as empty ones.
  *
  * @example
  * arr.unzip([["a", 1], ["b", 2]]); // [["a", "b"], [1, 2]]
@@ -753,15 +759,17 @@ function zip(...arrays) {
  * @returns {Array<Array<T | undefined>>}
  */
 function unzip(tuples) {
-  return _zip(tuples);
+  return Array.isArray(tuples) ? _zip(tuples) : [];
 }
 
 /**
  * @template T
- * @param {ReadonlyArray<ReadonlyArray<T>>} arrays
+ * @param {ReadonlyArray<ReadonlyArray<T>>} input
  * @returns {Array<Array<T | undefined>>}
  */
-const _zip = (arrays) => {
+const _zip = (input) => {
+  // Only real arrays: a parsed `{ "length": 1e9 }` would allocate a billion rows.
+  const arrays = input.map((array) => (Array.isArray(array) ? array : []));
   let size = 0;
   for (const array of arrays) if (array.length > size) size = array.length;
   /** @type {Array<Array<T | undefined>>} */
