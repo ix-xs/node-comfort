@@ -260,7 +260,14 @@ const _mergeOptions = (base, extra) => {
  * @returns {{ url: URL, foreign: boolean }}
  */
 const _resolve = (input, options) => {
-  const base = options.baseURL ? new URL(String(options.baseURL).replace(/\/*$/, "/")) : undefined;
+  let base;
+  if (options.baseURL) {
+    // One slash at the end, so that relative paths go under it.
+    const text = String(options.baseURL);
+    let end = text.length;
+    while (end > 0 && text[end - 1] === "/") end--;
+    base = new URL(`${text.slice(0, end)}/`);
+  }
   let url;
   let absolute = true;
   if (typeof input !== "string") {

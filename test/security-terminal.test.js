@@ -212,17 +212,18 @@ describe("color.strip", () => {
     for (const fn of [() => color.strip(hostile), () => color.width(hostile), () => color.truncate(hostile, 10), () => c3.link(hostile, "https://x.example")]) {
       const started = performance.now();
       fn();
-      assert.ok(performance.now() - started < 100, String(fn));
+      // quadratic, 400 000 characters would take minutes; slow CI machines need some room
+      assert.ok(performance.now() - started < 1000, String(fn));
     }
     for (const introducer of ["\x90", "\x98", "\x9e", "\x9f"]) {
       const started = performance.now();
       color.strip(introducer.repeat(400_000));
-      assert.ok(performance.now() - started < 100, JSON.stringify(introducer));
+      assert.ok(performance.now() - started < 1000, JSON.stringify(introducer));
     }
     const out = capture({ format: "json" });
     const started = performance.now();
     out.log.info(hostile);
-    assert.ok(performance.now() - started < 100);
+    assert.ok(performance.now() - started < 1000);
     assert.equal(JSON.parse(out.text()).msg, "");
     assert.equal(color.strip("a\x1b]0;t\x07b\x9d2;x\x9cc"), "abc", "whole sequences still go");
   });

@@ -38,8 +38,8 @@ listed under "Changed". The package also makes use of what Node.js 26 brings.
 - **Denial of service**: a few hundred bytes could block the process for seconds or minutes in
   `isMimeType()`, the duration parser (`"5m"`, behind every `timeout`, `ttl` and `expiresIn`), `time.add()`,
   the case converters of `str`, the paths of `obj`, a recursive `schema.union()`, `.env` comments and
-  expansion, `time.parse()`, `obj.set()` with a key like `"a.4000000000"` and `arr.unzip()`. All of them are
-  now linear.
+  expansion, `time.parse()`, `obj.set()` with a key like `"a.4000000000"`, `arr.unzip()`, `num.parseBytes()`
+  and `fs.sanitizeFilename()`. All of them are now linear.
 - **logger and cli**: a logged value could send escape sequences to the terminal (write to the clipboard,
   change the title, clear the screen), forge a log line with `\r` or `\n`, or be read as markup. They are now
   shown as text, and the colors and links you add with `nc.color` still work. `redact` also covers `Map`,
