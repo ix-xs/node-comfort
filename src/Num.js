@@ -704,7 +704,7 @@ function parse(value, fallback = NaN) {
 function parseBytes(value, options = {}) {
   if (typeof value === "number") return value;
   // Trimmed first: spaces at both ends of the pattern would be tried against each other.
-  const match = /^([-+]?(?:\d+\.?\d*|\.\d+))\s*([kmgtpezy]?)(i?)(b?)(?:ytes?)?$/i.exec(String(value).trim());
+  const match = /^([-+]?(?:\d+(?:\.\d*)?|\.\d+))\s*([kmgtpezy]?)(i?)(b?)(?:ytes?)?$/i.exec(String(value).trim());
   if (!match) return NaN;
   const [, amount, prefix, iec] = match;
   const base = iec || options.binary !== false ? 1024 : 1000;
