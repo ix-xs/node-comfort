@@ -6,6 +6,14 @@ updates:
     directory: /
     schedule:
       interval: weekly
+    ignore:
+      # The build scripts use the compiler API of TypeScript 6, which TypeScript 7 no
+      # longer ships (CI still checks the package with TypeScript 7), and the types of
+      # Node.js stay those of the oldest version the package supports.
+      - dependency-name: typescript
+        update-types: ["version-update:semver-major"]
+      - dependency-name: "@types/node"
+        update-types: ["version-update:semver-major"]
     groups:
       tooling:
         patterns: ["*"]
