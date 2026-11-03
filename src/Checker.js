@@ -15,13 +15,24 @@ const shared = require("./internal/shared.js");
 
 /** @type {typeof import("node:net") | undefined} */
 let _net;
+/** @type {typeof import("node:url") | undefined} */
+let _url;
 
-const EMAIL = /^(?!\.)(?!.*\.\.)[\p{L}\p{N}.!#$%&'*+/=?^_`{|}~-]{1,64}(?<!\.)@(?:[\p{L}\p{N}](?:[\p{L}\p{N}-]{0,61}[\p{L}\p{N}])?\.)+(?:\p{L}{2,}|xn--[a-z0-9-]{2,})$/iu;
+// No "i" flag: with "u", it would let the Kelvin sign match "k" and the long s match "s".
+const EMAIL = /^(?!\.)(?!.*\.\.)[\p{L}\p{N}.!#$%&'*+/=?^_`{|}~-]{1,64}(?<!\.)@(?:[\p{L}\p{N}](?:[\p{L}\p{N}-]{0,61}[\p{L}\p{N}])?\.)+(?:\p{L}{2,}|[xX][nN]--[A-Za-z0-9-]{2,})$/u;
+// The same rules for ASCII addresses, the common case, which need no further check.
+const EMAIL_ASCII = /^(?!\.)(?!.*\.\.)[A-Za-z0-9.!#$%&'*+/=?^_`{|}~-]{1,64}(?<!\.)@(?:[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?\.)+(?:[A-Za-z]{2,}|[xX][nN]--[A-Za-z0-9-]{2,})$/;
 const TLD = /\.(?:[a-z]{2,}|xn--[a-z0-9-]{2,})\.?$/i;
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-([1-8])[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 const UUID_NIL_OR_MAX = /^(?:0{8}-0{4}-0{4}-0{4}-0{12}|f{8}-f{4}-f{4}-f{4}-f{12})$/i;
 const ISO_DATE = /^(\d{4})-(\d{2})-(\d{2})(?:[T ](\d{2}):(\d{2})(?::(\d{2})(?:\.\d{1,9})?)?(?:Z|([+-])(\d{2}):?(\d{2}))?)?$/;
 const HOST_LABEL = /^[\p{L}\p{N}](?:[\p{L}\p{N}-]{0,61}[\p{L}\p{N}])?$/u;
+// Characters a URL parser silently drops, encodes or rewrites.
+// The apostrophe is legal, as in /wiki/Ender's_Game.
+const URL_UNSAFE = /[\x00-\x20\x7f<>"`\\]/;
+// Quoted and bare parameter values can't overlap, so there is nothing to backtrack into.
+const MIME_TYPE = /^[a-z0-9][a-z0-9!#$&^_.+-]*\/[a-z0-9][a-z0-9!#$&^_.+-]*(?:\s*;\s*[a-z0-9-]+=(?:"[^"\r\n]*"|[^;\s"]+))*$/i;
+const DATA_URL = /^data:(?:[a-z0-9!#$&^_.+-]+\/[a-z0-9!#$&^_.+-]+)?(?:;[a-z0-9-]+=[^;,]*)*(?:;base64)?,/i;
 const DAYS_IN_MONTH = [31, 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31];
 
 /**
@@ -57,6 +68,12 @@ const DAYS_IN_MONTH = [31, 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31];
  * Options for `isBase64()`.
  * @typedef {object} IsBase64Options
  * @property {boolean} [urlSafe] Expect the URL-safe alphabet (`-` and `_`), padding optional.
+ */
+
+/**
+ * Options for `isDataURL()`.
+ * @typedef {object} IsDataURLOptions
+ * @property {string[]} [types] Accepted media types, like `["image/png", "image/jpeg"]`, case ignored. A URL without a type, like `data:,Hello`, counts as `text/plain`. Without this option, any type passes.
  */
 
 /**
@@ -580,7 +597,10 @@ function isOneOf(value, allowed) {
 /**
  * Does it look like an email address? The rules are practical rather than
  * the full RFC: one `@`, no stray dots, a real top-level domain.
- * International addresses are accepted.
+ * International addresses are accepted, but not look-alike characters such
+ * as the Kelvin sign in the domain. A valid address can still contain
+ * quotes, `&`, `|` or backticks: it is not safe to put unescaped into HTML
+ * or a shell command.
  *
  * @example
  * nc.isEmail("jose@exemple.fr");     // true
@@ -591,11 +611,19 @@ function isOneOf(value, allowed) {
  * @returns {value is string}
  */
 function isEmail(value) {
-  return typeof value === "string" && value.length <= 254 && EMAIL.test(value);
+  if (typeof value !== "string" || value.length > 254) return false;
+  if (EMAIL_ASCII.test(value)) return true;
+  if (shared.ASCII.test(value) || !EMAIL.test(value)) return false;
+  // Compatibility characters (Kelvin sign, fullwidth letters...) become other letters in DNS.
+  const domain = value.slice(value.lastIndexOf("@") + 1);
+  return domain === domain.normalize("NFKC");
 }
 
 /**
  * Is it an absolute URL with an allowed protocol (http and https by default)?
+ * The text must already be clean: spaces, control characters, double
+ * quotes, backticks, `<`, `>` and backslashes are refused, even where the URL
+ * parser would quietly fix them. An apostrophe is fine.
  *
  * @example
  * nc.isURL("https://example.com/a?b=1");                 // true
@@ -607,7 +635,7 @@ function isEmail(value) {
  * @returns {value is string}
  */
 function isURL(value, options = {}) {
-  if (typeof value !== "string") return false;
+  if (typeof value !== "string" || URL_UNSAFE.test(value)) return false;
   const url = URL.parse(value);
   if (!url) return false;
   const protocols = options.protocols;
@@ -891,6 +919,8 @@ function isJWT(value) {
 /**
  * Is it a host name, like `example.com`, `api.internal` or `localhost`?
  * International names are accepted. IP addresses aren't: see `isIP`.
+ * Lengths are counted the way DNS sees them, once converted to ASCII
+ * (`xn--`): 63 bytes per label, 253 in all.
  *
  * @example
  * nc.isHostname("api.example.com");                    // true
@@ -907,6 +937,11 @@ function isHostname(value, options = {}) {
   const labels = value.split(".");
   if (!labels.every((label) => HOST_LABEL.test(label))) return false;
   if (/^\d+$/.test(labels[labels.length - 1])) return false;
+  if (!shared.ASCII.test(value)) {
+    // An international label takes more room once encoded: "é" x 63 is 67 bytes long.
+    const ascii = (_url ??= require("node:url")).domainToASCII(value);
+    if (ascii === "" || ascii.length > 253 || ascii.split(".").some((label) => label.length > 63)) return false;
+  }
   return !options.requireTld || (labels.length > 1 && TLD.test(value));
 }
 
@@ -991,17 +1026,25 @@ function isULID(value) {
 }
 
 /**
- * Is it a `data:` URL, like an inline image?
+ * Is it a `data:` URL, like an inline image? Only the header is checked,
+ * not the data. Without `types`, any media type passes, `text/html` and
+ * `image/svg+xml` included, and both can run scripts.
  *
  * @example
  * nc.isDataURL("data:image/png;base64,iVBORw0KGgo="); // true
  * nc.isDataURL("data:,Hello");                         // true
+ * nc.isDataURL("data:text/html,<p>Hi</p>", { types: ["image/png"] }); // false
  *
  * @param {unknown} value
+ * @param {IsDataURLOptions} [options]
  * @returns {value is string}
  */
-function isDataURL(value) {
-  return typeof value === "string" && /^data:(?:[a-z0-9!#$&^_.+-]+\/[a-z0-9!#$&^_.+-]+)?(?:;[a-z0-9-]+=[^;,]*)*(?:;base64)?,/i.test(value);
+function isDataURL(value, options = {}) {
+  if (typeof value !== "string" || !DATA_URL.test(value)) return false;
+  const types = options.types;
+  if (!types) return true;
+  const type = value.slice(5, value.search(/[;,]/)).toLowerCase() || "text/plain";
+  return types.some((allowed) => allowed.toLowerCase() === type);
 }
 
 /**
@@ -1016,7 +1059,7 @@ function isDataURL(value) {
  * @returns {value is string}
  */
 function isMimeType(value) {
-  return typeof value === "string" && /^[a-z0-9][a-z0-9!#$&^_.+-]*\/[a-z0-9][a-z0-9!#$&^_.+-]*(?:\s*;\s*[a-z0-9-]+=(?:"[^"]*"|[^;\s]+))*$/i.test(value);
+  return typeof value === "string" && MIME_TYPE.test(value);
 }
 
 /**
@@ -1071,6 +1114,11 @@ function isLocale(value) {
  */
 function isCron(value) {
   if (typeof value !== "string") return false;
+  // "*/5/x" is not a step and "1-5-x" is not a range, even though the parser stops reading early.
+  for (const part of value.trim().split(/[\s,]+/)) {
+    const step = part.split("/");
+    if (step.length > 2 || step[0].split("-").length > 2) return false;
+  }
   try {
     shared.parseCron(value);
     return true;

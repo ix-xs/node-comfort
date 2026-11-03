@@ -200,9 +200,64 @@ class ValidationError extends NodeComfortError {
   }
 }
 
+// Query parameters whose value is likely a secret: api_key, access_token, sig, code...
+const SECRET_PARAM = /key|token|secret|password|passwd|pwd|auth|sig|signature|session|credential|code/i;
+// Headers `HttpError.toJSON()` leaves out: cookies and credentials, either way.
+const SECRET_HEADERS = new Set(["set-cookie", "cookie", "authorization", "proxy-authorization", "www-authenticate", "proxy-authenticate", "x-api-key", "x-auth-token", "api-key"]);
+// A body larger than this, in bytes, stays out of `HttpError.toJSON()`.
+const JSON_DATA_LIMIT = 4096;
+
+/** @param {string} name */
+const _decodeName = (name) => {
+  try {
+    return decodeURIComponent(name.replace(/\+/g, " "));
+  } catch {
+    return name;
+  }
+};
+
+/**
+ * A URL with `***` for the values of the query parameters that look secret.
+ * The rest is left exactly as it was.
+ * @param {string} url
+ * @returns {string}
+ */
+const _maskURL = (url) => {
+  const start = url.indexOf("?");
+  if (start === -1) return url;
+  const hash = url.indexOf("#", start);
+  const end = hash === -1 ? url.length : hash;
+  const query = url.slice(start + 1, end).split("&").map((pair) => {
+    const equals = pair.indexOf("=");
+    if (equals === -1 || equals === pair.length - 1) return pair;
+    const name = pair.slice(0, equals);
+    return SECRET_PARAM.test(_decodeName(name)) ? `${name}=***` : pair;
+  });
+  return `${url.slice(0, start + 1)}${query.join("&")}${url.slice(end)}`;
+};
+
+/**
+ * @param {unknown} data
+ * @returns {number} Roughly how many bytes it takes as JSON.
+ */
+const _sizeOf = (data) => {
+  if (data === undefined || data === null) return 0;
+  if (typeof data === "string") return Buffer.byteLength(data);
+  if (ArrayBuffer.isView(data) || data instanceof ArrayBuffer) return data.byteLength;
+  try {
+    return Buffer.byteLength(JSON.stringify(data) ?? "");
+  } catch {
+    return Infinity;
+  }
+};
+
 /**
  * Thrown by `nc.http` when the response status isn't 2xx (unless you pass
  * `throwHttpErrors: false`), and for network failures (`status` 0).
+ *
+ * The values of query parameters that look secret (`api_key`, `token`,
+ * `sig`...) read `***` in the message and in `url`, so the error can go to
+ * logs as it is.
  *
  * @example
  * try {
@@ -213,23 +268,39 @@ class ValidationError extends NodeComfortError {
  */
 class HttpError extends NodeComfortError {
   /**
-   * @param {string} message
+   * @param {string} message URLs in it have their secret query values masked.
    * @param {NodeComfortErrorOptions & { status?: number, statusText?: string, url?: string, method?: string, headers?: Record<string, string>, data?: unknown }} [options]
    */
   constructor(message, options = {}) {
-    super(message, { ...options, code: options.code ?? "ERR_HTTP" });
+    // The lookbehind keeps it linear on a long "a.a.a..." (the server picks statusText).
+    super(String(message).replace(/(?<![a-z\d+.-])[a-z][a-z\d+.-]*:\/\/\S+/gi, _maskURL), { ...options, code: options.code ?? "ERR_HTTP" });
     /** HTTP status, like `404`. `0` when no response came back. */
     this.status = options.status ?? 0;
     /** HTTP status text, like `"Not Found"`. */
     this.statusText = options.statusText ?? "";
-    /** The requested URL. */
-    this.url = options.url ?? "";
+    /** The requested URL, with `***` for the values of query parameters that look secret. */
+    this.url = _maskURL(String(options.url ?? ""));
     /** The HTTP method, like `"GET"`. */
     this.method = options.method ?? "GET";
     /** Response headers, with lower-cased names. */
     this.headers = options.headers ?? {};
     /** The response body: parsed JSON when possible, text otherwise. */
     this.data = options.data;
+  }
+
+  /**
+   * Like the base `toJSON()`, without what shouldn't reach a log or an API
+   * response: cookie and credential headers, and a body larger than 4 KB.
+   * `error.headers` and `error.data` themselves stay whole.
+   *
+   * @override
+   * @returns {Record<string, unknown>}
+   */
+  toJSON() {
+    const out = super.toJSON();
+    out.headers = Object.fromEntries(Object.entries(this.headers ?? {}).filter(([name]) => !SECRET_HEADERS.has(name.toLowerCase())));
+    if (_sizeOf(this.data) > JSON_DATA_LIMIT) delete out.data;
+    return out;
   }
 }
 

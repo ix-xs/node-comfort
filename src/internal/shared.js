@@ -43,7 +43,20 @@ const UNIT_ALIASES = {
  * @param {string} unit
  * @returns {keyof typeof MS | "M" | "y" | undefined}
  */
-const unitOf = (unit) => UNIT_ALIASES[unit] ?? UNIT_ALIASES[unit.toLowerCase()];
+const unitOf = (unit) => {
+  // Own keys only: "constructor" or "toString" are not units.
+  if (Object.hasOwn(UNIT_ALIASES, unit)) return UNIT_ALIASES[unit];
+  const lower = unit.toLowerCase();
+  return Object.hasOwn(UNIT_ALIASES, lower) ? UNIT_ALIASES[lower] : undefined;
+};
+
+// Longer texts are refused, and never cached: no real duration or cron
+// expression comes close, so they can only be junk or an attack.
+const MAX_TEXT = 256;
+
+// One "1.5h" of a text duration, with the spaces, commas and "and" around it.
+// Sticky, so the tokens must follow each other and cover the whole text.
+const DURATION_TOKEN = /(?:[\s,]|and)*(-?(?:\d+(?:\.\d+)?|\.\d+))\s*([a-zA-Z]+)(?:[\s,]|and)*/y;
 
 /** @type {Map<string, number | null>} */
 const _durations = new Map();
@@ -53,6 +66,7 @@ const _durations = new Map();
  * @returns {number | null}
  */
 const _readDuration = (text) => {
+  if (text.length > MAX_TEXT) return null;
   if (/^[-+]?\d+(?:\.\d+)?$/.test(text)) return Number(text);
 
   const iso = /^([-+])?P(?:(\d+(?:[.,]\d+)?)W)?(?:(\d+(?:[.,]\d+)?)D)?(?:T(?:(\d+(?:[.,]\d+)?)H)?(?:(\d+(?:[.,]\d+)?)M)?(?:(\d+(?:[.,]\d+)?)S)?)?$/i.exec(text);
@@ -70,18 +84,16 @@ const _readDuration = (text) => {
     return sign === "-" ? -total : total;
   }
 
-  const regex = /(-?\d*\.?\d+)\s*([a-zA-Z]+)/g;
   let total = 0;
-  let consumed = "";
   let match;
-  while ((match = regex.exec(text)) !== null) {
+  DURATION_TOKEN.lastIndex = 0;
+  while (DURATION_TOKEN.lastIndex < text.length && (match = DURATION_TOKEN.exec(text)) !== null) {
     const unit = unitOf(match[2]);
     if (!unit || unit === "M" || unit === "y") return null;
     total += Number(match[1]) * MS[unit];
-    consumed += match[0];
   }
-  if (!consumed || consumed.replace(/\s+/g, "") !== text.replace(/[\s,]+|and/g, "")) return null;
-  return total;
+  // A token that doesn't fit stops the loop before the end.
+  return match && DURATION_TOKEN.lastIndex === text.length ? total : null;
 };
 
 /**
@@ -97,8 +109,10 @@ const parseDuration = (input) => {
   const text = input.trim();
   const result = text ? _readDuration(text) : null;
   // Durations are almost always literals, so a handful of entries covers a whole program.
-  if (_durations.size >= 500) _durations.clear();
-  _durations.set(input, result);
+  if (input.length <= MAX_TEXT) {
+    if (_durations.size >= 500) _durations.clear();
+    _durations.set(input, result);
+  }
   return result;
 };
 
@@ -254,6 +268,30 @@ const _identity = (value) => {
 };
 
 /**
+ * The replacer of `_keyPart()`. It reads the raw value (JSON has already
+ * called `toJSON()` on the one it passes) and tags it, so `"u"` and
+ * `undefined`, `"i1"` and `1n`, or a date and its ISO string stay apart.
+ * Only plain objects and arrays are read by content: a `Set`, a `Map` or a
+ * class instance is keyed by identity, like at the top level.
+ * @this {any}
+ * @param {string} key
+ * @returns {unknown}
+ */
+const _replacer = function(key) {
+  const value = this[key];
+  switch (typeof value) {
+    case "string": return `s${value}`;
+    case "number": return Number.isFinite(value) && !Object.is(value, -0) ? value : _keyPart(value);
+    case "boolean": return value;
+    case "object": {
+      if (value === null || Array.isArray(value) || isPlainObject(value)) return value;
+      return types.isDate(value) ? `d${value.getTime()}` : `O${_identity(value)}`;
+    }
+    default: return _keyPart(value);
+  }
+};
+
+/**
  * @param {unknown} value
  * @returns {string}
  */
@@ -276,8 +314,9 @@ const _keyPart = (value) => {
       if (types.isDate(object)) return `d${object.getTime()}`;
       if (!Array.isArray(object) && !isPlainObject(object)) return `O${_identity(object)}`;
       try {
-        // The replacer keeps what JSON drops or refuses: undefined, bigint, functions, symbols.
-        return `j${JSON.stringify(object, (_, v) => (v !== null && typeof v === "object" ? v : typeof v === "string" || typeof v === "number" || typeof v === "boolean" ? v : _keyPart(v)))}`;
+        // Every value comes out tagged: strings start with "s", everything JSON
+        // would drop or change (undefined, bigint, dates, NaN...) has its own tag.
+        return `j${JSON.stringify(object, _replacer)}`;
       } catch {
         return `O${_identity(object)}`;
       }
@@ -328,7 +367,9 @@ const _cronSpecs = new Map();
 const parseCron = (expression) => {
   const cached = _cronSpecs.get(expression);
   if (cached) return cached;
-  const text = CRON_MACROS[expression.trim().toLowerCase()] ?? expression.trim();
+  const trimmed = expression.trim();
+  const macro = trimmed.toLowerCase();
+  const text = Object.hasOwn(CRON_MACROS, macro) ? CRON_MACROS[macro] : trimmed;
   const fields = text.split(/\s+/);
   if (fields.length !== 5 && fields.length !== 6) throw new SyntaxError(`Invalid cron expression "${expression}": expected 5 or 6 fields`);
   if (fields.length === 5) fields.unshift("0");
@@ -337,6 +378,8 @@ const parseCron = (expression) => {
     /** @type {Set<number>} */
     const values = new Set();
     for (const part of field.split(",")) {
+      // "*/5/x" or "1-5-x" is a typo, not a step or a range with something extra.
+      if (part.split("/").length > 2 || part.split("/")[0].split("-").length > 2) throw new SyntaxError(`Invalid field "${part}" in cron expression "${expression}"`);
       const [rangePart, stepPart] = part.split("/");
       const step = stepPart === undefined ? 1 : Number(stepPart);
       if (!Number.isInteger(step) || step < 1) throw new SyntaxError(`Invalid step "${part}" in cron expression "${expression}"`);
@@ -379,8 +422,10 @@ const parseCron = (expression) => {
     anyWeekday: fields[5] === "*" || fields[5] === "?",
     lastDay,
   };
-  if (_cronSpecs.size >= 200) _cronSpecs.clear();
-  _cronSpecs.set(expression, spec);
+  if (expression.length <= MAX_TEXT) {
+    if (_cronSpecs.size >= 200) _cronSpecs.clear();
+    _cronSpecs.set(expression, spec);
+  }
   return spec;
 };
 

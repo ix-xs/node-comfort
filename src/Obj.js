@@ -102,14 +102,83 @@ const _NOT_FOUND = Symbol("not-found");
 
 const _isPlain = shared.isPlainObject;
 
+/**
+ * What to throw when a walk failed: running out of stack on data nested
+ * thousands of levels deep becomes an error that says so.
+ * @param {unknown} error
+ * @param {string} name
+ * @returns {unknown}
+ */
+const _nestedError = (error, name) =>
+  error instanceof RangeError && /call stack/i.test(error.message) ? new RangeError(`obj.${name}(): the object is nested too deeply`, { cause: error }) : error;
+
 /** @param {ReadonlyArray<string | number>} keys */
 const _isSafePath = (keys) => {
   for (let i = 0; i < keys.length; i++) if (_UNSAFE.has(String(keys[i]))) return false;
   return true;
 };
 
+/** After this many missing items in a row, an array is walked by its keys. */
+const _MAX_HOLES = 1024;
+
+/**
+ * The indexes an array holds after `from`, in order.
+ * @param {readonly unknown[]} array
+ * @param {number} from
+ * @returns {number[]}
+ */
+const _indexesAfter = (array, from) => {
+  /** @type {number[]} */
+  const out = [];
+  for (const key of Object.keys(array)) {
+    const index = Number(key);
+    if (index > from && String(index) === key) out.push(index);
+  }
+  return out;
+};
+
+/**
+ * An array to fill up to `length`. Past `_MAX_INDEX` it starts empty: it
+ * may be sparse, and allocating every slot up front would cost far more
+ * than its content.
+ * @param {number} length
+ * @returns {any[]}
+ */
+const _newArray = (length) => (length > _MAX_INDEX ? [] : new Array(length));
+
+/**
+ * Calls `fn` on each item an array holds, in order, skipping holes. A
+ * sparse array is walked by its keys rather than by every index.
+ * @param {readonly unknown[]} array
+ * @param {(item: any, index: number) => void} fn
+ */
+const _forEachItem = (array, fn) => {
+  let holes = 0;
+  for (let i = 0; i < array.length; i++) {
+    if (i in array) {
+      fn(array[i], i);
+      holes = 0;
+    } else if (++holes > _MAX_HOLES) {
+      for (const index of _indexesAfter(array, i)) fn(array[index], index);
+      return;
+    }
+  }
+};
+
 /** @type {Map<string, { keys: Array<string | number>, safe: boolean }>} */
 const _paths = new Map();
+
+/** Longer paths are not remembered: they come from data, not from code. */
+const _MAX_CACHED_PATH = 256;
+
+/** An array index up to this creates an array; a larger one creates an object. */
+const _MAX_INDEX = 10_000;
+
+/**
+ * Does the key after this one ask for an array?
+ * @param {string | number} next
+ */
+const _wantsArray = (next) => (typeof next === "number" ? Number.isInteger(next) && next >= 0 && next <= _MAX_INDEX : typeof next === "string" && /^\d{1,5}$/.test(next) && Number(next) <= _MAX_INDEX);
 
 /**
  * Parses `"a.b[0].c"` or `["a", "b", 0, "c"]` into keys, and says whether
@@ -119,15 +188,33 @@ const _paths = new Map();
  * @returns {{ keys: ReadonlyArray<string | number>, safe: boolean }}
  */
 const _parsePath = (path) => {
-  if (Array.isArray(path)) return { keys: path, safe: _isSafePath(path) };
+  if (Array.isArray(path)) {
+    // Each key is read and converted once: an object whose toString() changes
+    // can't pass the check with one name and be used with another.
+    /** @type {Array<string | number>} */
+    const keys = new Array(path.length);
+    let safe = true;
+    for (let i = 0; i < keys.length; i++) {
+      const key = path[i];
+      if (typeof key === "number" || typeof key === "symbol") keys[i] = /** @type {any} */ (key);
+      else {
+        const name = String(key);
+        if (_UNSAFE.has(name)) safe = false;
+        keys[i] = name;
+      }
+    }
+    return { keys, safe };
+  }
   const text = String(path);
   let parsed = _paths.get(text);
   if (parsed === undefined) {
-    const dotted = text.includes("[") ? text.replace(/\[(\d+)\]/g, ".$1").replace(/\[["']?([^\]"']+)["']?\]/g, ".$1") : text;
+    const dotted = text.includes("[") ? text.replace(/\[(\d+)\]/g, ".$1").replace(/\[["']?([^\]"'[]+)["']?\]/g, ".$1") : text;
     const keys = dotted.includes(".") ? dotted.split(".").filter((part) => part !== "") : dotted === "" ? [] : [dotted];
     parsed = { keys, safe: _isSafePath(keys) };
-    if (_paths.size >= 1000) _paths.clear();
-    _paths.set(text, parsed);
+    if (text.length <= _MAX_CACHED_PATH) {
+      if (_paths.size >= 1000) _paths.clear();
+      _paths.set(text, parsed);
+    }
   }
   return parsed;
 };
@@ -145,9 +232,20 @@ const _deepClone = (value, seen) => {
   if (known !== undefined) return known;
   if (Array.isArray(value)) {
     /** @type {any[]} */
-    const out = new Array(value.length);
+    const out = _newArray(value.length);
     seen.set(value, out);
-    for (let i = 0; i < value.length; i++) if (i in value) out[i] = _deepClone(value[i], seen);
+    let holes = 0;
+    for (let i = 0; i < value.length; i++) {
+      if (i in value) {
+        out[i] = _deepClone(value[i], seen);
+        holes = 0;
+      } else if (++holes > _MAX_HOLES) {
+        // A sparse array, like one with only [4000000000] set: copy what it holds rather than walk every index.
+        for (const index of _indexesAfter(value, i)) out[index] = _deepClone(value[index], seen);
+        break;
+      }
+    }
+    if (out.length !== value.length) out.length = value.length;
     return out;
   }
   const proto = Object.getPrototypeOf(value);
@@ -257,10 +355,15 @@ const _mergeInto = (target, source, options) => {
  * @template T
  * @param {T} value
  * @returns {T}
+ * @throws {RangeError} If the value is nested too deeply to walk, thousands of levels.
  */
 function clone(value) {
   if (value === null || typeof value !== "object") return value;
-  return _deepClone(value, new Map());
+  try {
+    return _deepClone(value, new Map());
+  } catch (error) {
+    throw _nestedError(error, "clone");
+  }
 }
 
 /**
@@ -304,6 +407,7 @@ function clone(value) {
  * @overload
  * @param {...object} sources
  * @returns {Record<string, any>}
+ * @throws {RangeError} If an object is nested too deeply to walk, thousands of levels.
  */
 /**
  * @param {...object} sources
@@ -312,7 +416,11 @@ function clone(value) {
 function merge(...sources) {
   /** @type {Record<string, any>} */
   const out = {};
-  for (const source of sources) if (_isPlain(source)) _mergeInto(out, source, _NO_OPTIONS);
+  try {
+    for (const source of sources) if (_isPlain(source)) _mergeInto(out, source, _NO_OPTIONS);
+  } catch (error) {
+    throw _nestedError(error, "merge");
+  }
   return out;
 }
 
@@ -328,11 +436,16 @@ function merge(...sources) {
  * @param {MergeOptions} options
  * @param {...object} sources
  * @returns {Record<string, any>}
+ * @throws {RangeError} If an object is nested too deeply to walk, thousands of levels.
  */
 function mergeWith(options, ...sources) {
   /** @type {Record<string, any>} */
   const out = {};
-  for (const source of sources) if (_isPlain(source)) _mergeInto(out, source, options ?? _NO_OPTIONS);
+  try {
+    for (const source of sources) if (_isPlain(source)) _mergeInto(out, source, options ?? _NO_OPTIONS);
+  } catch (error) {
+    throw _nestedError(error, "mergeWith");
+  }
   return out;
 }
 
@@ -349,6 +462,7 @@ function mergeWith(options, ...sources) {
  * @param {T} target
  * @param {...D} sources The first one has the highest priority.
  * @returns {T & D}
+ * @throws {RangeError} If an object is nested too deeply to walk, thousands of levels.
  */
 function defaults(target, ...sources) {
   /** @type {(t: any, s: any) => any} */
@@ -361,7 +475,11 @@ function defaults(target, ...sources) {
     }
     return out;
   };
-  return sources.reduce((acc, source) => (_isPlain(source) ? fill(acc, source) : acc), /** @type {any} */ (clone(target)));
+  try {
+    return sources.reduce((acc, source) => (_isPlain(source) ? fill(acc, source) : acc), /** @type {any} */ (clone(target)));
+  } catch (error) {
+    throw _nestedError(error, "defaults");
+  }
 }
 
 /**
@@ -376,11 +494,16 @@ function defaults(target, ...sources) {
  * @param {unknown} a
  * @param {unknown} b
  * @returns {boolean}
+ * @throws {RangeError} If the values are nested too deeply to walk, thousands of levels.
  */
 function equal(a, b) {
   if (Object.is(a, b)) return true;
   if (typeof a !== "object" || typeof b !== "object" || a === null || b === null) return false;
-  return _equal(a, b, [], []);
+  try {
+    return _equal(a, b, [], []);
+  } catch (error) {
+    throw _nestedError(error, "equal");
+  }
 }
 
 /**
@@ -448,7 +571,19 @@ function _equal(a, b, stackA, stackB) {
 const _equalObjects = (a, b, proto, stackA, stackB) => {
   if (Array.isArray(a)) {
     if (a.length !== b.length) return false;
-    for (let i = 0; i < a.length; i++) if (!_equal(a[i], b[i], stackA, stackB)) return false;
+    let holes = 0;
+    for (let i = 0; i < a.length; i++) {
+      const x = a[i];
+      const y = b[i];
+      if (x === undefined && y === undefined && !(i in a) && !(i in b)) {
+        if (++holes <= _MAX_HOLES) continue;
+        // Sparse on both sides: compare what they hold rather than every index.
+        for (const index of [..._indexesAfter(a, i), ..._indexesAfter(b, i)]) if (!_equal(a[index], b[index], stackA, stackB)) return false;
+        return true;
+      }
+      holes = 0;
+      if (!_equal(x, y, stackA, stackB)) return false;
+    }
     return true;
   }
   if (proto === Object.prototype || proto === null) return _equalKeys(a, b, stackA, stackB);
@@ -504,6 +639,7 @@ const _equalObjects = (a, b, proto, stackA, stackB) => {
  * @param {unknown} before
  * @param {unknown} after
  * @returns {Change[]} Empty when nothing changed.
+ * @throws {RangeError} If the values are nested too deeply to walk, thousands of levels.
  */
 function diff(before, after) {
   /** @type {Change[]} */
@@ -538,13 +674,18 @@ function diff(before, after) {
     }
     if (!equal(a, b)) changes.push({ path: [...path], type: "changed", from: a, to: b });
   };
-  walk(before, after);
+  try {
+    walk(before, after);
+  } catch (error) {
+    throw _nestedError(error, "diff");
+  }
   return changes;
 }
 
 /**
  * Reads a nested value from a dotted path. Your editor completes the paths
- * and knows the type of the result.
+ * and knows the type of the result. What a plain object inherits is not
+ * read: `obj.get({}, "toString")` is `undefined`.
  *
  * @example
  * obj.get(config, "db.pool.max");      // number | undefined
@@ -585,14 +726,18 @@ function get(object, path, fallback) {
   let current = object;
   for (let i = 0; i < keys.length; i++) {
     if (current === null || current === undefined) return fallback;
-    current = current[keys[i]];
+    const next = current[keys[i]];
+    // What a plain object inherits, like toString, is not data. Class instances keep their getters and methods.
+    if (typeof next === "function" && !Object.hasOwn(current, keys[i]) && Object.getPrototypeOf(current) === Object.prototype) return fallback;
+    current = next;
   }
   return current === undefined ? fallback : current;
 }
 
 /**
  * Returns a copy with a nested value set. Missing levels are created
- * (arrays when the next key is a number).
+ * (arrays when the next key is a number up to 10000, objects otherwise, so
+ * a key like `"a.4000000000"` can't make a huge array).
  *
  * @example
  * obj.set({}, "a.b.c", 1);            // { a: { b: { c: 1 } } }
@@ -614,7 +759,7 @@ function set(object, path, value) {
     const key = keys[i];
     const next = keys[i + 1];
     if (current[key] === null || typeof current[key] !== "object") {
-      current[key] = typeof next === "number" || /^\d+$/.test(String(next)) ? [] : {};
+      current[key] = _wantsArray(next) ? [] : {};
     }
     current = current[key];
   }
@@ -846,6 +991,7 @@ function invert(object) {
  * @param {T} object
  * @param {CompactOptions} [options]
  * @returns {Partial<T>}
+ * @throws {RangeError} With `deep`, if the object is nested too deeply to walk, thousands of levels.
  */
 function compact(object, options = {}) {
   /** @type {(value: any) => boolean} */
@@ -857,18 +1003,34 @@ function compact(object, options = {}) {
   /** @type {(value: any) => any} */
   const clean = (value) => {
     if (!options.deep) return value;
-    if (Array.isArray(value)) return value.map(clean).filter((v) => !isEmptyValue(v));
-    if (_isPlain(value)) return compact(value, options);
+    if (Array.isArray(value)) {
+      /** @type {any[]} */
+      const kept = [];
+      _forEachItem(value, (item) => {
+        const cleaned = clean(item);
+        if (!isEmptyValue(cleaned)) kept.push(cleaned);
+      });
+      return kept;
+    }
+    if (_isPlain(value)) return compactObject(value);
     return value;
   };
-  /** @type {any} */
-  const out = {};
-  for (const [key, value] of Object.entries(object ?? {})) {
-    if (_UNSAFE.has(key)) continue;
-    const cleaned = clean(value);
-    if (!isEmptyValue(cleaned)) out[key] = cleaned;
+  /** @type {(source: any) => any} */
+  const compactObject = (source) => {
+    /** @type {any} */
+    const out = {};
+    for (const [key, value] of Object.entries(source ?? {})) {
+      if (_UNSAFE.has(key)) continue;
+      const cleaned = clean(value);
+      if (!isEmptyValue(cleaned)) out[key] = cleaned;
+    }
+    return out;
+  };
+  try {
+    return compactObject(object);
+  } catch (error) {
+    throw _nestedError(error, "compact");
   }
-  return out;
 }
 
 /**
@@ -880,6 +1042,7 @@ function compact(object, options = {}) {
  * @param {object} object
  * @param {string} [prefix=""] Added in front of every key.
  * @returns {Record<string, unknown>}
+ * @throws {RangeError} If the object is nested too deeply to walk, thousands of levels.
  */
 function flatten(object, prefix = "") {
   /** @type {Record<string, unknown>} */
@@ -894,7 +1057,11 @@ function flatten(object, prefix = "") {
       else out[next] = child;
     }
   };
-  walk(/** @type {any} */ (object ?? {}), prefix);
+  try {
+    walk(/** @type {any} */ (object ?? {}), prefix);
+  } catch (error) {
+    throw _nestedError(error, "flatten");
+  }
   return out;
 }
 
@@ -913,6 +1080,7 @@ function paths(object) {
 
 /**
  * Rebuilds nested objects from dotted keys. The opposite of `flatten()`.
+ * A number key up to 10000 makes an array, as in `set()`.
  *
  * @example
  * obj.unflatten({ "db.host": "x", "db.port": 5432 }); // { db: { host: "x", port: 5432 } }
@@ -930,7 +1098,7 @@ function unflatten(object) {
     for (let i = 0; i < keys.length - 1; i++) {
       const key = keys[i];
       if (current[key] === null || typeof current[key] !== "object") {
-        current[key] = /^\d+$/.test(String(keys[i + 1])) ? [] : {};
+        current[key] = _wantsArray(keys[i + 1]) ? [] : {};
       }
       current = current[key];
     }
@@ -1033,15 +1201,25 @@ function isEmpty(object) {
  * @template T
  * @param {T} object
  * @returns {DeepReadonly<T>} The same object.
+ * @throws {RangeError} If the object is nested too deeply to walk, thousands of levels. What was reached by then stays frozen.
  */
 function deepFreeze(object) {
-  if (object === null || (typeof object !== "object" && typeof object !== "function") || Object.isFrozen(object)) return /** @type {DeepReadonly<T>} */ (object);
-  // Typed arrays and buffers can't be frozen: their memory stays writable.
-  if (ArrayBuffer.isView(object)) return /** @type {DeepReadonly<T>} */ (object);
-  Object.freeze(object);
-  for (const key of Reflect.ownKeys(/** @type {object} */ (object))) deepFreeze(/** @type {any} */ (object)[key]);
+  try {
+    _freeze(object);
+  } catch (error) {
+    throw _nestedError(error, "deepFreeze");
+  }
   return /** @type {DeepReadonly<T>} */ (object);
 }
+
+/** @param {unknown} object */
+const _freeze = (object) => {
+  if (object === null || (typeof object !== "object" && typeof object !== "function") || Object.isFrozen(object)) return;
+  // Typed arrays and buffers can't be frozen: their memory stays writable.
+  if (ArrayBuffer.isView(object)) return;
+  Object.freeze(object);
+  for (const key of Reflect.ownKeys(/** @type {object} */ (object))) _freeze(/** @type {any} */ (object)[key]);
+};
 
 /**
  * A copy with its keys in order, nested objects included. Two objects with
@@ -1056,6 +1234,7 @@ function deepFreeze(object) {
  * @param {T} object
  * @param {SortKeysOptions} [options]
  * @returns {T}
+ * @throws {RangeError} If the object is nested too deeply to walk, thousands of levels.
  */
 function sortKeys(object, options = {}) {
   const deep = options.deep ?? true;
@@ -1069,8 +1248,14 @@ function sortKeys(object, options = {}) {
     ancestors.push(value);
     /** @type {any} */
     let out;
-    if (isArray) out = deep ? value.map(walk) : value;
-    else {
+    if (isArray) {
+      if (deep) {
+        const copy = _newArray(value.length);
+        _forEachItem(value, (item, i) => (copy[i] = walk(item)));
+        copy.length = value.length;
+        out = copy;
+      } else out = value;
+    } else {
       out = {};
       for (const key of Object.keys(value).sort(options.compare)) {
         if (!_UNSAFE.has(key)) out[key] = deep ? walk(value[key]) : value[key];
@@ -1079,7 +1264,11 @@ function sortKeys(object, options = {}) {
     ancestors.pop();
     return out;
   };
-  return walk(object);
+  try {
+    return walk(object);
+  } catch (error) {
+    throw _nestedError(error, "sortKeys");
+  }
 }
 
 /** @type {MergeOptions} */

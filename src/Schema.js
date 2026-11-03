@@ -70,7 +70,30 @@ const { UNSAFE_KEYS } = require("./internal/shared.js");
  */
 
 /**
- * @typedef {{ issues: import("./errors").ValidationIssue[], path: Array<string | number> }} ParseContext
+ * Options for `parse()`, `safeParse()` and `is()`.
+ * @typedef {object} ParseOptions
+ * @property {number} [maxDepth] How many levels of objects and arrays a value may have. A value nested deeper is refused with a `"too_deep"` issue instead of running out of stack. Defaults to `1000`.
+ */
+
+/**
+ * The state of a parse. `abortEarly` is set by `is()` and while a union
+ * tries its options: containers then stop at the first issue, and set
+ * `aborted` when they do. `memo` keeps what unions found on objects for
+ * the rest of the parse.
+ * @typedef {{ issues: import("./errors").ValidationIssue[], path: Array<string | number>, maxDepth: number, abortEarly: boolean, aborted: boolean, memo: { unions: WeakMap<object, Map<Schema<any>, _UnionMemo>> | undefined } | undefined }} ParseContext
+ */
+
+/**
+ * How an option of a union failed when tried, with paths relative to the
+ * union. `aborted` says the issues are only the first ones.
+ * @typedef {{ issues: import("./errors").ValidationIssue[], aborted: boolean }} _Attempt
+ */
+
+/**
+ * What a union found on a value: how each option failed when tried, and
+ * what it reported while another union tried its options (`fast`) or for
+ * the final report (`full`).
+ * @typedef {{ tried: _Attempt[], fast: _Attempt | undefined, full: _Attempt | undefined }} _UnionMemo
  */
 
 /**
@@ -93,6 +116,56 @@ const INVALID = Symbol("invalid");
 const _TRUE = ["true", "1", "yes", "on", "y"];
 const _FALSE = ["false", "0", "no", "off", "n", ""];
 const _DATE = /^\d{4}-\d{2}-\d{2}$/;
+const _MAX_DEPTH = 1000;
+// What a URL can't hold as written. new URL() would encode it, but the string returned is the raw one.
+const _URL_UNSAFE = /[\u0000- \u007f<>"`\\]/;
+
+/**
+ * A fresh context for a parse.
+ * @param {ParseOptions | undefined} options
+ * @returns {ParseContext}
+ */
+const _context = (options) => ({ issues: [], path: [], maxDepth: options?.maxDepth ?? _MAX_DEPTH, abortEarly: false, aborted: false, memo: undefined });
+
+/**
+ * A value for a message: JSON, except bigints (`5n`) and what JSON can't
+ * write, like a cycle.
+ * @param {unknown} value
+ * @returns {string}
+ */
+const _show = (value) => {
+  if (typeof value === "bigint") return `${value}n`;
+  try {
+    return JSON.stringify(value) ?? String(value);
+  } catch {
+    try {
+      return JSON.stringify(value, (_key, v) => (typeof v === "bigint" ? `${v}n` : v));
+    } catch {
+      return _typeName(value);
+    }
+  }
+};
+
+/** @param {unknown} error */
+const _isStackOverflow = (error) => error instanceof RangeError && /call stack/i.test(error.message);
+
+/**
+ * Runs a schema from the top. A value nested so deep that the stack runs
+ * out becomes a `"too_deep"` issue instead of an exception.
+ * @param {Schema<any>} schema
+ * @param {unknown} value
+ * @param {ParseContext} ctx
+ * @returns {unknown}
+ */
+const _runRoot = (schema, value, ctx) => {
+  try {
+    return /** @type {any} */ (schema)._run(value, ctx);
+  } catch (error) {
+    if (!_isStackOverflow(error)) throw error;
+    ctx.issues.push({ path: [...ctx.path], code: "too_deep", message: "Nested too deeply" });
+    return INVALID;
+  }
+};
 
 /**
  * What a failed `safeParse()` returns. The error is only built if it's
@@ -151,6 +224,47 @@ const _typeIssue = (ctx, expected, value, message) => {
 };
 
 /**
+ * Refuses a container nested deeper than allowed. The path holds one key
+ * per level, so its length is the depth.
+ * @param {ParseContext} ctx
+ * @returns {boolean} `true` when the issue was added.
+ */
+const _tooDeep = (ctx) => {
+  if (ctx.path.length < ctx.maxDepth) return false;
+  _issue(ctx, "too_deep", `Nested more than ${ctx.maxDepth} levels deep`, { maximum: ctx.maxDepth });
+  return true;
+};
+
+/**
+ * Issues with their path made relative to a depth.
+ * @param {import("./errors").ValidationIssue[]} issues
+ * @param {number} depth
+ * @returns {import("./errors").ValidationIssue[]}
+ */
+const _from = (issues, depth) => (depth === 0 ? issues : issues.map((issue) => ({ ...issue, path: issue.path.slice(depth) })));
+
+/**
+ * Relative issues placed under a path.
+ * @param {import("./errors").ValidationIssue[]} issues
+ * @param {Array<string | number>} path
+ * @returns {import("./errors").ValidationIssue[]}
+ */
+const _at = (issues, path) => issues.map((issue) => ({ ...issue, path: [...path, ...issue.path] }));
+
+/**
+ * Ends a container early while a union tries an option: one issue is
+ * enough to know the option doesn't fit.
+ * @param {ParseContext} ctx
+ * @param {number} before
+ * @returns {boolean}
+ */
+const _stop = (ctx, before) => {
+  if (!ctx.abortEarly || ctx.issues.length === before) return false;
+  ctx.aborted = true;
+  return true;
+};
+
+/**
  * Runs a nested schema.
  * @param {Schema<any>} schema
  * @param {unknown} value
@@ -158,6 +272,18 @@ const _typeIssue = (ctx, expected, value, message) => {
  * @returns {unknown}
  */
 const _runChild = (schema, value, ctx) => /** @type {any} */ (schema)._run(value, ctx);
+
+/**
+ * Reads a key of an object. What every object inherits, like toString,
+ * is not data.
+ * @param {Record<string, unknown>} input
+ * @param {string} key
+ * @returns {unknown}
+ */
+const _read = (input, key) => {
+  const raw = input[key];
+  return typeof raw === "function" && !Object.hasOwn(input, key) ? undefined : raw;
+};
 
 /**
  * The base of every schema.
@@ -232,7 +358,11 @@ class Schema {
     if (ctx.issues.length === before) {
       for (const step of this._steps) {
         if (step.kind === "check") {
-          if (!step.test(out)) _issue(ctx, step.code, _message(step.message, out), step.details);
+          if (!step.test(out)) {
+            _issue(ctx, step.code, _message(step.message, out), step.details);
+            // A value already too long is refused: the checks after, a regex above all, could be very slow on it.
+            if ((typeof out === "string" || Array.isArray(out)) && (step.code === "too_big" || (step.code === "invalid_length" && out.length > Number(step.details?.exact)))) break;
+          }
         } else if (ctx.issues.length > before) {
           // What follows needs a value that passed everything before it.
           if (step.kind !== "refine") break;
@@ -267,12 +397,13 @@ class Schema {
    * const port = s.coerce.number().int().min(1).max(65535).parse(process.env.PORT);
    *
    * @param {unknown} value
+   * @param {ParseOptions} [options]
    * @returns {T}
    * @throws {ValidationError} Listing every issue with its path.
    */
-  parse(value) {
-    const ctx = { issues: [], path: [] };
-    const out = this._run(value, ctx);
+  parse(value, options) {
+    const ctx = _context(options);
+    const out = _runRoot(this, value, ctx);
     if (ctx.issues.length) throw new ValidationError(ctx.issues);
     return /** @type {T} */ (out);
   }
@@ -286,12 +417,12 @@ class Schema {
    * saveUser(result.data);
    *
    * @param {unknown} value
+   * @param {ParseOptions} [options]
    * @returns {SafeParseResult<T>}
    */
-  safeParse(value) {
-    /** @type {ParseContext} */
-    const ctx = { issues: [], path: [] };
-    const out = this._run(value, ctx);
+  safeParse(value, options) {
+    const ctx = _context(options);
+    const out = _runRoot(this, value, ctx);
     if (ctx.issues.length) return _failure(ctx.issues);
     return { success: true, data: /** @type {T} */ (out) };
   }
@@ -303,12 +434,14 @@ class Schema {
    * if (Email.is(input)) sendMail(input); // input is a string here
    *
    * @param {unknown} value
+   * @param {ParseOptions} [options]
    * @returns {value is T}
    */
-  is(value) {
-    /** @type {ParseContext} */
-    const ctx = { issues: [], path: [] };
-    this._run(value, ctx);
+  is(value, options) {
+    const ctx = _context(options);
+    // No report to build: the first issue answers.
+    ctx.abortEarly = true;
+    _runRoot(this, value, ctx);
     return ctx.issues.length === 0;
   }
 
@@ -544,7 +677,14 @@ class StringSchema extends Schema {
    */
   _check(value, ctx) {
     let v = value;
-    if (this._coerce && v !== undefined && v !== null && typeof v !== "string") v = String(v);
+    if (this._coerce && v !== undefined && v !== null && typeof v !== "string") {
+      try {
+        v = String(v);
+      } catch (error) {
+        // An array nested too deep to join, or an object without toString().
+        if (_isStackOverflow(error)) return _issue(ctx, "too_deep", "Nested too deeply");
+      }
+    }
     if (typeof v !== "string") return _typeIssue(ctx, "string", value, this._typeMessage);
     return v;
   }
@@ -612,14 +752,16 @@ class StringSchema extends Schema {
   }
 
   /**
-   * An absolute URL.
+   * An absolute URL. The string is returned as written, so spaces, control
+   * characters, double quotes, backticks, `<`, `>` and backslashes are
+   * refused: a URL that needs them must come percent-encoded.
    * @param {Message | { message?: Message, protocols?: string[] }} [options] A message, or allowed protocols (http and https by default).
    * @returns {this}
    */
   url(options = "Invalid URL") {
     const opts = typeof options === "object" ? options : { message: options };
     const { isURL } = require("./Checker.js");
-    return this._rule((v) => isURL(v, { protocols: opts.protocols }), "invalid_string", opts.message ?? "Invalid URL", { validation: "url" }, { format: "uri" });
+    return this._rule((v) => !_URL_UNSAFE.test(v) && isURL(v, { protocols: opts.protocols }), "invalid_string", opts.message ?? "Invalid URL", { validation: "url" }, { format: "uri" });
   }
 
   /**
@@ -1104,9 +1246,9 @@ class LiteralSchema extends Schema {
   _check(value, ctx) {
     // A Set treats 0 and -0 as the same value: tell them apart, as before.
     if (this._set.has(value) && (value !== 0 || this._values.some((v) => Object.is(v, value)))) return value;
-    const list = this._values.map((v) => JSON.stringify(v)).join(" | ");
+    const list = this._values.map(_show).join(" | ");
     const code = this._values.length > 1 ? "invalid_enum_value" : "invalid_literal";
-    return _issue(ctx, code, this._typeMessage ? _message(this._typeMessage, value) : `Expected ${list}, received ${JSON.stringify(value) ?? String(value)}`, { expected: list, received: _typeName(value) });
+    return _issue(ctx, code, this._typeMessage ? _message(this._typeMessage, value) : `Expected ${list}, received ${_show(value)}`, { expected: list, received: _typeName(value) });
   }
 
   /**
@@ -1183,13 +1325,16 @@ class ArraySchema extends Schema {
    */
   _check(value, ctx) {
     if (!Array.isArray(value)) return _typeIssue(ctx, "array", value, this._typeMessage);
+    if (_tooDeep(ctx)) return INVALID;
     const item = this._item;
     const path = ctx.path;
+    const before = ctx.issues.length;
     const out = new Array(value.length);
     for (let i = 0; i < value.length; i++) {
       path.push(i);
       out[i] = _runChild(item, value[i], ctx);
       path.pop();
+      if (_stop(ctx, before)) return INVALID;
     }
     return out;
   }
@@ -1295,6 +1440,10 @@ class ObjectSchema extends Schema {
     this._keys = Object.keys(shape).filter((key) => key !== "__proto__");
     /** @protected @type {Array<Schema<any>>} */
     this._schemas = this._keys.map((key) => shape[key]);
+    // Keys holding a literal or an enum tell the options of a union apart: they are checked first there.
+    /** @protected @type {number[]} */
+    this._literals = [];
+    for (let i = 0; i < this._schemas.length; i++) if (this._schemas[i] instanceof LiteralSchema) this._literals.push(i);
   }
 
   /**
@@ -1306,20 +1455,35 @@ class ObjectSchema extends Schema {
    */
   _check(value, ctx) {
     if (value === null || typeof value !== "object" || Array.isArray(value)) return _typeIssue(ctx, "object", value, this._typeMessage);
+    if (_tooDeep(ctx)) return INVALID;
     const input = /** @type {Record<string, unknown>} */ (value);
     const keys = this._keys;
     const schemas = this._schemas;
     const path = ctx.path;
+    const before = ctx.issues.length;
+    /** @type {unknown[] | undefined} */
+    let early;
+    if (ctx.abortEarly && this._literals.length) {
+      early = new Array(keys.length);
+      for (const i of this._literals) {
+        path.push(keys[i]);
+        early[i] = _runChild(schemas[i], _read(input, keys[i]), ctx);
+        path.pop();
+        if (_stop(ctx, before)) return INVALID;
+      }
+    }
     /** @type {Record<string, unknown>} */
     const out = {};
     for (let i = 0; i < keys.length; i++) {
       const key = keys[i];
-      let raw = input[key];
-      // What every object inherits, like toString, is not data.
-      if (typeof raw === "function" && !Object.hasOwn(input, key)) raw = undefined;
-      path.push(key);
-      const result = _runChild(schemas[i], raw, ctx);
-      path.pop();
+      let result;
+      if (early !== undefined && i in early) result = early[i];
+      else {
+        path.push(key);
+        result = _runChild(schemas[i], _read(input, key), ctx);
+        path.pop();
+        if (_stop(ctx, before)) return INVALID;
+      }
       if (result !== undefined || Object.hasOwn(input, key)) out[key] = result;
     }
     if (this._unknown === "strip") return out;
@@ -1510,22 +1674,93 @@ class UnionSchema extends Schema {
    * @protected
    */
   _check(value, ctx) {
-    /** @type {import("./errors").ValidationIssue[][]} */
-    const failures = [];
-    for (const option of this._options) {
-      const attempt = { issues: [], path: ctx.path };
-      const out = _runChild(option, value, attempt);
-      if (!attempt.issues.length) return out;
-      failures.push(attempt.issues);
+    const options = this._options;
+    const root = ctx.path.length;
+    // What a union found on an object is remembered for the rest of the
+    // parse, with paths relative to the union: the options of an outer
+    // union often lead to the same nested value.
+    const isObject = value !== null && typeof value === "object";
+    const outermost = ctx.memo === undefined;
+    /** @type {_UnionMemo | undefined} */
+    let memo;
+    if (isObject) {
+      memo = (ctx.memo ??= { unions: undefined }).unions?.get(value)?.get(this);
+      const saved = ctx.abortEarly ? memo?.fast : memo?.full;
+      if (saved) {
+        ctx.issues.push(..._at(saved.issues, ctx.path));
+        if (saved.aborted) ctx.aborted = true;
+        return INVALID;
+      }
     }
-    const typeOnly = failures.every((issues) => issues.length === 1 && issues[0].code === "invalid_type" && issues[0].path.length === ctx.path.length);
-    if (typeOnly) {
-      const expected = failures.map((issues) => issues[0].expected).join(" | ");
-      return _issue(ctx, "invalid_union", `Expected ${expected}, received ${_typeName(value)}`, { expected, received: _typeName(value) });
+    // Each option is first tried in a context that stops at its first
+    // issue. Trying every option in full made each level of a recursive
+    // union cost twice the one below, so a small input could take seconds.
+    /** @type {_Attempt[]} */
+    let tried;
+    if (memo) tried = memo.tried.map((attempt) => ({ issues: _at(attempt.issues, ctx.path), aborted: attempt.aborted }));
+    else {
+      tried = [];
+      for (let i = 0; i < options.length; i++) {
+        /** @type {ParseContext} */
+        const attempt = { issues: [], path: ctx.path, maxDepth: ctx.maxDepth, abortEarly: true, aborted: false, memo: ctx.memo };
+        const out = _runChild(options[i], value, attempt);
+        if (!attempt.issues.length) return out;
+        tried.push(attempt);
+      }
     }
-    const best = failures.reduce((a, b) => (b.length < a.length ? b : a));
-    ctx.issues.push(...best);
+    /** @type {import("./errors").ValidationIssue[]} */
+    let issues;
+    let aborted = false;
+    if (ctx.abortEarly) {
+      // Another union is trying its options, or is() only asks yes or no: one issue is enough, unless every one is already known.
+      aborted = tried.some((attempt) => attempt.aborted);
+      issues = aborted ? [tried[0].issues[0]] : this._report(tried.map((attempt) => attempt.issues), value, ctx.path);
+    } else {
+      // The options that stopped early run again, in full, for the report.
+      /** @type {import("./errors").ValidationIssue[][]} */
+      const full = [];
+      for (let i = 0; i < tried.length; i++) {
+        if (!tried[i].aborted) {
+          full.push(tried[i].issues);
+          continue;
+        }
+        /** @type {ParseContext} */
+        const again = { issues: [], path: ctx.path, maxDepth: ctx.maxDepth, abortEarly: false, aborted: false, memo: ctx.memo };
+        const out = _runChild(options[i], value, again);
+        if (!again.issues.length) return out;
+        full.push(again.issues);
+      }
+      issues = this._report(full, value, ctx.path);
+    }
+    // Only a union inside another one can meet the same value again.
+    if (isObject && !outermost && ctx.memo) {
+      const unions = (ctx.memo.unions ??= new WeakMap());
+      let known = unions.get(value);
+      if (!known) unions.set(value, (known = new Map()));
+      memo ??= { tried: tried.map((attempt) => ({ issues: _from(attempt.issues, root), aborted: attempt.aborted })), fast: undefined, full: undefined };
+      known.set(this, memo);
+      memo[ctx.abortEarly ? "fast" : "full"] = { issues: _from(issues, root), aborted };
+    }
+    ctx.issues.push(...issues);
+    if (aborted) ctx.aborted = true;
     return INVALID;
+  }
+
+  /**
+   * The issues to report once every option failed: a single one when no
+   * option had the right type, or those of the option with the fewest.
+   * @param {import("./errors").ValidationIssue[][]} failures
+   * @param {unknown} value
+   * @param {Array<string | number>} path Where the union is.
+   * @returns {import("./errors").ValidationIssue[]}
+   * @protected
+   */
+  _report(failures, value, path) {
+    if (failures.every((issues) => issues.length === 1 && issues[0].code === "invalid_type" && issues[0].path.length === path.length)) {
+      const expected = failures.map((issues) => issues[0].expected).join(" | ");
+      return [{ path: [...path], code: "invalid_union", message: `Expected ${expected}, received ${_typeName(value)}`, expected, received: _typeName(value) }];
+    }
+    return failures.reduce((a, b) => (b.length < a.length ? b : a));
   }
 
   /**
@@ -1562,7 +1797,7 @@ class DiscriminatedUnionSchema extends Schema {
       const values = /** @type {any} */ (option)?._shape?.[key]?._values;
       if (!Array.isArray(values)) throw new TypeError(`discriminatedUnion(): every option must be an object with a literal "${key}"`);
       for (const value of values) {
-        if (this._byValue.has(value)) throw new TypeError(`discriminatedUnion(): two options have "${key}" set to ${JSON.stringify(value)}`);
+        if (this._byValue.has(value)) throw new TypeError(`discriminatedUnion(): two options have "${key}" set to ${_show(value)}`);
         this._byValue.set(value, option);
       }
     }
@@ -1580,9 +1815,9 @@ class DiscriminatedUnionSchema extends Schema {
     const tag = /** @type {Record<string, unknown>} */ (value)[this._key];
     const option = this._byValue.get(tag);
     if (option) return _runChild(option, value, ctx);
-    const expected = [...this._byValue.keys()].map((known) => JSON.stringify(known)).join(" | ");
+    const expected = [...this._byValue.keys()].map(_show).join(" | ");
     ctx.path.push(this._key);
-    _issue(ctx, "invalid_union_discriminator", `Expected ${expected}, received ${JSON.stringify(tag) ?? String(tag)}`, { expected, received: _typeName(tag) });
+    _issue(ctx, "invalid_union_discriminator", `Expected ${expected}, received ${_show(tag)}`, { expected, received: _typeName(tag) });
     ctx.path.pop();
     return INVALID;
   }
@@ -1624,12 +1859,15 @@ class TupleSchema extends Schema {
     if (value.length !== this._items.length) {
       return _issue(ctx, "invalid_length", `Expected ${this._items.length} items, received ${value.length}`);
     }
+    if (_tooDeep(ctx)) return INVALID;
     const path = ctx.path;
+    const before = ctx.issues.length;
     const out = new Array(this._items.length);
     for (let i = 0; i < out.length; i++) {
       path.push(i);
       out[i] = _runChild(this._items[i], value[i], ctx);
       path.pop();
+      if (_stop(ctx, before)) return INVALID;
     }
     return out;
   }
@@ -1673,8 +1911,10 @@ class RecordSchema extends Schema {
    */
   _check(value, ctx) {
     if (value === null || typeof value !== "object" || Array.isArray(value)) return _typeIssue(ctx, "object", value, this._typeMessage);
+    if (_tooDeep(ctx)) return INVALID;
     const input = /** @type {Record<string, unknown>} */ (value);
     const path = ctx.path;
+    const before = ctx.issues.length;
     /** @type {Record<string, unknown>} */
     const out = {};
     for (const key of Object.keys(input)) {
@@ -1683,6 +1923,7 @@ class RecordSchema extends Schema {
       const k = this._keys ? _runChild(this._keys, key, ctx) : key;
       const v = _runChild(this._values, input[key], ctx);
       path.pop();
+      if (_stop(ctx, before)) return INVALID;
       if (typeof k === "string" && !UNSAFE_KEYS.has(k)) out[k] = v;
     }
     return out;

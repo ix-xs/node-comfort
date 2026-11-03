@@ -19,6 +19,10 @@
  * });
  * db.insert("users", { email: "ada@example.com", settings: { theme: "dark" } });
  * db.getAll("users", { email: { like: "%@example.com" } }, { orderBy: "email", limit: 20 });
+ *
+ * // Values from a request can't turn into operators:
+ * const safe = new nc.SQLite("data/app.sqlite", { operators: "tagged" });
+ * safe.getAll("users", { age: nc.SQLite.op.gte(18), role: nc.SQLite.op.in(["admin", "editor"]) });
  */
 
 const nodePath = require("node:path");
@@ -48,14 +52,15 @@ const { toMs } = require("./internal/shared.js");
  * @property {unknown} [defaultValue] Objects work for JSON columns, booleans for BOOLEAN ones. `"CURRENT_TIMESTAMP"`, `"CURRENT_DATE"` and `"CURRENT_TIME"` mean the moment of the insert.
  * @property {string} [defaultExpression] A default computed by SQLite, like `"(unixepoch())"` or `"(lower(hex(randomblob(16))))"`. Written into the table as is: never build it from user input.
  * @property {unknown[]} [values] Allowed values.
- * @property {string} [check] A `CHECK` expression, like `"price >= 0"`.
+ * @property {string} [check] A `CHECK` expression, like `"price >= 0"`. Written into the table as is: never build it from user input.
  * @property {{ table: string, column: string }} [references] Foreign key target.
  * @property {ForeignKeyAction} [onDelete] When the referenced row is deleted.
  * @property {ForeignKeyAction} [onUpdate] When the referenced key changes.
  */
 
 /**
- * A constraint on several columns.
+ * A constraint on several columns. The `expression` of a `check` is written
+ * into the table as is: never build it from user input.
  * @typedef {{ type: "unique", columns: string[] } | { type: "primaryKey", columns: string[] } | { type: "check", expression: string } | { type: "foreignKey", columns: string[], references: { table: string, columns: string[] }, onDelete?: ForeignKeyAction, onUpdate?: ForeignKeyAction }} TableConstraint
  */
 
@@ -65,7 +70,7 @@ const { toMs } = require("./internal/shared.js");
  * @property {string[]} columns Several columns make a composite index.
  * @property {boolean} [unique]
  * @property {string} [name] Defaults to `idx_<table>_<columns>`.
- * @property {string} [where] Makes it a partial index, like `"deleted_at IS NULL"`.
+ * @property {string} [where] Makes it a partial index, like `"deleted_at IS NULL"`. Written into the index as is: never build it from user input.
  */
 
 /**
@@ -101,6 +106,13 @@ const { toMs } = require("./internal/shared.js");
  * `IS NULL`, an array means "one of", and an object uses operators. Keys
  * combine with AND; use `$or` and `$and` for the rest.
  *
+ * A value taken from a request must be checked first (parsed JSON like
+ * `{ "ne": "" }` would act as an operator), or the database opened with
+ * `operators: "tagged"`, where only `SQLite.op` makes operators.
+ *
+ * On a read, a missing value drops its condition: check required values
+ * first (writes, and reads with `operators: "tagged"`, throw instead).
+ *
  * A key with dots looks inside a JSON column: `"settings.theme"` is the
  * `theme` key of the `settings` column, `"tags.0"` the first item of `tags`.
  *
@@ -108,6 +120,7 @@ const { toMs } = require("./internal/shared.js");
  * { status: "active", age: { gte: 18, lt: 65 }, role: ["admin", "editor"], deleted_at: null }
  * { $or: [{ email: { like: "%@acme.com" } }, { vip: true }] }
  * { "settings.theme": "dark", "settings.beta": true }
+ * { age: nc.SQLite.op.gte(18), role: nc.SQLite.op.in(["admin", "editor"]) }
  *
  * @template [R=Record<string, any>] Row type; its keys are suggested as columns.
  * @typedef {{ [K in keyof R]?: WhereValue } & { [path: `${string}.${string}`]: WhereValue } & { $or?: Where<R>[], $and?: Where<R>[] }} Where
@@ -115,7 +128,33 @@ const { toMs } = require("./internal/shared.js");
 
 /**
  * The condition for one column: a value, `null`, an array, or operators.
- * @typedef {null | string | number | bigint | boolean | Date | Uint8Array | readonly unknown[] | WhereOperators} WhereValue
+ * @typedef {null | string | number | bigint | boolean | Date | Uint8Array | readonly unknown[] | WhereOperators | TaggedOperator} WhereValue
+ */
+
+/**
+ * An operator made by `SQLite.op`. It carries a mark that JSON can't
+ * produce, so it's an operator with `operators: "tagged"` too. Several can
+ * be spread into one object: `{ ...op.gte(18), ...op.lt(65) }`.
+ * @typedef {Readonly<WhereOperators>} TaggedOperator
+ */
+
+/**
+ * The helpers of `SQLite.op`, one per filter operator.
+ * @typedef {object} OperatorHelpers
+ * @property {(value: unknown) => TaggedOperator} eq Equal. `null` means `IS NULL`.
+ * @property {(value: unknown) => TaggedOperator} ne Not equal. Rows where the column is `NULL` match too.
+ * @property {(value: number | string | bigint | Date) => TaggedOperator} gt Greater than.
+ * @property {(value: number | string | bigint | Date) => TaggedOperator} gte Greater than or equal.
+ * @property {(value: number | string | bigint | Date) => TaggedOperator} lt Less than.
+ * @property {(value: number | string | bigint | Date) => TaggedOperator} lte Less than or equal.
+ * @property {(values: readonly unknown[]) => TaggedOperator} in One of these values.
+ * @property {(values: readonly unknown[]) => TaggedOperator} notIn None of these values.
+ * @property {(pattern: string) => TaggedOperator} like A `LIKE` pattern: `%` any text, `_` one character.
+ * @property {(pattern: string) => TaggedOperator} notLike
+ * @property {(pattern: string) => TaggedOperator} glob A case-sensitive pattern: `*` any text, `?` one character.
+ * @property {(min: unknown, max: unknown) => TaggedOperator} between From `min` to `max`, both included.
+ * @property {() => TaggedOperator} isNull `IS NULL`.
+ * @property {() => TaggedOperator} notNull `IS NOT NULL`.
  */
 
 /**
@@ -144,6 +183,7 @@ const { toMs } = require("./internal/shared.js");
  * @property {number | string} [busyTimeout] How long to wait for a lock held by another connection, in ms or like `"5s"`. Defaults to 5 seconds.
  * @property {"OFF" | "NORMAL" | "FULL" | "EXTRA"} [synchronous] How hard SQLite pushes each commit to the disk. With `wal`, `"NORMAL"` writes several times faster and can't corrupt the file; a power cut may undo the last commits. Defaults to SQLite's own setting, `"FULL"`.
  * @property {boolean} [readOnly]
+ * @property {"plain" | "tagged"} [operators] What makes an object in a filter an operator. `"plain"`, the default: any object with an operator key, like `{ gte: 18 }`, and an array means "one of". `"tagged"`: only the operators made by `SQLite.op`, any other object or array is a value compared as JSON text, so a value taken from a request can never become an operator.
  */
 
 /**
@@ -229,6 +269,8 @@ const SOURCE_EXISTS = EXISTS("'table', 'view'");
 const JSON_KIND = 1;
 const BOOLEAN_KIND = 2;
 const DATE_KIND = 3;
+// Marks the operators made by SQLite.op. JSON can't produce a symbol key, so a parsed request never carries it.
+const TAGGED = Symbol("nc.SQLite.op");
 const OPERATORS = new Set(["eq", "ne", "gt", "gte", "lt", "lte", "in", "notIn", "like", "notLike", "glob", "between", "isNull"]);
 const COMPARATORS = /** @type {Record<string, string>} */ ({ gt: ">", gte: ">=", lt: "<", lte: "<=", like: "LIKE", notLike: "NOT LIKE", glob: "GLOB" });
 const ACTIONS = ["CASCADE", "SET NULL", "SET DEFAULT", "RESTRICT", "NO ACTION"];
@@ -408,6 +450,31 @@ const _insertVerb = (options) => {
 };
 
 /**
+ * @param {string} name
+ * @param {unknown} operand
+ * @returns {TaggedOperator}
+ */
+const _tag = (name, operand) => /** @type {TaggedOperator} */ (Object.freeze({ [name]: operand, [TAGGED]: true }));
+
+/** @type {OperatorHelpers} */
+const OP = Object.freeze({
+  eq: (value) => _tag("eq", value),
+  ne: (value) => _tag("ne", value),
+  gt: (value) => _tag("gt", value),
+  gte: (value) => _tag("gte", value),
+  lt: (value) => _tag("lt", value),
+  lte: (value) => _tag("lte", value),
+  in: (values) => _tag("in", values),
+  notIn: (values) => _tag("notIn", values),
+  like: (pattern) => _tag("like", pattern),
+  notLike: (pattern) => _tag("notLike", pattern),
+  glob: (pattern) => _tag("glob", pattern),
+  between: (min, max) => _tag("between", [min, max]),
+  isNull: () => _tag("isNull", true),
+  notNull: () => _tag("isNull", false),
+});
+
+/**
  * Removes quoted strings and names, to look for `;` safely.
  * @param {string} sql
  * @returns {string}
@@ -420,6 +487,23 @@ const _stripQuoted = (sql) => sql.replace(/'(?:''|[^'])*'|"(?:""|[^"])*"/g, "");
  * @template [R=Record<string, any>] The row type read methods return by default. Each call can override it.
  */
 class SQLite {
+  /**
+   * Filter operators that only code can make. Plain objects like
+   * `{ gte: 18 }` still work, unless the database was opened with
+   * `operators: "tagged"`: then only these are operators, and a value
+   * taken from a request stays a value.
+   *
+   * @example
+   * const { op } = nc.SQLite;
+   * const db = new nc.SQLite("data/app.sqlite", { operators: "tagged" });
+   * db.getAll("users", { age: op.between(18, 65), role: op.in(["admin", "editor"]), deleted_at: op.isNull() });
+   * // { "ne": "" } in the body is compared as text, not run, and a missing token throws
+   * db.get("users", { email, token: body.token });
+   *
+   * @type {OperatorHelpers}
+   */
+  static op = OP;
+
   /** @type {import("node:sqlite").DatabaseSync} */
   #db;
   /** @type {Map<string, import("node:sqlite").StatementSync>} */
@@ -433,6 +517,8 @@ class SQLite {
   #read;
   #depth = 0;
   #open = true;
+  // With operators: "tagged", only SQLite.op makes operators.
+  #tagged = false;
   /** @type {string} */
   #path;
 
@@ -450,6 +536,9 @@ class SQLite {
    * @throws {SQLiteError} If the file can't be opened.
    */
   constructor(path = "db.sqlite", options = {}) {
+    const operators = options.operators ?? "plain";
+    if (operators !== "plain" && operators !== "tagged") throw new SQLiteError(`Invalid operators "${String(operators)}" (use "plain" or "tagged")`);
+    this.#tagged = operators === "tagged";
     const DatabaseSync = _engine();
     const memory = path === ":memory:" || path === "";
     const target = memory ? ":memory:" : nodePath.resolve(process.cwd(), path);
@@ -608,43 +697,72 @@ class SQLite {
 
   /**
    * @param {Where<any> | undefined} where
+   * @param {string} [write] The method, for a filter that changes rows: then no condition may be skipped, and the filter must not match every row.
+   * @param {string} [read] The method, for a read: with operators: "tagged", no condition may be skipped either.
    * @returns {{ sql: string, params: any[] }}
    */
-  #where(where) {
+  #where(where, write, read) {
     if (!where || !Object.keys(where).length) return { sql: "", params: [] };
+    const tagged = this.#tagged;
+    // where a missing value throws rather than drops its condition (a token left out would let anyone in)
+    const strict = write ?? (tagged ? read ?? "read" : undefined);
     /** @type {any[]} */
     const params = [];
     /**
      * @param {Where<any>} filter
+     * @param {string} at Where this filter is, for error messages.
      * @returns {string}
      */
-    const build = (filter) => {
+    const build = (filter, at) => {
       if (!_isPlain(filter)) throw new SQLiteError("A where filter must be a plain object");
       /** @type {string[]} */
       const parts = [];
       for (const [key, value] of Object.entries(filter)) {
-        if (value === undefined) continue;
+        if (value === undefined) {
+          // a missing value would drop its condition, and the query would reach more rows
+          if (strict) throw new SQLiteError(`${strict}(): ${at}.${key} is undefined`);
+          continue;
+        }
         if (key === "$or" || key === "$and") {
           if (!Array.isArray(value)) throw new SQLiteError(`"${key}" expects an array of filters`);
-          const subs = value.map((sub) => build(sub) || "1");
+          if (write) {
+            if (!value.length) throw new SQLiteError(`${write}(): ${at}.${key} is empty`);
+            const subs = value.map((sub, i) => {
+              const sql = build(sub, `${at}.${key}[${i}]`);
+              if (!sql) throw new SQLiteError(`${write}(): ${at}.${key}[${i}] matches every row`);
+              return `(${sql})`;
+            });
+            parts.push(`(${subs.join(key === "$or" ? " OR " : " AND ")})`);
+            continue;
+          }
+          const subs = value.map((sub, i) => build(sub, strict ? `${at}.${key}[${i}]` : at) || "1");
           parts.push(subs.length ? `(${subs.map((s) => `(${s})`).join(key === "$or" ? " OR " : " AND ")})` : key === "$or" ? "0" : "1");
           continue;
         }
         const col = _column(key);
         if (value === null) parts.push(`${col} IS NULL`);
-        else if (Array.isArray(value)) parts.push(this.#op(col, "in", value, params));
-        else if (_isPlain(value) && Object.keys(value).some((k) => OPERATORS.has(k))) {
+        else if (Array.isArray(value) && !tagged) parts.push(this.#op(col, "in", value, params));
+        else if (_isPlain(value) && (/** @type {any} */ (value)[TAGGED] === true || (!tagged && Object.keys(value).some((k) => OPERATORS.has(k))))) {
           // unknown keys next to operators are typos: #op() reports them
-          for (const [op, operand] of Object.entries(value)) if (operand !== undefined) parts.push(this.#op(col, op, operand, params));
+          for (const [op, operand] of Object.entries(value)) {
+            if (operand === undefined) {
+              if (strict) throw new SQLiteError(`${strict}(): ${at}.${key}.${op} is undefined`);
+              continue;
+            }
+            const sql = this.#op(col, op, operand, params);
+            // "1" (an empty notIn) holds for every row: for a write, it's no condition at all
+            if (!write || sql !== "1") parts.push(sql);
+          }
         } else {
-          // other objects and arrays compare as JSON text
+          // other objects and arrays (all of them with operators: "tagged") compare as JSON text
           parts.push(`${col} = ?`);
           params.push(_toSQL(value));
         }
       }
       return parts.join(" AND ");
     };
-    const sql = build(where);
+    const sql = build(where, "where");
+    if (write && !sql) throw new SQLiteError(`${write}() refuses a where filter that matches every row${write === "delete" ? " (use clearTable() to delete every row)" : ""}`);
     return { sql: sql ? ` WHERE ${sql}` : "", params };
   }
 
@@ -1065,7 +1183,7 @@ class SQLite {
   #select(tableName, where, options, single) {
     const table = this.#table(tableName);
     const columns = options.columns?.length ? options.columns.map((c) => _id(c, "column name")).join(", ") : "*";
-    const clause = this.#where(where);
+    const clause = this.#where(where, undefined, single ? "get" : "getAll");
     let sql = `SELECT ${columns} FROM ${table}${clause.sql}${this.#orderBy(options)}`;
     if (single) {
       sql += " LIMIT 1";
@@ -1115,7 +1233,7 @@ class SQLite {
    * @throws {SQLiteError}
    */
   count(tableName, where = {}) {
-    const clause = this.#where(where);
+    const clause = this.#where(where, undefined, "count");
     const sql = `SELECT COUNT(*) AS total FROM ${this.#table(tableName)}${clause.sql}`;
     const stmt = this.#prepare(sql);
     try {
@@ -1137,7 +1255,7 @@ class SQLite {
    * @throws {SQLiteError}
    */
   exists(tableName, where = {}) {
-    const clause = this.#where(where);
+    const clause = this.#where(where, undefined, "exists");
     const sql = `SELECT 1 FROM ${this.#table(tableName)}${clause.sql} LIMIT 1`;
     const stmt = this.#prepare(sql);
     try {
@@ -1222,7 +1340,8 @@ class SQLite {
 
   /**
    * Updates the rows that match. The filter is required, so a forgotten
-   * condition can't rewrite the whole table.
+   * condition can't rewrite the whole table: an `undefined` value in it, an
+   * empty `$and` or `$or`, or a filter that matches every row throws.
    *
    * @example
    * db.update("users", { active: false }, { last_login: { lt: "2025-01-01" } });
@@ -1238,7 +1357,7 @@ class SQLite {
     if (!_isPlain(where) || !Object.keys(where).length) throw new SQLiteError("update() requires a non-empty where filter");
     const [cols, values] = this.#values(data);
     if (!cols.length) throw new SQLiteError("update() requires at least one column to change");
-    const clause = this.#where(where);
+    const clause = this.#where(where, "update");
     const { changes } = this.#run(`UPDATE ${table} SET ${cols.map((c) => `${c} = ?`).join(", ")}${clause.sql}`, [...values, ...clause.params]);
     return { ok: true, changes };
   }
@@ -1290,7 +1409,8 @@ class SQLite {
 
   /**
    * Deletes the rows that match. The filter is required; `clearTable()`
-   * deletes everything on purpose.
+   * deletes everything on purpose. An `undefined` value in the filter, an
+   * empty `$and` or `$or`, or a filter that matches every row throws.
    *
    * @example
    * db.delete("sessions", { expires_at: { lt: new Date() } });
@@ -1303,7 +1423,7 @@ class SQLite {
   delete(tableName, where) {
     const table = this.#table(tableName);
     if (!_isPlain(where) || !Object.keys(where).length) throw new SQLiteError("delete() requires a non-empty where filter (use clearTable() to delete every row)");
-    const clause = this.#where(where);
+    const clause = this.#where(where, "delete");
     const { changes } = this.#run(`DELETE FROM ${table}${clause.sql}`, clause.params);
     return { ok: true, changes };
   }
@@ -1312,7 +1432,7 @@ class SQLite {
    * Adds to number columns in one statement, so two requests at the same
    * moment both count. Reading the value, adding to it and writing it back
    * would lose one of them. Negative numbers subtract; an empty column
-   * counts as 0.
+   * counts as 0. The filter is checked like the one of `update()`.
    *
    * @example
    * db.increment("posts", { views: 1 }, { id: post.id });
@@ -1335,7 +1455,7 @@ class SQLite {
       const col = _id(column, "column name");
       return `${col} = COALESCE(${col}, 0) + ?`;
     });
-    const clause = this.#where(where);
+    const clause = this.#where(where, "increment");
     const { changes } = this.#run(`UPDATE ${table} SET ${set.join(", ")}${clause.sql}`, [...entries.map(([, amount]) => amount), ...clause.params]);
     return { ok: true, changes };
   }

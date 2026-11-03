@@ -87,6 +87,13 @@
  * @typedef {object} ClosestOptions
  * @property {number} [threshold] Minimum similarity (0 to 1) to accept a match. Defaults to `0.4`.
  * @property {boolean} [caseSensitive] Take case into account.
+ * @property {number} [maxDistance] Ignore candidates more than this many edits away. The search also gets faster.
+ */
+
+/**
+ * Options for `levenshtein()`.
+ * @typedef {object} LevenshteinOptions
+ * @property {number} [maxDistance] Stop counting past this many edits, which is much faster on long texts. A larger distance then comes back as `maxDistance + 1`.
  */
 
 /**
@@ -108,13 +115,14 @@ const SPECIAL_LATIN = /[\u00df\u1e9e\u00e6\u00c6\u0153\u0152\u00f8\u00d8\u0111\u
 const HTML_UNSAFE = /[&<>"']/;
 const HTML_UNSAFE_ALL = /[&<>"']/g;
 const HTML_ESCAPES = /** @type {Record<string, string>} */ ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" });
-const HTML_ENTITIES = /** @type {Record<string, string>} */ ({
+// No prototype, so "&constructor;" finds nothing.
+const HTML_ENTITIES = /** @type {Record<string, string>} */ (Object.assign(Object.create(null), {
   amp: "&", lt: "<", gt: ">", quot: '"', apos: "'", nbsp: "\u00a0",
   copy: "\u00a9", reg: "\u00ae", trade: "\u2122", hellip: "\u2026", mdash: "\u2014", ndash: "\u2013",
   lsquo: "\u2018", rsquo: "\u2019", ldquo: "\u201c", rdquo: "\u201d", laquo: "\u00ab", raquo: "\u00bb",
   euro: "\u20ac", pound: "\u00a3", yen: "\u00a5", cent: "\u00a2", deg: "\u00b0", middot: "\u00b7",
   bull: "\u2022", times: "\u00d7", divide: "\u00f7", sect: "\u00a7", para: "\u00b6",
-});
+}));
 const TEMPLATE_DEFAULT = /\{\s*([\w$.-]+)\s*\}/g;
 /** @type {Map<string, RegExp>} */
 const _templateRegexes = new Map();
@@ -133,7 +141,8 @@ const _SPECIAL_LATIN = /** @type {Record<string, string>} */ ({
 const _words = (input) =>
   String(input)
     .replace(/(\p{Ll}|\p{N})(\p{Lu})/gu, "$1 $2")
-    .replace(/(\p{Lu}+)(\p{Lu}\p{Ll})/gu, "$1 $2")
+    // A lookahead, not "(\p{Lu}+)(\p{Lu}\p{Ll})": that one is quadratic on a long run of capitals.
+    .replace(/(\p{Lu})(?=\p{Lu}\p{Ll})/gu, "$1 ")
     .replace(/[^\p{L}\p{N}]+/gu, " ")
     .trim()
     .split(/\s+/)
@@ -182,45 +191,65 @@ const _templateValue = (value, key) => {
   return typeof found === "function" ? undefined : found;
 };
 
-/** One row of the edit-distance table, reused between calls. */
+/** One row of the edit-distance table, reused between calls for short texts. */
 let _row = new Uint32Array(64);
+/** Longer rows are allocated for the call, so a huge text doesn't keep its memory. */
+const _ROW_REUSE = 4096;
 
 /**
- * Levenshtein distance between two sequences of characters.
+ * Levenshtein distance between two sequences of characters. Past `max`, it
+ * stops and returns `max + 1`.
  * @param {ArrayLike<string>} s
  * @param {ArrayLike<string>} t
+ * @param {number} [max]
  * @returns {number}
  */
-const _distance = (s, t) => {
+const _distance = (s, t, max = Infinity) => {
+  // The row follows the shorter text.
+  if (t.length > s.length) [s, t] = [t, s];
   let sLength = s.length;
   let tLength = t.length;
+  if (sLength - tLength > max) return max + 1;
   let start = 0;
-  while (start < sLength && start < tLength && s[start] === t[start]) start++;
-  while (sLength > start && tLength > start && s[sLength - 1] === t[tLength - 1]) {
+  while (start < tLength && s[start] === t[start]) start++;
+  while (tLength > start && s[sLength - 1] === t[tLength - 1]) {
     sLength--;
     tLength--;
   }
   sLength -= start;
   tLength -= start;
-  if (sLength === 0) return tLength;
-  if (tLength === 0) return sLength;
-  if (_row.length <= tLength) _row = new Uint32Array(tLength * 2);
-  const row = _row;
+  if (tLength === 0) return sLength > max ? max + 1 : sLength;
+  /** @type {Uint32Array} */
+  let row;
+  if (tLength >= _ROW_REUSE) row = new Uint32Array(tLength + 1);
+  else {
+    if (_row.length <= tLength) _row = new Uint32Array(Math.min(tLength * 2, _ROW_REUSE));
+    row = _row;
+  }
   for (let j = 0; j <= tLength; j++) row[j] = j;
+  // Only cells within `max` of the diagonal can stay under `max`: the others are skipped.
+  const banded = max < sLength;
   for (let i = 1; i <= sLength; i++) {
     const char = s[start + i - 1];
-    let diagonal = row[0];
-    row[0] = i;
-    for (let j = 1; j <= tLength; j++) {
+    const from = banded && i > max ? i - max : 1;
+    const to = banded && i + max < tLength ? i + max : tLength;
+    let diagonal = row[from - 1];
+    let left = from === 1 ? i : max + 1;
+    if (from === 1) row[0] = i;
+    let lowest = left;
+    for (let j = from; j <= to; j++) {
       const above = row[j];
       let best = char === t[start + j - 1] ? diagonal : diagonal + 1;
       if (above + 1 < best) best = above + 1;
-      if (row[j - 1] + 1 < best) best = row[j - 1] + 1;
+      if (left + 1 < best) best = left + 1;
       row[j] = best;
+      left = best;
       diagonal = above;
+      if (best < lowest) lowest = best;
     }
+    if (lowest > max) return max + 1;
   }
-  return row[tLength];
+  return row[tLength] > max ? max + 1 : row[tLength];
 };
 
 /**
@@ -426,7 +455,9 @@ function words(input) {
 
 /**
  * Removes accents (`é` becomes `e`) and spells out special Latin letters
- * (`ß` becomes `ss`, `æ` becomes `ae`).
+ * (`ß` becomes `ss`, `æ` becomes `ae`). Look-alike forms become plain ones
+ * too (Unicode NFKD), so a fullwidth `＜` becomes `<`: deburr before
+ * escaping HTML, never after.
  *
  * @example
  * str.deburr("Crème brûlée"); // "Creme brulee"
@@ -490,7 +521,8 @@ function squish(input) {
 
 /**
  * Removes HTML tags and keeps the text. This is not a sanitizer: to show
- * untrusted text in HTML, use `escapeHTML()`.
+ * untrusted text in HTML, use `escapeHTML()`. Broken markup can even leave
+ * a tag behind: `"<<a>script>"` gives `"<script>"`.
  *
  * @example
  * str.stripTags("<p>Hello <b>world</b></p>"); // "Hello world"
@@ -503,7 +535,9 @@ function stripTags(input) {
 }
 
 /**
- * Escapes `& < > " '` so the text is safe inside HTML content and attributes.
+ * Escapes `& < > " '` so the text is safe inside HTML content and quoted
+ * attribute values. It is not enough for an unquoted attribute, a URL
+ * (`javascript:` stays as it is), a script or a style.
  *
  * @example
  * str.escapeHTML('<a href="x">Tom & Jerry</a>');
@@ -895,12 +929,14 @@ function reverse(input) {
 }
 
 /**
- * Hides part of a string, like a card number or a token.
+ * Hides part of a string, like a card number or a token. When `start` and
+ * `end` would leave the whole text visible, all of it is hidden instead.
  *
  * @example
  * str.mask("4242424242424242");                           // "************4242"
  * str.mask("4242 4242 4242 4242", { keepSpaces: true });   // "**** **** **** 4242"
  * str.mask("secret-token", { start: 2, end: 2, char: "•" }); // "se••••••••en"
+ * str.mask("1234");                                         // "****"
  *
  * @param {unknown} input
  * @param {MaskOptions} [options]
@@ -908,10 +944,11 @@ function reverse(input) {
  */
 function mask(input, options = {}) {
   const chars = _graphemes(String(input));
-  const start = Math.max(0, options.start ?? 0);
-  const end = Math.max(0, options.end ?? 4);
+  let start = Math.max(0, options.start ?? 0);
+  let end = Math.max(0, options.end ?? 4);
   const char = options.char ?? "*";
-  if (start + end >= chars.length) return chars.join("");
+  // Too short to show anything safely: hide it all rather than reveal it all.
+  if (start + end >= chars.length) start = end = 0;
   return chars
     .map((c, i) => {
       if (i < start || i >= chars.length - end) return c;
@@ -965,7 +1002,8 @@ function plural(value, forms, options = {}) {
 
 /**
  * Fills `{placeholders}` with values. Dotted paths like `{user.name}` work,
- * and missing values are left alone unless you give a `fallback`.
+ * and missing values are left alone unless you give a `fallback`. Values
+ * are not escaped: to build HTML, pass them through `escapeHTML()` first.
  *
  * @example
  * str.template("Hi {name}, you have {count} messages", { name: "Jo", count: 3 });
@@ -1091,18 +1129,23 @@ function compare(a, b, options = {}) {
 
 /**
  * The number of single-character edits needed to turn `a` into `b`.
+ * The work grows with the product of both lengths: on long or untrusted
+ * texts, set `maxDistance`.
  *
  * @example
- * str.levenshtein("kitten", "sitting"); // 3
+ * str.levenshtein("kitten", "sitting");                     // 3
+ * str.levenshtein("kitten", "sitting", { maxDistance: 1 }); // 2, which means "more than 1"
  *
  * @param {unknown} a
  * @param {unknown} b
+ * @param {LevenshteinOptions} [options]
  * @returns {number}
  */
-function levenshtein(a, b) {
+function levenshtein(a, b, options = {}) {
   const x = String(a);
   const y = String(b);
-  return x === y ? 0 : _distance(_units(x), _units(y));
+  const max = options.maxDistance;
+  return x === y ? 0 : _distance(_units(x), _units(y), max === undefined || !(max >= 0) ? Infinity : Math.floor(max));
 }
 
 /**
@@ -1140,6 +1183,7 @@ function similarity(a, b) {
  */
 function closest(input, candidates, options = {}) {
   const threshold = options.threshold ?? 0.4;
+  const maxDistance = options.maxDistance === undefined || !(options.maxDistance >= 0) ? Infinity : Math.floor(options.maxDistance);
   const norm = (/** @type {string} */ s) => (options.caseSensitive ? s : s.toLowerCase());
   const needle = _units(norm(String(input)));
   let best;
@@ -1149,7 +1193,11 @@ function closest(input, candidates, options = {}) {
     const longest = Math.max(needle.length, units.length);
     // The length gap alone bounds the score: skip candidates that can't win.
     if (longest > 0 && 1 - Math.abs(needle.length - units.length) / longest <= bestScore) continue;
-    const score = longest === 0 ? 1 : 1 - _distance(needle, units) / longest;
+    // Neither can a candidate further away than the threshold or the best so far allows (rounded up, to stay exact).
+    const max = Math.min(maxDistance, Math.ceil((1 - Math.max(threshold, bestScore)) * longest));
+    const distance = longest === 0 ? 0 : _distance(needle, units, max);
+    if (distance > max) continue;
+    const score = longest === 0 ? 1 : 1 - distance / longest;
     if (score > bestScore) {
       bestScore = score;
       best = candidate;

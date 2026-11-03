@@ -111,12 +111,13 @@ describe("logger", () => {
     const circular = { a: 1 };
     circular.self = circular;
     log.log({ a: 1 }).log(circular).log(new Map([["k", 1]])).log(10n);
+    // log() has no badge, so it prints like console.log; badged lines are indented.
     assert.deepEqual(out.lines.slice(0, 3), ["{", '  "a": 1', "}"]);
     assert.ok(out.lines.some((l) => l.includes("[Circular *1]")));
     assert.ok(out.lines.some((l) => l.includes("Map(1)")));
     log.error(new Error("boom", { cause: new Error("root cause") }));
     assert.ok(out.lines.some((l) => l.startsWith("✖ ERROR Error: boom")));
-    assert.ok(out.lines.some((l) => l === "Caused by: Error: root cause"));
+    assert.ok(out.lines.some((l) => l === "        Caused by: Error: root cause"));
   });
 
   it("timestamps, scopes, children and custom delimiters", () => {

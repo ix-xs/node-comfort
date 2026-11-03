@@ -30,7 +30,7 @@ const _cp = () => (_childProcess ??= require("node:child_process"));
  * @typedef {object} RunOptions
  * @property {string} [cwd] Where to run the command.
  * @property {Record<string, string | undefined>} [env] Extra environment variables, added to `process.env`. `undefined` removes one.
- * @property {boolean} [extendEnv] Set to `false` to pass only `env`, without `process.env`.
+ * @property {boolean} [extendEnv] Set to `false` to pass only `env`, without `process.env`. Without `env`, the command then gets an empty environment.
  * @property {string | Buffer} [input] Written to the command's stdin.
  * @property {number | string} [timeout] Kill the command after this long, like `"30s"`. On Windows, what it started is stopped with it.
  * @property {AbortSignal} [signal] Kills the command when aborted. On Windows, what it started is stopped with it.
@@ -64,6 +64,19 @@ const _cp = () => (_childProcess ??= require("node:child_process"));
  * Why the process is stopping: the signal it got, or `"shutdown"` when
  * `sys.shutdown()` was called.
  * @typedef {NodeJS.Signals | "shutdown"} ShutdownReason
+ */
+
+/**
+ * Options for `which()`.
+ * @typedef {object} WhichOptions
+ * @property {string} [cwd] Where a relative path like `"./bin/tool"`, or a relative folder in `PATH`, is looked up from. Defaults to `process.cwd()`.
+ */
+
+/**
+ * Options for `open()`.
+ * @typedef {object} OpenOptions
+ * @property {string[]} [protocols] The URL schemes that may be opened, like `"https:"` or `"vscode:"`. Defaults to `["http:", "https:", "mailto:"]`: `file:`, `search-ms:` and the schemes other apps register can start programs, so they're refused unless you name them. An allowed `file:` URL is checked like a path.
+ * @property {boolean} [allowUNC] Allow a Windows network path like `\\server\share\file`. Defaults to `false`: just looking one up can send your Windows credentials to that server.
  */
 
 /**
@@ -101,18 +114,58 @@ const _escapeArg = (arg, doubleEscape) => {
   return doubleEscape ? out.replace(META, "^$1") : out;
 };
 
+/** @type {Map<string, boolean>} */
+const _forwarding = new Map();
+
+/**
+ * Does this batch file pass its arguments on with `%*`? cmd.exe then reads
+ * them a second time, so they need a second escape.
+ * @param {string} file
+ * @returns {boolean}
+ */
+const _forwardsArgs = (file) => {
+  const known = _forwarding.get(file);
+  if (known !== undefined) return known;
+  let forwards = /node_modules[\\/]\.bin[\\/]/i.test(file);
+  if (!forwards) {
+    try {
+      const head = Buffer.alloc(8192);
+      const fd = fs.openSync(file, "r");
+      try {
+        forwards = /%\*/.test(head.toString("latin1", 0, fs.readSync(fd, head, 0, head.length, 0)));
+      } finally {
+        fs.closeSync(fd);
+      }
+    } catch {
+      // Unreadable: the second escape is the one that lets nothing through.
+      forwards = true;
+    }
+  }
+  if (_forwarding.size >= 200) _forwarding.clear();
+  _forwarding.set(file, forwards);
+  return forwards;
+};
+
 /**
  * Handles Windows `.cmd` and `.bat` files.
  * @param {string} file
  * @param {string[]} args
+ * @param {string | undefined} cwd
+ * @param {string} display
  * @returns {{ file: string, args: string[], verbatim: boolean }}
  */
-const _prepare = (file, args) => {
+const _prepare = (file, args, cwd, display) => {
   if (process.platform !== "win32") return { file, args, verbatim: false };
-  const resolved = which(file) ?? file;
+  const resolved = which(file, { cwd }) ?? file;
   if (!/\.(cmd|bat)$/i.test(resolved)) return { file: resolved, args, verbatim: false };
-  const shim = /node_modules[\\/]\.bin[\\/][^\\/]+\.cmd$/i.test(resolved);
-  const line = [_escapeCommand(nodePath.normalize(resolved)), ...args.map((a) => _escapeArg(a, shim))].join(" ");
+  const forwards = _forwardsArgs(resolved);
+  for (const arg of args) {
+    // Like Rust, refuse what cmd.exe can't be given safely: it ends the command
+    // at a line break, and a file that reads %1 splits quotes its own way.
+    if (/[\r\n]/.test(arg)) throw new ProcessError(`Can't pass a line break to a batch file: ${display}`, { command: display });
+    if (!forwards && arg.includes('"')) throw new ProcessError(`Can't pass a quote to a batch file that doesn't use %*: ${display}`, { command: display });
+  }
+  const line = [_escapeCommand(nodePath.normalize(resolved)), ...args.map((a) => _escapeArg(a, forwards))].join(" ");
   return { file: process.env.comspec || "cmd.exe", args: ["/d", "/s", "/c", `"${line}"`], verbatim: true };
 };
 
@@ -121,7 +174,7 @@ const _prepare = (file, args) => {
  * @returns {Record<string, string | undefined> | undefined}
  */
 const _env = (options) => {
-  if (options.extendEnv === false) return options.env;
+  if (options.extendEnv === false) return options.env ?? {};
   if (!options.env) return process.env;
   /** @type {Record<string, string | undefined>} */
   const merged = { ...process.env };
@@ -145,7 +198,7 @@ const _spawn = (file, args, shell, display, options) =>
   new Promise((resolve, reject) => {
     const started = Date.now();
     const inherit = options.stdio === "inherit";
-    const prepared = shell ? { file, args, verbatim: false } : _prepare(file, args);
+    const prepared = shell ? { file, args, verbatim: false } : _prepare(file, args, options.cwd, display);
     const timeoutMs = options.timeout === undefined ? undefined : toMs(options.timeout, "timeout");
     if (options.signal?.aborted) return reject(new AbortError(`Command aborted: ${display}`, { cause: options.signal.reason }));
 
@@ -266,7 +319,7 @@ const _spawn = (file, args, shell, display, options) =>
  * @param {string[]} [args=[]]
  * @param {RunOptions} [options]
  * @returns {Promise<RunResult>}
- * @throws {ProcessError} If it can't start, fails (unless `reject: false`) or times out.
+ * @throws {ProcessError} If it can't start, fails (unless `reject: false`) or times out. On Windows, also when a `.cmd` or `.bat` file would get an argument with a line break, or with a quote when the file doesn't pass its arguments on with `%*`: cmd.exe can't be given those safely.
  */
 function run(file, args = [], options = {}) {
   const display = [file, ...args.map((a) => (/\s/.test(a) ? JSON.stringify(a) : a))].join(" ");
@@ -305,20 +358,24 @@ const _runnable = (file) => {
 };
 
 /**
- * Finds an executable in `PATH`, like the `which` command.
+ * Finds an executable in `PATH`, like the `which` command. A path, like
+ * `"./bin/tool"`, is looked up from `cwd` instead.
  *
  * @example
  * sys.which("git");  // "/usr/bin/git"
  * sys.which("nope"); // undefined
+ * sys.which("./tool", { cwd: "./app" });
  *
  * @param {string} command
+ * @param {WhichOptions} [options]
  * @returns {string | undefined}
  */
-function which(command) {
+function which(command, options = {}) {
   if (typeof command !== "string" || !command) return undefined;
   const isWin = process.platform === "win32";
   const searchPath = process.env.PATH ?? process.env.Path ?? "";
-  const key = `${command}\0${searchPath}\0${process.cwd()}`;
+  const cwd = nodePath.resolve(options.cwd ?? process.cwd());
+  const key = `${command}\0${searchPath}\0${cwd}`;
   const known = _found.get(key);
   // A found program is checked again with one call, in case it was removed since.
   if (known !== undefined && _runnable(known)) return known;
@@ -327,11 +384,11 @@ function which(command) {
   /** @type {string | undefined} */
   let found;
   if (command.includes("/") || command.includes("\\")) {
-    found = candidates(nodePath.resolve(command)).find(_runnable);
+    found = candidates(nodePath.resolve(cwd, command)).find(_runnable);
   } else {
     for (const dir of searchPath.split(nodePath.delimiter)) {
       if (!dir) continue;
-      found = candidates(nodePath.join(dir.replace(/^"|"$/g, ""), command)).find(_runnable);
+      found = candidates(nodePath.resolve(cwd, dir.replace(/^"|"$/g, ""), command)).find(_runnable);
       if (found) break;
     }
   }
@@ -345,20 +402,64 @@ function which(command) {
 }
 
 /**
- * Opens a URL, file or folder with the default app.
+ * The absolute path that `open()` may hand to the opener.
+ * @param {string} target
+ * @param {OpenOptions} options
+ * @returns {string}
+ */
+const _openPath = (target, options) => {
+  const full = nodePath.resolve(target);
+  // Checked before anything touches the disk: looking up a network path is enough to leak credentials.
+  if (process.platform === "win32" && /^[\\/]{2}/.test(full) && !options.allowUNC) {
+    throw new TypeError(`open(): network paths are refused without allowUNC: ${full}`);
+  }
+  try {
+    fs.statSync(full);
+  } catch (error) {
+    throw new Error(`open(): no file or folder at ${full}`, { cause: error });
+  }
+  return full;
+};
+
+/**
+ * Opens a URL, file or folder with the default app. Only `http:`,
+ * `https:` and `mailto:` URLs are opened unless you allow more with
+ * `protocols`; anything else is a path, which must exist. A program is
+ * started, as with a double click: don't pass a path you didn't choose.
  *
  * @example
  * sys.open("http://localhost:3000");
+ * sys.open("./report.html");
+ * sys.open("vscode://file/C:/app/index.js", { protocols: ["vscode:"] });
  *
- * @param {string} target
+ * @param {string} target A URL, or the path of a file or folder.
+ * @param {OpenOptions} [options]
  * @returns {boolean} `true` if the opener started.
+ * @throws {TypeError} If the URL's scheme isn't allowed, the target holds a control character (or a double quote, on Windows), or it's a network path without `allowUNC`.
+ * @throws {Error} If the path doesn't exist.
  */
-function open(target) {
+function open(target, options = {}) {
+  if (typeof target !== "string" || !target) throw new TypeError("open(): expected a URL or a path");
+  // Control characters have no business in a URL or a file name.
+  if (/[\x00-\x1f\x7f]/.test(target)) throw new TypeError(`open(): control characters are refused: ${JSON.stringify(target)}`);
+  // A quote ends the target early for Windows' start. open and xdg-open get it as an argument, and it's legal in a file name there.
+  if (process.platform === "win32" && target.includes('"')) throw new TypeError(`open(): quotes are refused on Windows: ${JSON.stringify(target)}`);
+  const allowed = (options.protocols ?? ["http:", "https:", "mailto:"]).map((p) => String(p).toLowerCase().replace(/:?$/, ":"));
+  /** @type {string} */
+  let value;
+  // A single letter before the colon is a Windows drive, not a scheme.
+  if (/^[a-z][a-z\d+.-]+:/i.test(target)) {
+    const url = new URL(target);
+    if (!allowed.includes(url.protocol)) throw new TypeError(`open(): the ${url.protocol} scheme isn't allowed (allowed: ${allowed.join(", ")})`);
+    // href encodes spaces and quotes, so the opener gets a single argument.
+    value = url.protocol === "file:" ? _openPath(require("node:url").fileURLToPath(url), options) : url.href;
+  } else {
+    value = _openPath(target, options);
+  }
   try {
-    const value = /^[a-z][a-z\d+.-]*:/i.test(target) ? target : nodePath.resolve(target);
     const child =
       process.platform === "win32"
-        ? _cp().spawn(process.env.comspec || "cmd.exe", ["/d", "/s", "/c", `start "" ${_escapeArg(value, false)}`], { detached: true, stdio: "ignore", windowsHide: true, windowsVerbatimArguments: true })
+        ? _cp().spawn(process.env.comspec || "cmd.exe", ["/d", "/s", "/c", `start "" ${`"${value}"`.replace(META, "^$1")}`], { detached: true, stdio: "ignore", windowsHide: true, windowsVerbatimArguments: true })
         : _cp().spawn(process.platform === "darwin" ? "open" : "xdg-open", [value], { detached: true, stdio: "ignore" });
     child.on("error", () => {});
     child.unref();

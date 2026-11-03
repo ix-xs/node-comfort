@@ -7,7 +7,15 @@
  * files if you need to.
  *
  * Markup: `<% red bold Error:%> disk is full`. Any style name works, plus
- * `#ff8800`, `bg#1e1e2e`, `rgb(255, 128, 0)` and `bgRgb(...)`.
+ * `#ff8800`, `bg#1e1e2e`, `rgb(255, 128, 0)` and `bgRgb(...)`. Only the
+ * first argument, the message, is read as markup: the values after it are
+ * printed as they are.
+ *
+ * What a terminal could act on is shown as text (`\x1b`, `\r`), so a logged
+ * value can't move the cursor, change the title or forge a log line. Colors
+ * from `nc.color`, links from `color.link()`, new lines and tabs still work,
+ * and the lines of a message after its first one are indented, except with
+ * `log()` when there is no scope and no timestamp.
  *
  * Levels, from chatty to severe: `trace`, `debug`, `info`, `warn`, `error`,
  * `fatal`. The default is `info`; `LOG_LEVEL` changes it. `DEBUG=1` shows
@@ -44,6 +52,7 @@ const { timeConfig } = require("./internal/shared.js");
  * @property {string} path The file to append to. Folders are created, colors removed.
  * @property {string | number} [maxSize] Rotate past this size, like `"10MB"`.
  * @property {number} [maxFiles] How many rotated files to keep. Defaults to `5`.
+ * @property {number} [mode] The permissions a new log file gets, like `0o640`. Defaults to `0o600`: only its owner can read it. A file that already exists keeps its own. Ignored on Windows.
  */
 
 /**
@@ -78,7 +87,7 @@ const { timeConfig } = require("./internal/shared.js");
  * A logger from `createLogger()`. Every method returns the logger, so calls chain.
  *
  * @typedef {object} Logger
- * @property {(...args: unknown[]) => Logger} log A plain message, no badge. Supports markup.
+ * @property {(...args: unknown[]) => Logger} log A plain message, no badge. Its first argument supports markup.
  * @property {(...args: unknown[]) => Logger} trace Very detailed diagnostics, hidden unless the level is `trace`.
  * @property {(...args: unknown[]) => Logger} debug Diagnostics, hidden unless the level is `debug` or lower.
  * @property {(...args: unknown[]) => Logger} info An `ℹ INFO` message.
@@ -124,6 +133,13 @@ const STYLE_NAMES = new Set([
 ]);
 
 const REDACTED = "[redacted]";
+// Shows control characters and escape sequences as text, keeps colors and links.
+const { safe: _safe } = require("./internal/terminal.js");
+// What JSON.stringify leaves as is, but a terminal or a JavaScript parser may act on.
+const JSON_UNSAFE = /[\x7f-\x9f\u{2028}\u{2029}]/u;
+const JSON_UNSAFE_ALL = /[\x7f-\x9f\u{2028}\u{2029}]/gu;
+/** @param {string} char */
+const _jsonEscape = (char) => `\\u${char.charCodeAt(0).toString(16).padStart(4, "0")}`;
 const TRIM_LINES = /^(\s*\r?\n)+|(\r?\n\s*)+$/g;
 const RGB = /(bg)?rgb\(\s*(\d{1,3})\s*,\s*(\d{1,3})\s*,\s*(\d{1,3})\s*\)/gi;
 const TOKEN = /^(\S+)(\s+|$)/;
@@ -227,7 +243,7 @@ const _markup = (input, delimiter, palette) => {
  * @returns {unknown}
  */
 const _redact = (value, secrets, seen) => {
-  if (value === null || typeof value !== "object" || value instanceof Date || value instanceof RegExp || value instanceof Error || ArrayBuffer.isView(value)) return value;
+  if (value === null || typeof value !== "object" || value instanceof Date || value instanceof RegExp || ArrayBuffer.isView(value)) return value;
   const known = seen.get(value);
   if (known !== undefined) return known;
   if (Array.isArray(value)) {
@@ -237,7 +253,44 @@ const _redact = (value, secrets, seen) => {
     for (const item of value) list.push(_redact(item, secrets, seen));
     return list;
   }
-  if (value instanceof Map || value instanceof Set) return value;
+  if (value instanceof Map) {
+    // Same class name in the output, values masked by their key.
+    /** @type {Map<unknown, unknown>} */
+    const map = Object.setPrototypeOf(new Map(), Object.getPrototypeOf(value));
+    seen.set(value, map);
+    for (const [key, item] of Map.prototype.entries.call(value)) {
+      map.set(_redact(key, secrets, seen), typeof key === "string" && secrets.has(key.toLowerCase()) ? REDACTED : _redact(item, secrets, seen));
+    }
+    return map;
+  }
+  if (value instanceof Set) {
+    /** @type {Set<unknown>} */
+    const set = Object.setPrototypeOf(new Set(), Object.getPrototypeOf(value));
+    seen.set(value, set);
+    for (const item of Set.prototype.values.call(value)) set.add(_redact(item, secrets, seen));
+    return set;
+  }
+  if (value instanceof Error) {
+    // Its own properties too (the cause, a code, a response), stack and message kept as they are.
+    /** @type {Record<string | symbol, unknown>} */
+    const error = Object.create(Object.getPrototypeOf(value));
+    seen.set(value, error);
+    for (const key of Reflect.ownKeys(value)) {
+      const descriptor = /** @type {PropertyDescriptor} */ (Object.getOwnPropertyDescriptor(value, key));
+      let item;
+      try {
+        item = /** @type {any} */ (value)[key];
+      } catch {
+        continue;
+      }
+      const secret = typeof key === "string" && secrets.has(key.toLowerCase());
+      const keep = key === "stack" || key === "message" || key === "name";
+      Object.defineProperty(error, key, { value: secret ? REDACTED : keep ? item : _redact(item, secrets, seen), enumerable: descriptor.enumerable, writable: true, configurable: true });
+    }
+    // The stack lives on the original, not on the copy: carry it over.
+    if (!Object.hasOwn(error, "stack")) Object.defineProperty(error, "stack", { value: value.stack, writable: true, configurable: true });
+    return error;
+  }
   /** @type {Record<string, unknown>} */
   const copy = Object.create(Object.getPrototypeOf(value));
   seen.set(value, copy);
@@ -260,7 +313,7 @@ const _stringify = (value, colors, secrets) => {
     let cause = /** @type {any} */ (value).cause;
     let depth = 0;
     while (cause !== undefined && depth++ < 5) {
-      text += `\nCaused by: ${cause instanceof Error ? cause.stack ?? cause.message : util.inspect(cause, { colors })}`;
+      text += `\nCaused by: ${cause instanceof Error ? cause.stack ?? cause.message : util.inspect(secrets ? _redact(cause, secrets, new Map()) : cause, { colors })}`;
       cause = cause instanceof Error ? /** @type {any} */ (cause).cause : undefined;
     }
     return text;
@@ -290,8 +343,9 @@ const _stringify = (value, colors, secrets) => {
  * @returns {string}
  */
 const _json = (level, args, scope, fields, secrets, now) => {
+  const time = now.toISOString();
   /** @type {Record<string, unknown>} */
-  const record = { time: now.toISOString(), level, ...fields };
+  const record = { time, level, ...fields };
   if (scope) record.scope = scope;
   const messages = [];
   for (const arg of args) {
@@ -303,17 +357,25 @@ const _json = (level, args, scope, fields, secrets, now) => {
       messages.push(typeof arg === "string" ? color.strip(arg) : _stringify(arg, false, secrets));
     }
   }
+  // A logged object may carry a `time`, `level`, `scope` or `msg` of its own: the logger's win.
+  record.time = time;
+  record.level = level;
+  if (scope) record.scope = scope;
+  else delete record.scope;
   record.msg = messages.join(" ");
+  let line;
   try {
-    return JSON.stringify(record, (key, v) => (secrets?.has(key.toLowerCase()) ? REDACTED : typeof v === "bigint" ? v.toString() : v));
+    line = JSON.stringify(record, (key, v) => (secrets?.has(key.toLowerCase()) ? REDACTED : typeof v === "bigint" ? v.toString() : v));
   } catch {
-    return JSON.stringify({ time: record.time, level, msg: `${record.msg} [unserializable fields]` });
+    line = JSON.stringify({ time, level, msg: `${record.msg} [unserializable fields]` });
   }
+  // C1 controls and line separators stay raw in JSON: escape them too.
+  return JSON_UNSAFE.test(line) ? line.replace(JSON_UNSAFE_ALL, _jsonEscape) : line;
 };
 
 /**
  * A log file: where it is, how big it may get, how big it is now.
- * @typedef {{ target: string, limit: number | undefined, keep: number, size: number, ready: boolean }} _LogFile
+ * @typedef {{ target: string, limit: number | undefined, keep: number, size: number, ready: boolean, options: { mode: number } }} _LogFile
  */
 
 /**
@@ -326,6 +388,8 @@ const _openFile = (file) => ({
   keep: Math.max(1, file.maxFiles ?? 5),
   size: 0,
   ready: false,
+  // Logs can hold personal data: a new file is for its owner only.
+  options: { mode: file.mode ?? 0o600 },
 });
 
 /** @param {string} target */
@@ -365,11 +429,11 @@ const _writeFile = (file, line) => {
       }
     }
     try {
-      fs.appendFileSync(file.target, text);
+      fs.appendFileSync(file.target, text, file.options);
     } catch {
       // The folder was removed since: make it again, once.
       fs.mkdirSync(path.dirname(file.target), { recursive: true });
-      fs.appendFileSync(file.target, text);
+      fs.appendFileSync(file.target, text, file.options);
       file.size = 0;
     }
     file.size += bytes;
@@ -464,7 +528,7 @@ const _create = (options) => {
     let face = faces[which];
     if (face) return face;
     const palette = paletteOf(which);
-    face = { palette, colors: palette.level > 0, labels: {}, scope: settings.scope ? palette.magenta(`[${settings.scope}]`) : "", stamp: "", stampAt: -1, stampWidth: 0 };
+    face = { palette, colors: palette.level > 0, labels: {}, scope: settings.scope ? palette.magenta(`[${_safe(settings.scope, false)}]`) : "", stamp: "", stampAt: -1, stampWidth: 0 };
     for (const kind of Object.keys(BADGES)) face.labels[kind] = BADGES[kind].label ? _style(palette, BADGES[kind].style.split(" "), BADGES[kind].label) : "";
     faces[which] = face;
     return face;
@@ -493,13 +557,18 @@ const _create = (options) => {
    * @param {unknown[]} args
    * @param {Date} now
    * @param {boolean} stamped
+   * @param {boolean} block A table or a box, drawn by the CLI: no markup, lines kept in place.
    * @returns {string}
    */
-  const render = (face, kind, args, now, stamped) => {
+  const render = (face, kind, args, now, stamped, block) => {
     const { palette } = face;
     let body = "";
     for (let i = 0; i < args.length; i++) {
-      const text = _markup(_stringify(args[i], face.colors, secrets), delimiter, palette);
+      const arg = args[i];
+      // Whatever is logged, a terminal must not act on it: only colors and links get through.
+      let text = _safe(_stringify(arg, face.colors, secrets), face.colors);
+      // Markup is for the message the developer wrote, never for the values after it.
+      if (i === 0 && !block && typeof arg === "string") text = _markup(text, delimiter, palette);
       body += (i ? " " : "") + (face.colors && (kind === "debug" || kind === "trace") ? palette.gray(text) : text);
     }
     let prefix = "";
@@ -517,6 +586,12 @@ const _create = (options) => {
     if (face.labels[kind]) prefix += `${face.labels[kind]} `;
     if (body.indexOf("\n") === -1) return (prefix + body).trimEnd();
     const lines = body.replace(TRIM_LINES, "").split(/\r?\n/);
+    // Without a timestamp, the next lines line up under the message, past the badge and
+    // the scope: a new line in a message can't pass for a log line of its own. Without
+    // either, like `log()`, there is nothing to forge and nothing is added, as with console.log.
+    if (!stamped && !block) {
+      padWidth += (face.scope ? color.width(face.scope) + 1 : 0) + (face.labels[kind] ? color.width(face.labels[kind]) + 1 : 0);
+    }
     const pad = " ".repeat(padWidth);
     let out = (prefix + lines[0]).trimEnd();
     for (let i = 1; i < lines.length; i++) out += `\n${pad}${lines[i]}`;
@@ -526,8 +601,9 @@ const _create = (options) => {
   /**
    * @param {keyof typeof BADGES} kind
    * @param {unknown[]} args
+   * @param {boolean} [block] A table or a box drawn by the CLI.
    */
-  const emit = (kind, args) => {
+  const emit = (kind, args, block = false) => {
     if (!on[kind]) return;
     const badge = BADGES[kind];
     const now = new Date();
@@ -538,15 +614,15 @@ const _create = (options) => {
       if (file) _writeFile(file, line);
     } else {
       const face = faceOf(badge.stream);
-      const line = render(face, kind, args, now, Boolean(settings.timestamp));
+      const line = render(face, kind, args, now, Boolean(settings.timestamp), block);
       stream.write(`${line}\n`);
       // The file gets the same line without colors: the one just made, when it has none.
-      if (file) _writeFile(file, face.colors ? render(faceOf("file"), kind, args, now, Boolean(settings.timestamp)) : line);
+      if (file) _writeFile(file, face.colors ? render(faceOf("file"), kind, args, now, Boolean(settings.timestamp), block) : line);
     }
     if (settings.onLog) {
       try {
         /** @type {unknown} */
-        const pending = settings.onLog({ time: now, level: badge.level, kind: /** @type {LogEntry["kind"]} */ (kind), scope: settings.scope, message: render(faceOf("file"), kind, args, now, false), args });
+        const pending = settings.onLog({ time: now, level: badge.level, kind: /** @type {LogEntry["kind"]} */ (kind), scope: settings.scope, message: render(faceOf("file"), kind, args, now, false, block), args });
         // An async hook that fails would otherwise be an unhandled rejection.
         if (pending && typeof (/** @type {any} */ (pending).then) === "function") /** @type {PromiseLike<unknown>} */ (pending).then(undefined, () => {});
       } catch {
@@ -587,8 +663,9 @@ const _create = (options) => {
       const ms = Number(process.hrtime.bigint() - start) / 1e6;
       return logger.log(`${label}: ${ms < 1000 ? `${Math.round(ms * 100) / 100}ms` : require("./Time.js").formatDuration(ms, { units: 2 })}`);
     },
-    table: (rows, tableOptions) => logger.log(require("./Cli.js").table(rows, { ...tableOptions, colors: faceOf("stdout").colors })),
-    box: (text, boxOptions) => logger.log(require("./Cli.js").box(text, { ...boxOptions, colors: faceOf("stdout").colors })),
+    // Drawn by the CLI from values: no markup in them.
+    table: (rows, tableOptions) => (on.log && emit("log", [require("./Cli.js").table(rows, { ...tableOptions, colors: faceOf("stdout").colors })], true), logger),
+    box: (text, boxOptions) => (on.log && emit("log", [require("./Cli.js").box(text, { ...boxOptions, colors: faceOf("stdout").colors })], true), logger),
     divider: (title) => {
       const columns = /** @type {any} */ (streamOf("stdout")).columns ?? 80;
       const width = Math.max(10, Math.min(columns, 100) - (settings.timestamp ? 11 : 0) - groups.length * 2);
@@ -651,8 +728,9 @@ function createLogger(options = {}) {
 }
 
 /**
- * Prints a message without a badge. Strings support markup, objects are
- * pretty-printed, and several arguments are joined with spaces.
+ * Prints a message without a badge. The first argument, when it's a string,
+ * supports markup; objects are pretty-printed, and several arguments are
+ * joined with spaces.
  *
  * @example
  * nc.log("<% green ✔ Saved%> in <% bold 12ms%>");

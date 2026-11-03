@@ -6,6 +6,10 @@
  * boxes. When nobody's at the keyboard (CI, pipes), prompts read plain lines
  * and animations print only their final state.
  *
+ * Tables, boxes, trees and menus show what a terminal could act on as text
+ * (`\x1b`, `\r`), so a value can't move the cursor or break the layout.
+ * Colors and links in them still work.
+ *
  * @example
  * const { flags } = cli.args({
  *   port: { type: "number", short: "p", default: 3000, description: "Port to listen on" },
@@ -265,18 +269,28 @@ const _align = (text, width, align) => {
   return text + " ".repeat(gap);
 };
 
+const { safe: _safe } = require("./internal/terminal.js");
+
+/**
+ * Text a terminal can't act on: control characters and escape sequences are
+ * shown as text (`\x1b`, `\r`). Colors and links stay, a cell may be colored
+ * on purpose.
+ * @param {string} text
+ */
+const _text = (text) => _safe(text, true);
+
 /** @param {unknown} value */
 const _cell = (value) => {
   if (value === null || value === undefined) return "";
   if (value instanceof Date) return Number.isNaN(value.getTime()) ? "Invalid Date" : value.toISOString();
   if (typeof value === "object") {
     try {
-      return JSON.stringify(value);
+      return _text(JSON.stringify(value) ?? String(value));
     } catch {
-      return String(value);
+      return _text(String(value));
     }
   }
-  return String(value);
+  return _text(String(value));
 };
 
 /** @param {NodeJS.WriteStream | undefined} stream */
@@ -336,7 +350,7 @@ function table(rows, options = {}) {
   const columns = keys.map((column) => (typeof column === "object" ? column : { key: column }));
   if (!columns.length) return "";
   const showHeader = options.header ?? !isArrayRows;
-  const headers = columns.map((column) => column.header ?? String(column.key));
+  const headers = columns.map((column) => _text(column.header ?? String(column.key)));
   const widths = headers.map((header) => Math.max(markdown ? 3 : 1, showHeader ? color.width(header) : 0));
   const numeric = columns.map(() => rows.length > 0);
 
@@ -417,8 +431,8 @@ function box(text, options = {}) {
   const palette = _palette(options.colors);
   const b = BORDERS[options.border ?? "rounded"];
   const pad = typeof options.padding === "number" ? { x: options.padding, y: Math.floor(options.padding / 2) } : { x: 2, y: 0, ...options.padding };
-  const lines = String(text).split(_LINE_BREAK);
-  const title = options.title ? ` ${options.title} ` : "";
+  const lines = _text(String(text)).split(_LINE_BREAK);
+  const title = options.title ? ` ${_text(options.title)} ` : "";
   let longest = Math.max(options.width ?? 0, color.width(title) + 2 - pad.x * 2);
   for (const line of lines) longest = Math.max(longest, color.width(line));
   const inner = longest + pad.x * 2;
@@ -495,7 +509,8 @@ function tree(data, options = {}) {
     entries.forEach(([label, value], i) => {
       const isLast = i === entries.length - 1;
       const nested = isBranch(value);
-      const text = nested || value === null || value === undefined || value === true ? label : `${label}: ${_cell(value)}`;
+      const name = _text(label);
+      const text = nested || value === null || value === undefined || value === true ? name : `${name}: ${_cell(value)}`;
       const [first, ...rest] = text.split(_LINE_BREAK);
       out.push(indent + (isLast ? last : branch) + first);
       for (const line of rest) out.push(indent + (isLast ? blank : pipe) + line);
@@ -924,16 +939,28 @@ const _normalizeChoices = (choices) =>
   choices.map((c) => (typeof c === "string" ? { label: c, value: /** @type {V} */ (/** @type {unknown} */ (c)) } : c));
 
 /**
+ * The question and its numbered choices, for when nobody can use the arrow keys.
+ * @param {string} question
+ * @param {Array<{ label: string, disabled?: boolean }>} items
+ */
+const _numbered = (question, items) =>
+  `? ${_text(String(question))}\n${items.map((it, i) => `  ${i + 1}. ${_text(String(it.label))}${it.disabled ? " (disabled)" : ""}`).join("\n")}\n`;
+
+/**
  * The arrow-key list behind `select()` and `multiselect()`.
  * @template V
- * @param {string} question
+ * @param {string} rawQuestion
  * @param {Array<{ label: string, value: V, hint?: string, disabled?: boolean }>} items
  * @param {SelectOptions} options
  * @param {boolean} multiple
  * @returns {Promise<number[]>}
  */
-const _interactiveList = (question, items, options, multiple) =>
+const _interactiveList = (rawQuestion, items, options, multiple) =>
   new Promise((resolve, reject) => {
+    // Choices often come from data: shown as text, they can't drive the terminal.
+    const question = _text(String(rawQuestion));
+    const labels = items.map((item) => _text(String(item.label)));
+    const hints = items.map((item) => (item.hint ? _text(String(item.hint)) : ""));
     const input = options.input ?? process.stdin;
     const output = options.output ?? process.stdout;
     const palette = color.create(color.detect(output));
@@ -957,8 +984,8 @@ const _interactiveList = (question, items, options, multiple) =>
         const item = items[i];
         const active = i === cursor;
         const mark = multiple ? (selected.has(i) ? palette.green("◉ ") : "◯ ") : "";
-        const text = item.disabled ? palette.gray(`${item.label} (disabled)`) : active ? palette.cyan(item.label) : item.label;
-        lines.push(`${active ? palette.cyan("❯") : " "} ${mark}${text}${item.hint ? ` ${palette.gray(item.hint)}` : ""}`);
+        const text = item.disabled ? palette.gray(`${labels[i]} (disabled)`) : active ? palette.cyan(labels[i]) : labels[i];
+        lines.push(`${active ? palette.cyan("❯") : " "} ${mark}${text}${hints[i] ? ` ${palette.gray(hints[i])}` : ""}`);
       }
       if (error) lines.push(palette.red(`✖ ${error}`));
       // Going back up assumes one row per line, so nothing may wrap.
@@ -1009,7 +1036,7 @@ const _interactiveList = (question, items, options, multiple) =>
         } else {
           const picked = multiple ? [...selected].sort((a, b) => a - b) : [cursor];
           // Fold the list into one line that says what was chosen.
-          output.write(`${_up(drawn)}${CLEAR_BELOW}${_oneRow(`${palette.green("✔")} ${question} ${palette.cyan(picked.map((i) => items[i].label).join(", "))}`, output)}\n`);
+          output.write(`${_up(drawn)}${CLEAR_BELOW}${_oneRow(`${palette.green("✔")} ${question} ${palette.cyan(picked.map((i) => labels[i]).join(", "))}`, output)}\n`);
           cleanup();
           resolve(picked);
           return;
@@ -1053,7 +1080,7 @@ async function select(question, choices, options = {}) {
     return items[index].value;
   }
   const output = options.output ?? process.stdout;
-  output.write(`? ${question}\n${items.map((it, i) => `  ${i + 1}. ${it.label}${it.disabled ? " (disabled)" : ""}`).join("\n")}\n`);
+  output.write(_numbered(question, items));
   for (;;) {
     const answer = (await _ask(`Choose 1-${items.length}${options.default !== undefined ? ` (${options.default + 1})` : ""}: `, input, output)).trim();
     const index = answer === "" && options.default !== undefined ? options.default : Number(answer) - 1;
@@ -1083,7 +1110,7 @@ async function multiselect(question, choices, options = {}) {
     return indexes.map((i) => items[i].value);
   }
   const output = options.output ?? process.stdout;
-  output.write(`? ${question}\n${items.map((it, i) => `  ${i + 1}. ${it.label}${it.disabled ? " (disabled)" : ""}`).join("\n")}\n`);
+  output.write(_numbered(question, items));
   for (;;) {
     const answer = (await _ask("Choose (comma-separated numbers): ", input, output)).trim();
     const indexes = answer === "" ? [] : answer.split(/[\s,]+/).filter(Boolean).map((n) => Number(n) - 1);

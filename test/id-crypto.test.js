@@ -119,11 +119,18 @@ describe("crypto: encryption", () => {
 });
 
 describe("crypto: JWT", () => {
-  const SECRET = "your-256-bit-secret";
+  const SECRET = "a-shared-secret-of-at-least-32-bytes";
 
-  it("verifies the reference token from jwt.io", () => {
-    const token = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiIxMjM0NTY3ODkwIiwibmFtZSI6IkpvaG4gRG9lIiwiaWF0IjoxNTE2MjM5MDIyfQ.SflKxwRJSMeKKF2QT4fwpMeJf36POk6yJV_adQssw5c";
+  it("verifies a token signed by someone else", () => {
+    const nodeCrypto = require("node:crypto");
+    const signed = `${Buffer.from('{"alg":"HS256","typ":"JWT"}').toString("base64url")}.${Buffer.from('{"sub":"1234567890","name":"John Doe","iat":1516239022}').toString("base64url")}`;
+    const token = `${signed}.${nodeCrypto.createHmac("sha256", SECRET).update(signed).digest("base64url")}`;
     assert.deepEqual(crypto.verifyJWT(token, SECRET), { sub: "1234567890", name: "John Doe", iat: 1516239022 });
+  });
+
+  it("refuses the short secret of the jwt.io example", () => {
+    const token = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiIxMjM0NTY3ODkwIiwibmFtZSI6IkpvaG4gRG9lIiwiaWF0IjoxNTE2MjM5MDIyfQ.SflKxwRJSMeKKF2QT4fwpMeJf36POk6yJV_adQssw5c";
+    assert.throws(() => crypto.verifyJWT(token, "your-256-bit-secret"), TypeError);
   });
 
   it("signs and verifies with claims", () => {
@@ -149,7 +156,7 @@ describe("crypto: JWT", () => {
     const expired = crypto.signJWT({}, SECRET, { expiresIn: -10 });
     assert.equal(code(() => crypto.verifyJWT(expired, SECRET)), "ERR_JWT_EXPIRED");
     assert.equal(code(() => crypto.verifyJWT(expired, SECRET, { clockTolerance: 60 })), "no error");
-    assert.equal(code(() => crypto.verifyJWT(crypto.signJWT({}, SECRET), "wrong")), "ERR_JWT_SIGNATURE");
+    assert.equal(code(() => crypto.verifyJWT(crypto.signJWT({}, SECRET), "another-secret-of-at-least-32-bytes")), "ERR_JWT_SIGNATURE");
     assert.equal(code(() => crypto.verifyJWT(crypto.signJWT({}, SECRET, { notBefore: "1h" }), SECRET)), "ERR_JWT_NOT_BEFORE");
     assert.equal(code(() => crypto.verifyJWT(crypto.signJWT({}, SECRET, { issuer: "a" }), SECRET, { issuer: "b" })), "ERR_JWT_CLAIM");
     assert.equal(code(() => crypto.verifyJWT(crypto.signJWT({}, SECRET, { algorithm: "HS384" }), SECRET, { algorithms: ["HS256"] })), "ERR_JWT_ALGORITHM");
