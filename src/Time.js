@@ -17,9 +17,10 @@
 const { types } = require("node:util");
 
 /**
- * A date: a `Date`, a timestamp in ms, or a string `new Date()` understands
- * (ISO 8601 is safest).
- * @typedef {Date | number | string} DateInput
+ * A date: a `Date`, a timestamp in ms, a string `new Date()` understands
+ * (ISO 8601 is safest), or an instant from `Temporal`, like a
+ * `Temporal.Instant` or a `Temporal.ZonedDateTime`.
+ * @typedef {Date | number | string | { readonly epochMilliseconds: number }} DateInput
  */
 
 /**
@@ -117,8 +118,13 @@ const { types } = require("node:util");
  */
 
 /**
- * A schedule returned by `every()` and `cron()`.
- * @typedef {object} ScheduledTask
+ * A schedule returned by `every()` and `cron()`. With `using`, it stops at
+ * the end of the block.
+ * @typedef {_ScheduledTaskMethods & Disposable} ScheduledTask
+ */
+
+/**
+ * @typedef {object} _ScheduledTaskMethods
  * @property {() => void} stop Stops the schedule. A run in progress finishes.
  * @property {() => Date | undefined} next When the next run is planned.
  * @property {() => boolean} isRunning Whether a run is in progress.
@@ -145,7 +151,13 @@ const _config = shared.timeConfig;
  * @param {DateInput | undefined} value
  * @returns {Date}
  */
-const _toDate = (value) => (types.isDate(value) ? new Date(value.getTime()) : value === undefined ? new Date() : new Date(value));
+const _toDate = (value) => {
+  if (types.isDate(value)) return new Date(value.getTime());
+  if (value === undefined) return new Date();
+  // Temporal.Instant and Temporal.ZonedDateTime say which instant they are.
+  if (typeof value === "object" && value !== null && typeof value.epochMilliseconds === "number") return new Date(value.epochMilliseconds);
+  return new Date(/** @type {string | number} */ (value));
+};
 
 /**
  * @param {number} n
@@ -156,6 +168,34 @@ const _pad = (n, len = 2) => String(Math.abs(n)).padStart(len, "0");
 
 /** @type {Map<string, Intl.DateTimeFormat>} */
 const _dtfCache = new Map();
+
+/**
+ * Temporal, where the runtime has it. Each zone is tried once: one that
+ * Temporal refuses goes through Intl, which then says what is wrong with it.
+ * @type {any}
+ */
+const _temporal = typeof (/** @type {any} */ (globalThis).Temporal) === "object" ? /** @type {any} */ (globalThis).Temporal : undefined;
+/** @type {Map<string, boolean>} */
+const _temporalZones = new Map();
+/**
+ * @param {string} timeZone
+ * @returns {boolean}
+ */
+const _byTemporal = (timeZone) => {
+  if (!_temporal) return false;
+  let ok = _temporalZones.get(timeZone);
+  if (ok === undefined) {
+    try {
+      _temporal.Instant.fromEpochMilliseconds(0).toZonedDateTimeISO(timeZone);
+      ok = true;
+    } catch {
+      ok = false;
+    }
+    if (_temporalZones.size >= 500) _temporalZones.clear();
+    _temporalZones.set(timeZone, ok);
+  }
+  return ok;
+};
 
 /**
  * Calendar parts of a date in a time zone.
@@ -169,6 +209,10 @@ const _parts = (d, timeZone) => {
       year: d.getFullYear(), month: d.getMonth() + 1, day: d.getDate(), hour: d.getHours(),
       minute: d.getMinutes(), second: d.getSeconds(), ms: d.getMilliseconds(), weekday: d.getDay(),
     };
+  }
+  if (_byTemporal(timeZone)) {
+    const z = _temporal.Instant.fromEpochMilliseconds(d.getTime()).toZonedDateTimeISO(timeZone);
+    return { year: z.year, month: z.month, day: z.day, hour: z.hour, minute: z.minute, second: z.second, ms: z.millisecond, weekday: z.dayOfWeek % 7 };
   }
   let dtf = _dtfCache.get(timeZone);
   if (!dtf) {
@@ -196,6 +240,7 @@ const _parts = (d, timeZone) => {
  */
 const _offset = (d, timeZone) => {
   if (!timeZone) return -d.getTimezoneOffset();
+  if (_byTemporal(timeZone)) return Math.round(_temporal.Instant.fromEpochMilliseconds(d.getTime()).toZonedDateTimeISO(timeZone).offsetNanoseconds / 6e10);
   const p = _parts(d, timeZone);
   const asUTC = Date.UTC(p.year, p.month - 1, p.day, p.hour, p.minute, p.second, p.ms);
   return Math.round((asUTC - d.getTime()) / 60_000);
@@ -246,6 +291,16 @@ const _daysIn = (year, month) => (month === 2 ? ((year % 4 === 0 && year % 100 !
 const _instantOf = (year, month, day, hour, minute, second, ms, timeZone) => {
   if (!timeZone) return new Date(year, month - 1, day, hour, minute, second, ms);
   const guess = Date.UTC(year, month - 1, day, hour, minute, second, ms);
+  if (_byTemporal(timeZone) && Number.isFinite(guess)) {
+    // Date.UTC carries what overflows (day 32, hour 24) like the code below does.
+    const at = new Date(guess);
+    const wall = _temporal.PlainDateTime.from({
+      year: at.getUTCFullYear(), month: at.getUTCMonth() + 1, day: at.getUTCDate(),
+      hour: at.getUTCHours(), minute: at.getUTCMinutes(), second: at.getUTCSeconds(), millisecond: at.getUTCMilliseconds(),
+    });
+    // "compatible": a time that happens twice keeps the first one, a skipped time moves past the gap.
+    return new Date(wall.toZonedDateTime(timeZone, { disambiguation: "compatible" }).epochMilliseconds);
+  }
   // The offsets a day before and a day after frame any clock change.
   const early = guess - _offset(new Date(guess - MS.d), timeZone) * 60_000;
   const late = guess - _offset(new Date(guess + MS.d), timeZone) * 60_000;
@@ -1385,14 +1440,16 @@ function every(interval, task, options = {}) {
   };
   cancel = _longTimeout(tick, nextAt - Date.now(), options.unref ?? false);
 
+  const stop = () => {
+    stopped = true;
+    cancel();
+  };
   return {
-    stop: () => {
-      stopped = true;
-      cancel();
-    },
+    stop,
     next: () => (stopped ? undefined : new Date(nextAt)),
     isRunning: () => running,
     runs: () => runs,
+    [Symbol.dispose]: stop,
   };
 }
 
@@ -1521,15 +1578,17 @@ function cron(expression, task, options = {}) {
     });
   }
 
+  const stop = () => {
+    stopped = true;
+    nextDate = undefined;
+    cancel();
+  };
   return {
-    stop: () => {
-      stopped = true;
-      nextDate = undefined;
-      cancel();
-    },
+    stop,
     next: () => (stopped ? undefined : nextDate),
     isRunning: () => running,
     runs: () => runs,
+    [Symbol.dispose]: stop,
   };
 }
 

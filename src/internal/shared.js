@@ -393,7 +393,16 @@ const sleepSync = (ms) => {
   Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);
 };
 
+/**
+ * A function that undoes something, usable with `using` too: the undoing then
+ * happens at the end of the block.
+ * @param {() => void} fn
+ * @returns {(() => void) & Disposable}
+ */
+const disposable = (fn) => /** @type {(() => void) & Disposable} */ (Object.defineProperty(fn, Symbol.dispose, { value: fn }));
+
 module.exports = {
+  disposable,
   UNSAFE_KEYS,
   MS,
   timeConfig,

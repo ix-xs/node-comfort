@@ -29,7 +29,12 @@ const { sleep, toMs } = require("./internal/shared.js");
 
 /**
  * The task returned by `when()`. Every method returns the task, so calls chain.
- * @typedef {object} WhenTask
+ * With `using`, it stops at the end of the block.
+ * @typedef {_WhenTaskMethods & Disposable} WhenTask
+ */
+
+/**
+ * @typedef {object} _WhenTaskMethods
  * @property {() => WhenTask} start Starts checking. A stopped task can't be restarted.
  * @property {() => WhenTask} stop Stops checking and clears the timers.
  * @property {<E extends "trigger" | "error" | "timeout">(event: E, handler: E extends "error" ? (error: unknown) => void : (payload: any) => void) => WhenTask} on Listens to `"trigger"` (the condition is true), `"error"` (it threw) or `"timeout"`.
@@ -41,8 +46,12 @@ const { sleep, toMs } = require("./internal/shared.js");
  */
 
 /**
- * Returned by `dontCrash()`.
- * @typedef {object} DontCrashController
+ * Returned by `dontCrash()`. With `using`, what it installed goes at the end of the block.
+ * @typedef {_DontCrashMethods & Disposable} DontCrashController
+ */
+
+/**
+ * @typedef {object} _DontCrashMethods
  * @property {<E extends DontCrashEvent>(event: E, handler?: E extends "error" ? (error: unknown) => void : E extends "sig" ? (signal: NodeJS.Signals) => void : (code: number) => void) => DontCrashController} on Replaces the handler for an event. Call it without a handler to restore the default one.
  * @property {() => void} dispose Removes everything `dontCrash()` installed.
  */
@@ -155,6 +164,9 @@ function when(predicate, payload = {}, options = {}) {
       listeners[event]?.add(handler);
       return task;
     },
+    [Symbol.dispose]() {
+      halt();
+    },
   };
   return task;
 }
@@ -238,6 +250,9 @@ function dontCrash() {
     dispose() {
       unlisten(installed.map(([event]) => event));
       if (_dontCrashDispose === controller.dispose) _dontCrashDispose = undefined;
+    },
+    [Symbol.dispose]() {
+      controller.dispose();
     },
   };
   _dontCrashDispose = controller.dispose;

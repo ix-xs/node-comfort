@@ -135,8 +135,12 @@ const { sleepSync, toMs } = require("./internal/shared.js");
  */
 
 /**
- * Returned by `watch()`.
- * @typedef {object} Watcher
+ * Returned by `watch()`. With `using`, the watch stops at the end of the block.
+ * @typedef {_WatcherMethods & Disposable} Watcher
+ */
+
+/**
+ * @typedef {object} _WatcherMethods
  * @property {<E extends "change" | "rename" | "all" | "error">(event: E, callback: E extends "all" ? (event: "change" | "rename", file: string) => void : E extends "error" ? (error: Error) => void : (file: string) => void) => Watcher} on Listens for changes. `"all"` also gets the event name. `"error"` tells you the watch broke, for instance because the folder was deleted.
  * @property {() => void} stop Stops watching.
  * @property {() => Watcher} pause Ignores events until `resume()`.
@@ -1571,6 +1575,9 @@ function watch(options = {}) {
     resume() {
       paused = false;
       return controller;
+    },
+    [Symbol.dispose]() {
+      controller.stop();
     },
   };
   return controller;

@@ -2188,3 +2188,49 @@ describe("the fetch of Node.js", () => {
     assert.deepEqual(result.stdout.split(/\r?\n/), ["ERR_NETWORK", "still here"]);
   });
 });
+
+describe("2.2: Node 26 features, available everywhere they can be", () => {
+  it("objects that hold a resource stop when they are disposed", async () => {
+    const events = new nc.Emitter();
+    let calls = 0;
+    const off = events.on("x", () => calls++);
+    events.emit("x");
+    off[Symbol.dispose]();
+    events.emit("x");
+    assert.equal(calls, 1);
+    const any = events.onAny(() => calls++);
+    any[Symbol.dispose]();
+    events.emit("x");
+    assert.equal(calls, 1);
+
+    const task = nc.time.every("1h", () => {});
+    task[Symbol.dispose]();
+    assert.equal(task.next(), undefined);
+    const job = nc.time.cron("0 0 1 1 *", () => {});
+    job[Symbol.dispose]();
+    assert.equal(job.next(), undefined);
+
+    const sink = { written: "", write(/** @type {string} */ text) { this.written += text; }, isTTY: false };
+    const spinner = nc.cli.spinner("working", { stream: /** @type {any} */ (sink) }).start();
+    spinner[Symbol.dispose]();
+    const bar = nc.cli.progress({ total: 2, stream: /** @type {any} */ (sink) });
+    bar.tick();
+    bar[Symbol.dispose]();
+    assert.ok(sink.written.length > 0);
+
+    const when = nc.when(() => false).start();
+    when[Symbol.dispose]();
+    const removeHandler = nc.sys.onShutdown(() => {});
+    removeHandler[Symbol.dispose]();
+  });
+
+  it("dates can be Temporal instants", { skip: typeof (/** @type {any} */ (globalThis).Temporal) === "undefined" && "no Temporal in this version of Node.js" }, () => {
+    const T = /** @type {any} */ (globalThis).Temporal;
+    const instant = T.Instant.from("2024-03-30T11:00:00Z");
+    const zoned = instant.toZonedDateTimeISO("Europe/Paris");
+    assert.equal(time.format(instant, "YYYY-MM-DD HH:mm", { timeZone: "UTC" }), "2024-03-30 11:00");
+    assert.equal(time.format(zoned, "HH:mm", { timeZone: "Europe/Paris" }), "12:00");
+    assert.equal(time.add(zoned, 1, "day", { timeZone: "Europe/Paris" }).toISOString(), "2024-03-31T10:00:00.000Z");
+    assert.equal(time.diff(T.Instant.from("2024-01-02T00:00:00Z"), T.Instant.from("2024-01-01T00:00:00Z"), "days"), 1);
+  });
+});
