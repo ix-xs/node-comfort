@@ -1664,32 +1664,17 @@ describe("sqlite", () => {
     assert.equal(db.inTransaction, false);
   });
 
-  it("converts columns of joins where Node says where they come from, and of single tables everywhere", () => {
+  it("converts the columns of joins, renamed columns and views", () => {
     const db = open();
     db.createTable({ name: "posts", columns: { id: { type: "INTEGER", primaryKey: true }, user_id: { type: "INTEGER" }, meta: { type: "JSON" }, pinned: { type: "BOOLEAN" } } });
     db.insert("posts", { id: 1, user_id: 1, meta: { tags: ["x"] }, pinned: true });
-    const statement = /** @type {any} */ (db.native.prepare("SELECT 1"));
     const sql = "SELECT p.meta, p.pinned AS top, u.active FROM posts p JOIN users u ON u.id = p.user_id";
-    if (typeof statement.setReturnArrays === "function" && typeof statement.columns === "function") {
-      assert.deepEqual(db.queryAll(sql), [{ meta: { tags: ["x"] }, top: true, active: true }]);
-    }
+    assert.deepEqual(db.queryAll(sql), [{ meta: { tags: ["x"] }, top: true, active: true }]);
     assert.deepEqual(db.queryOne("SELECT * FROM posts WHERE id = ?", 1), { id: 1, user_id: 1, meta: { tags: ["x"] }, pinned: true });
     assert.deepEqual([...db.iterate("SELECT id, pinned FROM posts")], [{ id: 1, pinned: true }]);
-
-    // what Node 22.13 offers: rows come as objects, without column descriptions
-    const proto = Object.getPrototypeOf(statement);
-    const saved = proto.setReturnArrays;
-    proto.setReturnArrays = undefined;
-    try {
-      const old = open();
-      assert.deepEqual(old.get("users", { id: 1 }, { columns: ["id", "active", "settings"] }), { id: 1, active: true, settings: { theme: "dark", beta: true, tags: ["a", "b"] } });
-      assert.equal(Object.getPrototypeOf(old.getAll("users")[0]), Object.prototype);
-      assert.deepEqual(old.queryOne("SELECT id, active FROM users WHERE id = ?", 3), { id: 3, active: false });
-      old.exec("CREATE VIEW admins AS SELECT id, active, settings AS prefs FROM users WHERE role = 'admin'");
-      assert.deepEqual(old.getAll("admins"), [{ id: 2, active: true, prefs: old.get("users", { id: 2 }).settings }]);
-    } finally {
-      proto.setReturnArrays = saved;
-    }
+    assert.equal(Object.getPrototypeOf(db.getAll("users")[0]), Object.prototype);
+    db.exec("CREATE VIEW admins AS SELECT id, active, settings AS prefs FROM users WHERE role = 'admin'");
+    assert.deepEqual(db.getAll("admins"), [{ id: 2, active: true, prefs: db.get("users", { id: 2 }).settings }]);
   });
 });
 
@@ -2174,13 +2159,14 @@ describe("found on the first run of the CI", () => {
 });
 
 describe("the fetch of Node.js", () => {
-  // undici 6.29.1, 7.30.1 and 8.12.2, as in Node.js 22.23.4, 24.22.1 and 26.12.1. Before them this crashes,
-  // and nothing in the package can prevent it: the guide and SECURITY.md say so.
+  // undici 6.29.1, 7.30.1 and 8.12.2, as in Node.js 22.23.4, 24.22.1 and 26.12.1, the oldest versions the
+  // package supports. Before them this crashes, and nothing in the package can prevent it.
   const FIXED = /** @type {Record<string, number[]>} */ ({ 6: [29, 1], 7: [30, 1], 8: [12, 2] });
   const [major, minor, patch] = String(process.versions.undici).split(".").map(Number);
   const fixed = FIXED[major] !== undefined && (minor > FIXED[major][0] || (minor === FIXED[major][0] && patch >= FIXED[major][1]));
 
-  it("a response with too many content codings fails without stopping the process", { skip: fixed ? false : `undici ${process.versions.undici} has the flaw` }, async () => {
+  it("a response with too many content codings fails without stopping the process", async () => {
+    assert.ok(fixed, `undici ${process.versions.undici} has the flaw: this version of Node.js is not supported`);
     const script = `
       const http = require("node:http");
       const nc = require(${JSON.stringify(require.resolve(".."))});

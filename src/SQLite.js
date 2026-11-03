@@ -1,7 +1,7 @@
 "use strict";
 
 /**
- * SQLite made pleasant, on the engine built into Node.js (22.13+): CRUD with
+ * SQLite made pleasant, on the engine built into Node.js: CRUD with
  * rich filters, JSON and boolean columns, transactions, migrations and
  * backups. Methods are synchronous, like the engine, but `await` still
  * works. Errors are `SQLiteError`s. Values are always bound as parameters
@@ -215,7 +215,7 @@ const { toMs } = require("./internal/shared.js");
 
 /**
  * A prepared query and what's needed to turn its rows into objects.
- * @typedef {{ stmt: import("node:sqlite").StatementSync, names: string[] | undefined, kinds: Uint8Array | undefined, table: string | undefined }} _Reader
+ * @typedef {{ stmt: import("node:sqlite").StatementSync, names: string[], kinds: Uint8Array | undefined }} _Reader
  */
 
 const IDENTIFIER = /^[A-Za-z_][A-Za-z0-9_]*$/;
@@ -268,7 +268,7 @@ const _engine = () => {
   try {
     _DatabaseSync = require("node:sqlite").DatabaseSync;
   } catch (error) {
-    throw new SQLiteError(`node:sqlite is not available in Node.js ${process.version}: nc.SQLite requires Node.js 22.13 or newer`, { cause: error });
+    throw new SQLiteError(`node:sqlite is not available in Node.js ${process.version}: nc.SQLite requires Node.js 22.23.4, 24.22.1, 26.12.1 or newer`, { cause: error });
   } finally {
     process.emitWarning = original;
   }
@@ -429,10 +429,6 @@ class SQLite {
   // Tables and views known to exist, so that each call doesn't ask SQLite again.
   /** @type {Set<string>} */
   #known = new Set();
-  /** @type {Map<string, Map<string, number>>} */
-  #columnKinds = new Map();
-  /** @type {Map<string, string | undefined>} */
-  #sources = new Map();
   /** @type {{ json: boolean, booleans: boolean, dates: boolean }} */
   #read;
   #depth = 0;
@@ -494,9 +490,9 @@ class SQLite {
   }
 
   /**
-   * A prepared query. Where Node allows it, rows are fetched as arrays and
-   * turned into objects here: it's faster than copying the objects Node
-   * returns, and Node says which column each value comes from.
+   * A prepared query. Rows are fetched as arrays and turned into objects here:
+   * it's faster than copying the objects Node returns, and Node says which
+   * column each value comes from.
    * @param {string} sql
    * @param {boolean} [keep=true] `false` for a statement used once, like an iteration.
    * @returns {_Reader}
@@ -510,14 +506,9 @@ class SQLite {
     } catch (error) {
       throw _wrap(error, sql);
     }
-    reader = { stmt, names: undefined, kinds: undefined, table: undefined };
-    const modern = /** @type {any} */ (stmt);
-    if (typeof modern.setReturnArrays === "function" && typeof modern.columns === "function") {
-      modern.setReturnArrays(true);
-      this.#describe(reader);
-    } else {
-      reader.table = this.#sourceTable(sql);
-    }
+    stmt.setReturnArrays(true);
+    reader = { stmt, names: [], kinds: undefined };
+    this.#describe(reader);
     if (keep) {
       if (this.#readers.size >= 500) this.#readers.delete(/** @type {string} */ (this.#readers.keys().next().value));
       this.#readers.set(sql, reader);
@@ -530,8 +521,7 @@ class SQLite {
    * @param {_Reader} reader
    */
   #describe(reader) {
-    /** @type {Array<{ name: string, type: string | null }>} */
-    const columns = /** @type {any} */ (reader.stmt).columns();
+    const columns = reader.stmt.columns();
     reader.names = columns.map((column) => column.name);
     reader.kinds = undefined;
     for (let i = 0; i < columns.length; i++) {
@@ -549,16 +539,6 @@ class SQLite {
   #row(reader, raw) {
     /** @type {Record<string, unknown>} */
     const row = {};
-    if (reader.names === undefined) {
-      // Node before 22.16: a row is an object without a prototype, copied into a plain one.
-      for (const key in raw) row[key] = raw[key];
-      if (reader.table === undefined) return row;
-      for (const [key, kind] of this.#kinds(reader.table)) {
-        const value = row[key];
-        if (value !== null && value !== undefined) row[key] = _convert(kind, value);
-      }
-      return row;
-    }
     // A statement prepared before the table changed can come back with other columns.
     if (raw.length !== reader.names.length) this.#describe(reader);
     const names = reader.names;
@@ -621,30 +601,9 @@ class SQLite {
    * @returns {void}
    */
   #invalidate() {
-    this.#columnKinds.clear();
     this.#statements.clear();
     this.#readers.clear();
     this.#known.clear();
-    this.#sources.clear();
-  }
-
-  /**
-   * The columns of a table that are converted when read. Only used on Node
-   * versions that don't describe the columns of a query.
-   * @param {string} table
-   * @returns {Map<string, number>}
-   */
-  #kinds(table) {
-    let kinds = this.#columnKinds.get(table);
-    if (!kinds) {
-      kinds = new Map();
-      for (const col of /** @type {Array<{ name: string, type: string }>} */ (/** @type {unknown} */ (this.#prepare(`PRAGMA table_info(${_id(table, "table name")})`).all()))) {
-        const kind = _kindOf(String(col.type).toUpperCase(), this.#read);
-        if (kind) kinds.set(col.name, kind);
-      }
-      this.#columnKinds.set(table, kinds);
-    }
-    return kinds;
   }
 
   /**
@@ -790,25 +749,6 @@ class SQLite {
   }
 
   /**
-   * The table a simple `SELECT` reads from, for type conversions.
-   * @param {string} sql
-   * @returns {string | undefined}
-   */
-  #sourceTable(sql) {
-    if (this.#sources.has(sql)) return this.#sources.get(sql);
-    /** @type {string | undefined} */
-    let table;
-    if (!/\bjoin\b/i.test(sql)) {
-      const match = /^\s*select\b[\s\S]*?\bfrom\s+"?([A-Za-z_][A-Za-z0-9_]*)"?(?:\s+(?:as\s+)?(?!where\b|order\b|limit\b|group\b)[A-Za-z_]\w*)?\s*(?:where\b|order\b|limit\b|group\b|;|$)/i.exec(sql);
-      // A view has column types too: SQLite takes them from the tables it reads.
-      if (match && (this.#known.has(match[1]) || this.#prepare(SOURCE_EXISTS).get(match[1]) !== undefined)) table = match[1];
-    }
-    if (this.#sources.size >= 500) this.#sources.clear();
-    this.#sources.set(sql, table);
-    return table;
-  }
-
-  /**
    * Runs SQL that doesn't return rows. Without parameters, you can pass
    * several statements at once.
    *
@@ -844,8 +784,7 @@ class SQLite {
 
   /**
    * Runs a query and returns the first row. JSON and boolean columns are
-   * converted like in `get()`, joins and renamed columns included. On Node.js
-   * before 22.16, that only works for a query on a single table.
+   * converted like in `get()`, joins and renamed columns included.
    *
    * @example
    * const user = db.queryOne("SELECT * FROM users WHERE email = ?", [email]);
@@ -1492,9 +1431,7 @@ class SQLite {
 
   /** Whether a transaction is open. */
   get inTransaction() {
-    // `isTransaction` exists since Node 22.16
-    const native = /** @type {{ isTransaction?: boolean }} */ (/** @type {unknown} */ (this.#db)).isTransaction;
-    return typeof native === "boolean" ? native : this.#depth > 0;
+    return this.#db.isTransaction;
   }
 
   /**
