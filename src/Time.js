@@ -395,7 +395,8 @@ const _addMonths = (d, months, timeZone) => {
 const _MAX_DURATION_TEXT = 256;
 
 // One "1.5h" of a text duration, with the spaces, commas and "and" around it.
-const _DURATION_TOKEN = /(?:[\s,]|and)*([-+]?(?:\d+(?:\.\d+)?|\.\d+))\s*([a-zA-Z]+)(?:[\s,]|and)*/y;
+// Anchored, and run on what is left of the text: it never starts again further on.
+const _DURATION_TOKEN = /^(?:[\s,]|and)*([-+]?(?:\d+(?:\.\d+)?|\.\d+))\s*([a-zA-Z]+)(?:[\s,]|and)*/;
 
 /**
  * Adds a duration written as text: a fixed one (`"1h30m"`) or one with
@@ -417,10 +418,9 @@ const _addText = (d, text, sign, timeZone) => {
   let ms = 0;
   let tokens = 0;
   let at = 0;
-  // Sticky: the tokens must follow each other and cover the whole text.
+  // The tokens must follow each other and cover the whole text.
   while (at < text.length) {
-    _DURATION_TOKEN.lastIndex = at;
-    const match = _DURATION_TOKEN.exec(text);
+    const match = _DURATION_TOKEN.exec(text.slice(at));
     if (match === null) break;
     const unit = _unit(match[2]);
     if (!unit) break;
@@ -430,7 +430,7 @@ const _addText = (d, text, sign, timeZone) => {
     else if ((unit === "d" || unit === "w") && Number.isInteger(amount)) days += unit === "w" ? amount * 7 : amount;
     else ms += amount * MS[unit];
     tokens++;
-    at = _DURATION_TOKEN.lastIndex;
+    at += match[0].length;
   }
   if (!tokens || at !== text.length) {
     // A bare number of milliseconds, as text.
