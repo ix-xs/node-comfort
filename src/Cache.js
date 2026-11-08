@@ -49,6 +49,8 @@ const { toMs, argsKey } = require("./internal/shared.js");
  */
 
 /**
+ * What the cache keeps for a key: the value, when it expires, its time to
+ * live and how long it may still be served once expired.
  * @template V
  * @typedef {{ value: V, expires: number, ttl: number, stale: number }} CacheEntry
  */

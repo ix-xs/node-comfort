@@ -33,6 +33,8 @@ const shared = require("./internal/shared.js");
  */
 
 /**
+ * `undefined` when `T` can be null or undefined, `never` otherwise: what a
+ * missing level adds to the type `obj.get()` returns.
  * @template T
  * @typedef {[Extract<T, null | undefined>] extends [never] ? never : undefined} NullishToUndefined
  */
@@ -46,6 +48,8 @@ const shared = require("./internal/shared.js");
  */
 
 /**
+ * The type one key of a path leads to inside `T`: a property, an item of an
+ * array, or a marker when the key does not exist.
  * @template T
  * @template {string} K
  * @typedef {K extends keyof NonNullable<T> ? NonNullable<T>[K] : NonNullable<T> extends readonly (infer E)[] ? (K extends `${number}` ? E | undefined : typeof _NOT_FOUND) : typeof _NOT_FOUND} PathStep
