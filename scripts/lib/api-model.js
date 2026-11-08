@@ -168,7 +168,12 @@ function buildModel() {
   /** A type without the `| undefined` an optional value always carries. */
   const optionalType = (/** @type {string} */ text) => text.replace(/ \| undefined$/, "");
   /** `T` -> `T[]`, `A | B` -> `(A | B)[]`. */
-  const arrayOf = (/** @type {string} */ text) => ((/^[\w.$<>, ]+$/.test(text) && !/\s/.test(text.replace(/<[^<>]*>/g, ""))) || /^\(.*\)$/.test(text) ? `${text}[]` : `(${text})[]`);
+  const arrayOf = (/** @type {string} */ text) => {
+    // Type arguments, innermost first, until none is left: Map<string, Array<number>> is one name.
+    let bare = text;
+    while (/<[^<>]*>/.test(bare)) bare = bare.replace(/<[^<>]*>/g, "");
+    return (/^[\w.$<>, ]+$/.test(text) && !/\s/.test(bare)) || /^\(.*\)$/.test(text) ? `${text}[]` : `(${text})[]`;
+  };
 
   /**
    * What an object written inline accepts (`{ cwd?: string, type?: "file" }`):

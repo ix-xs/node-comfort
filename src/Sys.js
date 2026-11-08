@@ -26,6 +26,17 @@ let _childProcess;
 const _cp = () => (_childProcess ??= require("node:child_process"));
 
 /**
+ * The shell of Windows: ComSpec when it names a cmd.exe, as it always does,
+ * `cmd.exe` from the PATH otherwise. Any other program there would be given
+ * command lines escaped for cmd.exe.
+ * @returns {string}
+ */
+const _comspec = () => {
+  const value = process.env.ComSpec ?? process.env.comspec;
+  return value && /(^|[\\/])cmd\.exe$/i.test(value) ? value : "cmd.exe";
+};
+
+/**
  * Options for `run()` and `exec()`.
  * @typedef {object} RunOptions
  * @property {string} [cwd] Where to run the command.
@@ -166,7 +177,7 @@ const _prepare = (file, args, cwd, display) => {
     if (!forwards && arg.includes('"')) throw new ProcessError(`Can't pass a quote to a batch file that doesn't use %*: ${display}`, { command: display });
   }
   const line = [_escapeCommand(nodePath.normalize(resolved)), ...args.map((a) => _escapeArg(a, forwards))].join(" ");
-  return { file: process.env.comspec || "cmd.exe", args: ["/d", "/s", "/c", `"${line}"`], verbatim: true };
+  return { file: _comspec(), args: ["/d", "/s", "/c", `"${line}"`], verbatim: true };
 };
 
 /**
@@ -459,7 +470,7 @@ function open(target, options = {}) {
   try {
     const child =
       process.platform === "win32"
-        ? _cp().spawn(process.env.comspec || "cmd.exe", ["/d", "/s", "/c", `start "" ${`"${value}"`.replace(META, "^$1")}`], { detached: true, stdio: "ignore", windowsHide: true, windowsVerbatimArguments: true })
+        ? _cp().spawn(_comspec(), ["/d", "/s", "/c", `start "" ${`"${value}"`.replace(META, "^$1")}`], { detached: true, stdio: "ignore", windowsHide: true, windowsVerbatimArguments: true })
         : _cp().spawn(process.platform === "darwin" ? "open" : "xdg-open", [value], { detached: true, stdio: "ignore" });
     child.on("error", () => {});
     child.unref();
