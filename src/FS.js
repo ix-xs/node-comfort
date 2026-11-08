@@ -1130,10 +1130,10 @@ function ensureFolder(path) {
  */
 function ensureFile(path) {
   const target = _abs(path);
-  if (!fs.existsSync(target)) {
-    fs.mkdirSync(nodePath.dirname(target), { recursive: true });
-    fs.writeFileSync(target, "", { flag: "a" });
-  }
+  fs.mkdirSync(nodePath.dirname(target), { recursive: true });
+  // Appending nothing creates the file, and leaves one that exists as it is: no
+  // check first, so nothing can change between the check and the write.
+  fs.writeFileSync(target, "", { flag: "a" });
   return target;
 }
 

@@ -437,7 +437,10 @@ for (const probe of probes) {
     const res = service.getCompletionsAtPosition(probe.file, probe.pos, prefs);
     const fromPackage = (res?.entries ?? []).filter((e) => e.source && norm(e.source).includes(P));
     // the root and the official subpaths (".../str") are fine, file paths are not
-    const internal = fromPackage.filter((e) => /\/(src|types)\/|\.(d\.ts|js)$/.test(norm(/** @type {string} */ (e.source))));
+    const internal = fromPackage.filter((e) => {
+      const source = norm(/** @type {string} */ (e.source));
+      return /\/(src|types)\//.test(source) || /\.(d\.ts|js)$/.test(source);
+    });
     const offered = fromPackage.map((e) => e.name);
     const missing = (probe.expect ?? []).filter((n) => !offered.includes(n));
     check(!missing.length && !internal.length, probe.name, missing.length ? `not offered: ${missing.join(", ")}` : `internal paths offered: ${internal.map((e) => e.source).join(", ")}`);

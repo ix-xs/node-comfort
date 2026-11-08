@@ -409,7 +409,7 @@ const _readBody = async (res, { type = "auto", onProgress, limit, truncate, meth
       return text;
     }
   }
-  if (type === "text" || (type === "auto" && (/^text\/|xml|javascript|x-www-form-urlencoded/i.test(contentType) || !contentType))) return text;
+  if (type === "text" || (type === "auto" && (!contentType || /^text\//i.test(contentType) || /xml|javascript|x-www-form-urlencoded/i.test(contentType)))) return text;
   return buffer;
 };
 

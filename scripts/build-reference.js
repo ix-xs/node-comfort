@@ -274,7 +274,7 @@ const linesOf = (/** @type {string} */ module) => {
   }
   return /** @type {string[]} */ (sources.get(module));
 };
-const escape = (/** @type {string} */ name) => name.replace(/[$]/g, "\\$");
+const escape = (/** @type {string} */ name) => name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 
 /**
  * The address of a name in the source on GitHub, with its line when it can be found.

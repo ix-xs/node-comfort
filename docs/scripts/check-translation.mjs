@@ -79,13 +79,14 @@ function parts(body) {
 /** A code block without its comments and without its spacing. */
 function bare(code, info) {
   const hash = /^(bash|sh|shell|yaml|yml|env|ini|toml|dotenv|dockerfile|docker)\b/i.test(info);
-  return code
+  let text = code
     .replace(/\/\*[\s\S]*?\*\//g, "")
     .split("\n")
     .map((line) => line.replace(/(^|\s)\/\/.*$/, "$1").replace(hash ? /(^|\s)#.*$/ : /$^/, "$1"))
-    .join("\n")
-    .replace(/<!--[\s\S]*?-->/g, "")
-    .replace(/\s+/g, "");
+    .join("\n");
+  // Comments of HTML too, until none is left.
+  while (/<!--[\s\S]*?-->/.test(text)) text = text.replace(/<!--[\s\S]*?-->/g, "");
+  return text.replace(/\s+/g, "");
 }
 
 const headings = (prose) => [...prose.matchAll(/^(#{1,6})\s+\S/gm)].map((m) => m[1].length);

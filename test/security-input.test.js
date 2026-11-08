@@ -178,4 +178,43 @@ describe("hostile input", () => {
     assert.equal(nc.fs.sanitizeFilename("report. . "), "report");
     assert.equal(nc.fs.sanitizeFilename("CON .txt"), "_CON .txt");
   });
+
+  it("blank lines around a logged message are trimmed in linear time", () => {
+    const out = [];
+    const sink = { write: (text) => out.push(String(text)) };
+    const log = nc.createLogger({ timestamp: false, colors: false, stdout: sink, stderr: sink });
+    // a regex used to backtrack exponentially on a run of new lines
+    const started = performance.now();
+    log.info("a" + "\n".repeat(5000) + "\t".repeat(50) + "x");
+    assert.ok(performance.now() - started < 1000);
+    log.info("\n\nhello\nworld\n\n");
+    assert.equal(out.at(-1), "ℹ INFO hello\n       world\n");
+  });
+
+  it("a time pattern full of brackets is read in linear time", () => {
+    const started = performance.now();
+    nc.time.format(new Date(2026, 0, 2), "[".repeat(100000));
+    assert.ok(performance.now() - started < 1000);
+    assert.equal(nc.time.format(new Date(2026, 0, 2), "[Le] DD [à] YYYY"), "Le 02 à 2026");
+  });
+
+  it("a Markdown table escapes a backslash before a pipe", () => {
+    // C:\dir|x: the backslash is escaped, then the pipe
+    const table = nc.cli.table([{ path: "C:\\dir|x" }], { border: "markdown", print: false });
+    assert.ok(table.includes("C:\\\\dir\\|x"), table);
+  });
+
+  it("ensureFile creates a file and leaves an existing one as it is", () => {
+    const dir = require("node:fs").mkdtempSync(require("node:path").join(require("node:os").tmpdir(), "nc-ensure-"));
+    try {
+      const file = require("node:path").join(dir, "a", "b.txt");
+      nc.fs.ensureFile(file);
+      assert.equal(require("node:fs").readFileSync(file, "utf8"), "");
+      require("node:fs").writeFileSync(file, "kept");
+      nc.fs.ensureFile(file);
+      assert.equal(require("node:fs").readFileSync(file, "utf8"), "kept");
+    } finally {
+      require("node:fs").rmSync(dir, { recursive: true, force: true });
+    }
+  });
 });

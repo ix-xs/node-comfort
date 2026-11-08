@@ -366,7 +366,7 @@ function table(rows, options = {}) {
       let lines = text.includes("\n") ? text.split(_LINE_BREAK) : [text];
       if (column.maxWidth) lines = lines.map((line) => color.truncate(line, /** @type {number} */ (column.maxWidth)));
       // Markdown has no multi-line cells, and a pipe would end the cell.
-      if (markdown) lines = [lines.join("<br>").replace(/\|/g, "\\|")];
+      if (markdown) lines = [lines.join("<br>").replace(/\\/g, "\\\\").replace(/\|/g, "\\|")];
       for (const line of lines) widths[i] = Math.max(widths[i], color.width(line));
       const isNumber = typeof raw === "number" || typeof raw === "bigint";
       if (!isNumber) numeric[i] = false;

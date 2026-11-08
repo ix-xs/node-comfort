@@ -1493,7 +1493,7 @@
    "ref": "logger/log",
    "title": "nc.logger.log",
    "kind": "function",
-   "source": "https://github.com/ix-xs/node-comfort/blob/main/src/Logger.js#L742",
+   "source": "https://github.com/ix-xs/node-comfort/blob/main/src/Logger.js#L744",
    "overloads": [
     {
      "code": [
@@ -1546,7 +1546,7 @@
    "ref": "logger/trace",
    "title": "nc.logger.trace",
    "kind": "function",
-   "source": "https://github.com/ix-xs/node-comfort/blob/main/src/Logger.js#L753",
+   "source": "https://github.com/ix-xs/node-comfort/blob/main/src/Logger.js#L755",
    "overloads": [
     {
      "code": [
@@ -1596,7 +1596,7 @@
    "ref": "logger/debug",
    "title": "nc.logger.debug",
    "kind": "function",
-   "source": "https://github.com/ix-xs/node-comfort/blob/main/src/Logger.js#L768",
+   "source": "https://github.com/ix-xs/node-comfort/blob/main/src/Logger.js#L770",
    "overloads": [
     {
      "code": [
@@ -1649,7 +1649,7 @@
    "ref": "logger/info",
    "title": "nc.logger.info",
    "kind": "function",
-   "source": "https://github.com/ix-xs/node-comfort/blob/main/src/Logger.js#L782",
+   "source": "https://github.com/ix-xs/node-comfort/blob/main/src/Logger.js#L784",
    "overloads": [
     {
      "code": [
@@ -1702,7 +1702,7 @@
    "ref": "logger/success",
    "title": "nc.logger.success",
    "kind": "function",
-   "source": "https://github.com/ix-xs/node-comfort/blob/main/src/Logger.js#L796",
+   "source": "https://github.com/ix-xs/node-comfort/blob/main/src/Logger.js#L798",
    "overloads": [
     {
      "code": [
@@ -1755,7 +1755,7 @@
    "ref": "logger/warn",
    "title": "nc.logger.warn",
    "kind": "function",
-   "source": "https://github.com/ix-xs/node-comfort/blob/main/src/Logger.js#L807",
+   "source": "https://github.com/ix-xs/node-comfort/blob/main/src/Logger.js#L809",
    "overloads": [
     {
      "code": [
@@ -1805,7 +1805,7 @@
    "ref": "logger/error",
    "title": "nc.logger.error",
    "kind": "function",
-   "source": "https://github.com/ix-xs/node-comfort/blob/main/src/Logger.js#L822",
+   "source": "https://github.com/ix-xs/node-comfort/blob/main/src/Logger.js#L824",
    "overloads": [
     {
      "code": [
@@ -1858,7 +1858,7 @@
    "ref": "logger/fatal",
    "title": "nc.logger.fatal",
    "kind": "function",
-   "source": "https://github.com/ix-xs/node-comfort/blob/main/src/Logger.js#L834",
+   "source": "https://github.com/ix-xs/node-comfort/blob/main/src/Logger.js#L836",
    "overloads": [
     {
      "code": [
@@ -1908,7 +1908,7 @@
    "ref": "logger/group",
    "title": "nc.logger.group",
    "kind": "function",
-   "source": "https://github.com/ix-xs/node-comfort/blob/main/src/Logger.js#L850",
+   "source": "https://github.com/ix-xs/node-comfort/blob/main/src/Logger.js#L852",
    "overloads": [
     {
      "code": [
@@ -1961,7 +1961,7 @@
    "ref": "logger/group-end",
    "title": "nc.logger.groupEnd",
    "kind": "function",
-   "source": "https://github.com/ix-xs/node-comfort/blob/main/src/Logger.js#L860",
+   "source": "https://github.com/ix-xs/node-comfort/blob/main/src/Logger.js#L862",
    "overloads": [
     {
      "code": [
@@ -2000,7 +2000,7 @@
    "ref": "logger/time-start",
    "title": "nc.logger.timeStart",
    "kind": "function",
-   "source": "https://github.com/ix-xs/node-comfort/blob/main/src/Logger.js#L876",
+   "source": "https://github.com/ix-xs/node-comfort/blob/main/src/Logger.js#L878",
    "overloads": [
     {
      "code": [
@@ -2054,7 +2054,7 @@
    "ref": "logger/time-end",
    "title": "nc.logger.timeEnd",
    "kind": "function",
-   "source": "https://github.com/ix-xs/node-comfort/blob/main/src/Logger.js#L887",
+   "source": "https://github.com/ix-xs/node-comfort/blob/main/src/Logger.js#L889",
    "overloads": [
     {
      "code": [
@@ -2105,7 +2105,7 @@
    "ref": "logger/table",
    "title": "nc.logger.table",
    "kind": "function",
-   "source": "https://github.com/ix-xs/node-comfort/blob/main/src/Logger.js#L902",
+   "source": "https://github.com/ix-xs/node-comfort/blob/main/src/Logger.js#L904",
    "overloads": [
     {
      "code": [
@@ -2196,7 +2196,7 @@
    "ref": "logger/box",
    "title": "nc.logger.box",
    "kind": "function",
-   "source": "https://github.com/ix-xs/node-comfort/blob/main/src/Logger.js#L917",
+   "source": "https://github.com/ix-xs/node-comfort/blob/main/src/Logger.js#L919",
    "overloads": [
     {
      "code": [
@@ -2269,7 +2269,7 @@
    "ref": "logger/divider",
    "title": "nc.logger.divider",
    "kind": "function",
-   "source": "https://github.com/ix-xs/node-comfort/blob/main/src/Logger.js#L928",
+   "source": "https://github.com/ix-xs/node-comfort/blob/main/src/Logger.js#L930",
    "overloads": [
     {
      "code": [
@@ -2319,7 +2319,7 @@
    "ref": "logger/set-level",
    "title": "nc.logger.setLevel",
    "kind": "function",
-   "source": "https://github.com/ix-xs/node-comfort/blob/main/src/Logger.js#L944",
+   "source": "https://github.com/ix-xs/node-comfort/blob/main/src/Logger.js#L946",
    "overloads": [
     {
      "code": [
@@ -2393,7 +2393,7 @@
    "ref": "logger/get-level",
    "title": "nc.logger.getLevel",
    "kind": "function",
-   "source": "https://github.com/ix-xs/node-comfort/blob/main/src/Logger.js#L954",
+   "source": "https://github.com/ix-xs/node-comfort/blob/main/src/Logger.js#L956",
    "overloads": [
     {
      "code": [
@@ -2429,7 +2429,7 @@
    "ref": "logger/is-level-enabled",
    "title": "nc.logger.isLevelEnabled",
    "kind": "function",
-   "source": "https://github.com/ix-xs/node-comfort/blob/main/src/Logger.js#L968",
+   "source": "https://github.com/ix-xs/node-comfort/blob/main/src/Logger.js#L970",
    "overloads": [
     {
      "code": [
@@ -2481,7 +2481,7 @@
    "ref": "logger/configure",
    "title": "nc.logger.configure",
    "kind": "function",
-   "source": "https://github.com/ix-xs/node-comfort/blob/main/src/Logger.js#L982",
+   "source": "https://github.com/ix-xs/node-comfort/blob/main/src/Logger.js#L984",
    "overloads": [
     {
      "code": [
@@ -2545,7 +2545,7 @@
    "ref": "logger/set-timestamp",
    "title": "nc.logger.setTimestamp",
    "kind": "function",
-   "source": "https://github.com/ix-xs/node-comfort/blob/main/src/Logger.js#L997",
+   "source": "https://github.com/ix-xs/node-comfort/blob/main/src/Logger.js#L999",
    "overloads": [
     {
      "code": [
@@ -2597,7 +2597,7 @@
    "ref": "logger/set-delimiter",
    "title": "nc.logger.setDelimiter",
    "kind": "function",
-   "source": "https://github.com/ix-xs/node-comfort/blob/main/src/Logger.js#L1013",
+   "source": "https://github.com/ix-xs/node-comfort/blob/main/src/Logger.js#L1015",
    "overloads": [
     {
      "code": [
@@ -2670,7 +2670,7 @@
    "ref": "logger/create-logger",
    "title": "nc.logger.createLogger",
    "kind": "function",
-   "source": "https://github.com/ix-xs/node-comfort/blob/main/src/Logger.js#L726",
+   "source": "https://github.com/ix-xs/node-comfort/blob/main/src/Logger.js#L728",
    "overloads": [
     {
      "code": [
@@ -52922,7 +52922,7 @@
    "ref": "sys/run",
    "title": "nc.sys.run",
    "kind": "function",
-   "source": "https://github.com/ix-xs/node-comfort/blob/main/src/Sys.js#L324",
+   "source": "https://github.com/ix-xs/node-comfort/blob/main/src/Sys.js#L335",
    "overloads": [
     {
      "code": [
@@ -53039,7 +53039,7 @@
    "ref": "sys/exec",
    "title": "nc.sys.exec",
    "kind": "function",
-   "source": "https://github.com/ix-xs/node-comfort/blob/main/src/Sys.js#L342",
+   "source": "https://github.com/ix-xs/node-comfort/blob/main/src/Sys.js#L353",
    "overloads": [
     {
      "code": [
@@ -53145,7 +53145,7 @@
    "ref": "sys/which",
    "title": "nc.sys.which",
    "kind": "function",
-   "source": "https://github.com/ix-xs/node-comfort/blob/main/src/Sys.js#L373",
+   "source": "https://github.com/ix-xs/node-comfort/blob/main/src/Sys.js#L384",
    "overloads": [
     {
      "code": [
@@ -53205,7 +53205,7 @@
    "ref": "sys/open",
    "title": "nc.sys.open",
    "kind": "function",
-   "source": "https://github.com/ix-xs/node-comfort/blob/main/src/Sys.js#L441",
+   "source": "https://github.com/ix-xs/node-comfort/blob/main/src/Sys.js#L452",
    "overloads": [
     {
      "code": [
@@ -53288,7 +53288,7 @@
    "ref": "sys/on-shutdown",
    "title": "nc.sys.onShutdown",
    "kind": "function",
-   "source": "https://github.com/ix-xs/node-comfort/blob/main/src/Sys.js#L495",
+   "source": "https://github.com/ix-xs/node-comfort/blob/main/src/Sys.js#L506",
    "overloads": [
     {
      "code": [
@@ -53368,7 +53368,7 @@
    "ref": "sys/shutdown",
    "title": "nc.sys.shutdown",
    "kind": "function",
-   "source": "https://github.com/ix-xs/node-comfort/blob/main/src/Sys.js#L561",
+   "source": "https://github.com/ix-xs/node-comfort/blob/main/src/Sys.js#L572",
    "overloads": [
     {
      "code": [
@@ -53425,7 +53425,7 @@
    "ref": "sys/free-port",
    "title": "nc.sys.freePort",
    "kind": "function",
-   "source": "https://github.com/ix-xs/node-comfort/blob/main/src/Sys.js#L682",
+   "source": "https://github.com/ix-xs/node-comfort/blob/main/src/Sys.js#L693",
    "overloads": [
     {
      "code": [
@@ -53491,7 +53491,7 @@
    "ref": "sys/local-ip",
    "title": "nc.sys.localIP",
    "kind": "function",
-   "source": "https://github.com/ix-xs/node-comfort/blob/main/src/Sys.js#L714",
+   "source": "https://github.com/ix-xs/node-comfort/blob/main/src/Sys.js#L725",
    "overloads": [
     {
      "code": [
@@ -53534,7 +53534,7 @@
    "ref": "sys/is-windows",
    "title": "nc.sys.isWindows",
    "kind": "function",
-   "source": "https://github.com/ix-xs/node-comfort/blob/main/src/Sys.js#L569",
+   "source": "https://github.com/ix-xs/node-comfort/blob/main/src/Sys.js#L580",
    "overloads": [
     {
      "code": [
@@ -53560,7 +53560,7 @@
    "ref": "sys/is-mac",
    "title": "nc.sys.isMac",
    "kind": "function",
-   "source": "https://github.com/ix-xs/node-comfort/blob/main/src/Sys.js#L577",
+   "source": "https://github.com/ix-xs/node-comfort/blob/main/src/Sys.js#L588",
    "overloads": [
     {
      "code": [
@@ -53586,7 +53586,7 @@
    "ref": "sys/is-linux",
    "title": "nc.sys.isLinux",
    "kind": "function",
-   "source": "https://github.com/ix-xs/node-comfort/blob/main/src/Sys.js#L585",
+   "source": "https://github.com/ix-xs/node-comfort/blob/main/src/Sys.js#L596",
    "overloads": [
     {
      "code": [
@@ -53612,7 +53612,7 @@
    "ref": "sys/is-ci",
    "title": "nc.sys.isCI",
    "kind": "function",
-   "source": "https://github.com/ix-xs/node-comfort/blob/main/src/Sys.js#L598",
+   "source": "https://github.com/ix-xs/node-comfort/blob/main/src/Sys.js#L609",
    "overloads": [
     {
      "code": [
@@ -53641,7 +53641,7 @@
    "ref": "sys/is-docker",
    "title": "nc.sys.isDocker",
    "kind": "function",
-   "source": "https://github.com/ix-xs/node-comfort/blob/main/src/Sys.js#L616",
+   "source": "https://github.com/ix-xs/node-comfort/blob/main/src/Sys.js#L627",
    "overloads": [
     {
      "code": [
@@ -53667,7 +53667,7 @@
    "ref": "sys/is-wsl",
    "title": "nc.sys.isWSL",
    "kind": "function",
-   "source": "https://github.com/ix-xs/node-comfort/blob/main/src/Sys.js#L632",
+   "source": "https://github.com/ix-xs/node-comfort/blob/main/src/Sys.js#L643",
    "overloads": [
     {
      "code": [
@@ -53693,7 +53693,7 @@
    "ref": "sys/info",
    "title": "nc.sys.info",
    "kind": "function",
-   "source": "https://github.com/ix-xs/node-comfort/blob/main/src/Sys.js#L644",
+   "source": "https://github.com/ix-xs/node-comfort/blob/main/src/Sys.js#L655",
    "overloads": [
     {
      "code": [
@@ -53731,7 +53731,7 @@
    "ref": "sys/memory",
    "title": "nc.sys.memory",
    "kind": "function",
-   "source": "https://github.com/ix-xs/node-comfort/blob/main/src/Sys.js#L733",
+   "source": "https://github.com/ix-xs/node-comfort/blob/main/src/Sys.js#L744",
    "overloads": [
     {
      "code": [
@@ -53760,7 +53760,7 @@
    "ref": "sys/open-options",
    "kind": "interface",
    "title": "OpenOptions",
-   "source": "https://github.com/ix-xs/node-comfort/blob/main/src/Sys.js#L77",
+   "source": "https://github.com/ix-xs/node-comfort/blob/main/src/Sys.js#L88",
    "text": "Options for `open()`.",
    "properties": [
     {
@@ -53800,7 +53800,7 @@
    "ref": "sys/run-options",
    "kind": "interface",
    "title": "RunOptions",
-   "source": "https://github.com/ix-xs/node-comfort/blob/main/src/Sys.js#L30",
+   "source": "https://github.com/ix-xs/node-comfort/blob/main/src/Sys.js#L41",
    "text": "Options for `run()` and `exec()`.",
    "properties": [
     {
@@ -53976,7 +53976,7 @@
    "ref": "sys/run-result",
    "kind": "interface",
    "title": "RunResult",
-   "source": "https://github.com/ix-xs/node-comfort/blob/main/src/Sys.js#L46",
+   "source": "https://github.com/ix-xs/node-comfort/blob/main/src/Sys.js#L57",
    "text": "A finished command.",
    "properties": [
     {
@@ -54048,7 +54048,7 @@
    "ref": "sys/shutdown-options",
    "kind": "interface",
    "title": "ShutdownOptions",
-   "source": "https://github.com/ix-xs/node-comfort/blob/main/src/Sys.js#L57",
+   "source": "https://github.com/ix-xs/node-comfort/blob/main/src/Sys.js#L68",
    "text": "Options for `onShutdown()`. They apply to all handlers.",
    "properties": [
     {
@@ -54098,7 +54098,7 @@
    "ref": "sys/shutdown-reason",
    "kind": "type",
    "title": "ShutdownReason",
-   "source": "https://github.com/ix-xs/node-comfort/blob/main/src/Sys.js#L66",
+   "source": "https://github.com/ix-xs/node-comfort/blob/main/src/Sys.js#L77",
    "text": "Why the process is stopping: the signal it got, or `\"shutdown\"` when\n`sys.shutdown()` was called.",
    "code": [
     [
@@ -54156,7 +54156,7 @@
    "ref": "sys/system-info",
    "kind": "interface",
    "title": "SystemInfo",
-   "source": "https://github.com/ix-xs/node-comfort/blob/main/src/Sys.js#L84",
+   "source": "https://github.com/ix-xs/node-comfort/blob/main/src/Sys.js#L95",
    "text": "Returned by `info()`.",
    "properties": [
     {
@@ -54298,7 +54298,7 @@
    "ref": "sys/which-options",
    "kind": "interface",
    "title": "WhichOptions",
-   "source": "https://github.com/ix-xs/node-comfort/blob/main/src/Sys.js#L71",
+   "source": "https://github.com/ix-xs/node-comfort/blob/main/src/Sys.js#L82",
    "text": "Options for `which()`.",
    "properties": [
     {

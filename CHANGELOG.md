@@ -4,6 +4,26 @@ All notable changes to this project are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and the project uses
 [Semantic Versioning](https://semver.org/).
 
+## [Unreleased]
+
+### Security
+
+- **logger**: a logged message made of thousands of new lines followed by spaces could block the process
+  for seconds while the blank lines around it were trimmed. They are now trimmed in one pass.
+- **time**: a format pattern full of `[` (from a configuration file, for instance) was read in quadratic
+  time. It is now linear; literals in brackets work as before.
+- **cli**: in a Markdown table (`border: "markdown"`), a backslash before a pipe let the pipe end the
+  cell. Backslashes are now escaped too.
+- **sys**: on Windows, the shell for batch files comes from `ComSpec` only when it names a `cmd.exe`.
+- **fs**: `ensureFile()` no longer checks before it writes, so nothing can change in between. It still
+  leaves an existing file as it is.
+
+### Documentation
+
+- The site opens on a guide that builds one project page by page, with terminal scenes that show what
+  the package really prints, and the API reference has a page per function, method, class and type,
+  in English and French.
+
 ## [2.2.0] - 2026-11-03
 
 A security release. Three audits went through every module looking for what an attacker could do with the

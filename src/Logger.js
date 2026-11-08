@@ -140,7 +140,6 @@ const JSON_UNSAFE = /[\x7f-\x9f\u{2028}\u{2029}]/u;
 const JSON_UNSAFE_ALL = /[\x7f-\x9f\u{2028}\u{2029}]/gu;
 /** @param {string} char */
 const _jsonEscape = (char) => `\\u${char.charCodeAt(0).toString(16).padStart(4, "0")}`;
-const TRIM_LINES = /^(\s*\r?\n)+|(\r?\n\s*)+$/g;
 const RGB = /(bg)?rgb\(\s*(\d{1,3})\s*,\s*(\d{1,3})\s*,\s*(\d{1,3})\s*\)/gi;
 const TOKEN = /^(\S+)(\s+|$)/;
 
@@ -585,7 +584,10 @@ const _create = (options) => {
     if (face.scope) prefix += `${face.scope} `;
     if (face.labels[kind]) prefix += `${face.labels[kind]} `;
     if (body.indexOf("\n") === -1) return (prefix + body).trimEnd();
-    const lines = body.replace(TRIM_LINES, "").split(/\r?\n/);
+    const lines = body.split(/\r?\n/);
+    // Blank lines before and after the message go; the ones inside it stay.
+    while (lines.length > 1 && lines[0].trim() === "") lines.shift();
+    while (lines.length > 1 && lines[lines.length - 1].trim() === "") lines.pop();
     // Without a timestamp, the next lines line up under the message, past the badge and
     // the scope: a new line in a message can't pass for a log line of its own. Without
     // either, like `log()`, there is nothing to forge and nothing is added, as with console.log.

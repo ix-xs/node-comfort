@@ -698,7 +698,7 @@ function format(date, pattern = "YYYY-MM-DD HH:mm:ss", options = {}) {
   return out;
 }
 
-const _TOKENS = /\[([^\]]*)\]|YYYY|MMMM|dddd|SSS|MMM|ddd|Do|YY|MM|DD|HH|hh|mm|ss|ZZ|WW|M|D|d|H|h|m|s|A|a|Z|z|Q|X|x|W/g;
+const _TOKENS = /\[([^\][]*)\]|YYYY|MMMM|dddd|SSS|MMM|ddd|Do|YY|MM|DD|HH|hh|mm|ss|ZZ|WW|M|D|d|H|h|m|s|A|a|Z|z|Q|X|x|W/g;
 
 /** @type {Map<string, string[]>} */
 const _patterns = new Map();
