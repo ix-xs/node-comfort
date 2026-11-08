@@ -204,7 +204,7 @@ bar.stop();
 
 Spinners and progress bars write to stderr, so they don't get mixed with data you print on stdout. The progress format can use `{bar}`, `{percent}`, `{value}`, `{total}`, `{eta}`, `{elapsed}`, `{rate}` and `{label}`.
 
-On Node.js 24 and later, `using spin = cli.spinner(...).start()` or `using bar = cli.progress(...)` stops them at the end of the block, so an error can't leave a spinner turning or the cursor hidden: see [Cleaning up with `using`](/recipes/#cleaning-up-with-using).
+On Node.js 24 and later, `using spin = cli.spinner(...).start()` or `using bar = cli.progress(...)` stops them at the end of the block, so an error can't leave a spinner turning or the cursor hidden: see [Cleaning up with `using`](/recipes/cli-tool/#cleaning-up-with-using).
 
 ## Tables and boxes
 

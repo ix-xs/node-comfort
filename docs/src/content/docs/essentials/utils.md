@@ -52,7 +52,7 @@ nc.dontCrash()
   });
 ```
 
-It only ever removes its own handlers; listeners from your code or other libraries stay in place. `dispose()` on the returned object removes everything it installed, and so does the end of the block with `using` on Node.js 24 and later ([more on `using`](/recipes/#cleaning-up-with-using)). For a full graceful shutdown with timeouts, see [`sys.onShutdown()`](/system/sys/).
+It only ever removes its own handlers; listeners from your code or other libraries stay in place. `dispose()` on the returned object removes everything it installed, and so does the end of the block with `using` on Node.js 24 and later ([more on `using`](/recipes/cli-tool/#cleaning-up-with-using)). For a full graceful shutdown with timeouts, see [`sys.onShutdown()`](/system/sys/).
 
 ## when
 

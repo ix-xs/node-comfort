@@ -121,7 +121,7 @@ watcher.stop();
 
 `"error"` tells you that the watch itself failed, so you can start a new one. When the watched folder is deleted, the event fires once, with the code `ENOENT`, and the watcher stops. Without a listener, such an error is dropped. `watch()` returns `undefined` when the path doesn't exist.
 
-On Node.js 24 and later, `using watcher = nc.watch(...)` closes the watcher at the end of the block, even when an error leaves it early: see [Cleaning up with `using`](/recipes/#cleaning-up-with-using).
+On Node.js 24 and later, `using watcher = nc.watch(...)` closes the watcher at the end of the block, even when an error leaves it early: see [Cleaning up with `using`](/recipes/cli-tool/#cleaning-up-with-using).
 
 ## Odds and ends
 

@@ -1,39 +1,69 @@
 ---
-title: "Getting started"
-description: "Install the package, write a first script, and see how the same code works in CommonJS, ES modules and TypeScript."
+title: "Installation"
+description: "Install Node.js and the package, run a first script, and load the package from CommonJS, ES modules or TypeScript."
 sidebar:
   order: 2
 ---
 
-## Install
+import TerminalDemo from '../../../components/demo/TerminalDemo.astro';
+
+node-comfort is one package with no dependencies. All it needs is a recent
+Node.js.
+
+## Install Node.js
+
+Node.js runs JavaScript outside the browser. Install the **LTS** version from
+[nodejs.org](https://nodejs.org), then check the version:
+
+<TerminalDemo scene="start/installation/version" />
+
+| Node.js line | Minimum version |
+| --- | --- |
+| Node.js 22 | 22.23.4 |
+| Node.js 24 | 24.22.1 |
+| Node.js 26 | 26.12.1 |
+
+Older versions [can be crashed by a malicious HTTP response](/system/http/#servers-you-dont-control),
+and Node.js 23 and 25 are not supported. Node.js 26 is the fastest choice:
+time zones go through `Temporal` there.
+
+## Install the package
+
+In the folder of your project:
 
 ```bash
 npm install @ix-xs/node-comfort
 ```
 
-You need Node.js 22.23.4, 24.22.1, 26.12.1 or a later version of these lines. Older versions [can be crashed by a malicious HTTP response](/system/http/#servers-you-dont-control). Check yours with `node --version`. Node.js 26 is the fastest choice: time zones go through `Temporal` there.
+Nothing else is installed with it, and nothing runs at install time.
 
-## Your first script
+## Run a first script
 
 Create `hello.js`:
 
-```js
+```js title="hello.js"
 const nc = require("@ix-xs/node-comfort");
 
-nc.info("Starting up");
-
-const started = nc.time.stopwatch();
-const slug = nc.str.slugify("Héllo Wörld, from node-comfort!");
-nc.success(`Slug: ${slug}`);
-
-nc.box(`Done in ${started.stop(true)}`, { title: "hello" });
+nc.info("Hello from node-comfort");
+nc.success(nc.str.slugify("Héllo Wörld, from node-comfort!"));
+nc.box(nc.time.format(new Date(), "dddd D MMMM YYYY"), { title: "today" });
 ```
 
-Run it with `node hello.js`. You'll get colored output in a terminal and plain text when you redirect it to a file.
+<TerminalDemo scene="start/installation/hello" />
+
+| Line | What it does |
+| --- | --- |
+| `require("@ix-xs/node-comfort")` | loads the package; every tool hangs off `nc` |
+| `nc.info()`, `nc.success()` | write a log line, with the time and a badge |
+| `nc.str.slugify()` | turns a title into a piece of URL |
+| `nc.box()` | draws a frame around text |
+
+The output has colors in a terminal, and is plain text when you redirect it to
+a file.
 
 ## CommonJS, ES modules and TypeScript
 
-The package works the same way everywhere.
+The package works the same way everywhere. The guide uses CommonJS.
 
 ```js
 // CommonJS
@@ -53,9 +83,10 @@ import nc = require("@ix-xs/node-comfort");
 import { schema as s, type Infer } from "@ix-xs/node-comfort";
 ```
 
-The whole toolkit is also exported as `nc` and `nodeComfort`, so `const { nc } = require("@ix-xs/node-comfort")` works too. In an ES module or a TypeScript file, start typing `nc` and let your editor add the import.
+The whole toolkit is also exported as `nc` and `nodeComfort`, so
+`const { nc } = require("@ix-xs/node-comfort")` works too.
 
-## Importing a single namespace
+## Loading one namespace
 
 Each namespace has its own entry point:
 
@@ -65,28 +96,15 @@ import SQLite from "@ix-xs/node-comfort/sqlite";
 const { get, set } = require("@ix-xs/node-comfort/obj");
 ```
 
-In ES modules, this is the way to load only what you use, because Node.js reads every export of the root package when you import it. See [Performance](/start/performance/) for the numbers.
+In ES modules, this loads only what you use: Node.js reads every export of the
+root package when you import it. [Performance](/help/performance/) has the
+numbers.
 
-The entry points are: `logger`, `fs`, `checker`, `utils`, `str`, `num`, `arr`, `obj`, `func`, `time`, `id`, `crypto`, `color`, `cli`, `sys`, `async`, `schema`, `http`, `env`, `errors`, `sqlite`, `cache` and `emitter`.
+The entry points are `logger`, `fs`, `checker`, `utils`, `str`, `num`, `arr`,
+`obj`, `func`, `time`, `id`, `crypto`, `color`, `cli`, `sys`, `async`,
+`schema`, `http`, `env`, `errors`, `sqlite`, `cache` and `emitter`.
 
-## The `.env` file
-
-When you require the package, it loads the `.env` file in the working directory if there is one. Variables that are already set are never overwritten, so real environment variables always win.
-
-```bash
-# .env
-DATABASE_URL=postgres://localhost/app
-PORT=3000
-```
-
-```js
-const nc = require("@ix-xs/node-comfort");
-const port = nc.env.port("PORT", { default: 8080 }); // 3000
-```
-
-To turn this off, set `NODE_COMFORT_DOTENV=false`. To load other files, call `nc.env.load()` yourself. The [env guide](/essentials/env/) covers validation in detail.
-
-## Environment variables that change behavior
+## Variables that change the behavior
 
 | Variable | Effect |
 | --- | --- |
@@ -95,10 +113,4 @@ To turn this off, set `NODE_COMFORT_DOTENV=false`. To load other files, call `nc
 | `DEBUG` | Shows `debug` logs: `DEBUG=1` for all of them, `DEBUG=db,http:*` for the loggers with these scopes |
 | `NO_COLOR` | Turns colors off |
 | `FORCE_COLOR=1\|2\|3` | Forces colors on, with 16, 256 or 16 million colors |
-| `NODE_COMFORT_DOTENV=false` | Don't load `.env` automatically |
-
-## What's next
-
-- [Your editor](/start/editor/) shows how to get completions and type checking, in JavaScript too.
-- The module guides in the sidebar walk through each namespace.
-- The [API reference](/reference/) lists every function.
+| `NODE_COMFORT_DOTENV=false` | Doesn't load `.env` when the package loads ([more](/project/configuration/#write-the-env-file)) |

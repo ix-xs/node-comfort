@@ -65,5 +65,7 @@
   "The type found at a dotted path of `T`, or `any` for an unknown path.": "Le type trouvé à un chemin pointé de `T`, ou `any` pour un chemin inconnu.",
   "Options for `sortKeys()`.": "Options de `sortKeys()`.",
   "Sort nested objects too, arrays included. Defaults to `true`. With `false`, only the first level is copied and sorted: what it holds is shared with the original.": "Trie aussi les objets imbriqués, tableaux compris. Par défaut : `true`. Avec `false`, seul le premier niveau est copié et trié : ce qu'il contient est partagé avec l'original.",
-  "How to order two keys. Defaults to code-unit order, which is stable across machines.": "Comment ordonner deux clés. Par défaut : l'ordre des unités de code, qui est stable d'une machine à l'autre."
+  "How to order two keys. Defaults to code-unit order, which is stable across machines.": "Comment ordonner deux clés. Par défaut : l'ordre des unités de code, qui est stable d'une machine à l'autre.",
+  "`undefined` when `T` can be null or undefined, `never` otherwise: what a missing level adds to the type `obj.get()` returns.": "`undefined` quand `T` peut être null ou undefined, `never` sinon : ce qu'un niveau manquant ajoute au type que renvoie `obj.get()`.",
+  "The type one key of a path leads to inside `T`: a property, an item of an array, or a marker when the key does not exist.": "Le type auquel mène une clé d'un chemin dans `T` : une propriété, un élément de tableau, ou un marqueur quand la clé n'existe pas."
 }

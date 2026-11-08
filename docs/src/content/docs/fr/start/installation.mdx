@@ -1,39 +1,69 @@
 ---
-title: "Premiers pas"
-description: "Installez le paquet, écrivez un premier script et voyez comment le même code fonctionne en CommonJS, en modules ES et en TypeScript."
+title: "Installation"
+description: "Installez Node.js et le paquet, lancez un premier script, et chargez le paquet depuis CommonJS, des modules ES ou TypeScript."
 sidebar:
   order: 2
 ---
 
-## Installation
+import TerminalDemo from '../../../../components/demo/TerminalDemo.astro';
+
+node-comfort est un seul paquet, sans dépendance. Il lui faut seulement un
+Node.js récent.
+
+## Installer Node.js
+
+Node.js exécute du JavaScript hors du navigateur. Installez la version **LTS**
+depuis [nodejs.org](https://nodejs.org), puis vérifiez la version :
+
+<TerminalDemo scene="start/installation/version" />
+
+| Branche de Node.js | Version minimale |
+| --- | --- |
+| Node.js 22 | 22.23.4 |
+| Node.js 24 | 24.22.1 |
+| Node.js 26 | 26.12.1 |
+
+Les versions plus anciennes [peuvent être plantées par une réponse HTTP malveillante](/system/http/#servers-you-dont-control),
+et Node.js 23 et 25 ne sont pas pris en charge. Node.js 26 est le choix le plus
+rapide : les fuseaux horaires y passent par `Temporal`.
+
+## Installer le paquet
+
+Dans le dossier de votre projet :
 
 ```bash
 npm install @ix-xs/node-comfort
 ```
 
-Il vous faut Node.js 22.23.4, 24.22.1, 26.12.1 ou une version plus récente de ces branches. Les versions plus anciennes [peuvent être plantées par une réponse HTTP malveillante](/system/http/#servers-you-dont-control). Vérifiez la vôtre avec `node --version`. Node.js 26 est le choix le plus rapide : les fuseaux horaires y passent par `Temporal`.
+Rien d'autre n'est installé avec lui, et rien ne s'exécute à l'installation.
 
-## Votre premier script
+## Lancer un premier script
 
 Créez `hello.js` :
 
-```js
+```js title="hello.js"
 const nc = require("@ix-xs/node-comfort");
 
-nc.info("Starting up");
-
-const started = nc.time.stopwatch();
-const slug = nc.str.slugify("Héllo Wörld, from node-comfort!");
-nc.success(`Slug: ${slug}`);
-
-nc.box(`Done in ${started.stop(true)}`, { title: "hello" });
+nc.info("Hello from node-comfort");
+nc.success(nc.str.slugify("Héllo Wörld, from node-comfort!"));
+nc.box(nc.time.format(new Date(), "dddd D MMMM YYYY"), { title: "today" });
 ```
 
-Lancez-le avec `node hello.js`. La sortie est en couleur dans un terminal, et en texte brut quand vous la redirigez vers un fichier.
+<TerminalDemo scene="start/installation/hello" />
+
+| Ligne | Ce qu'elle fait |
+| --- | --- |
+| `require("@ix-xs/node-comfort")` | charge le paquet ; tous les outils sont rangés dans `nc` |
+| `nc.info()`, `nc.success()` | écrivent une ligne de log, avec l'heure et un badge |
+| `nc.str.slugify()` | transforme un titre en morceau d'URL |
+| `nc.box()` | dessine un cadre autour d'un texte |
+
+La sortie est en couleur dans un terminal, et en texte brut quand vous la
+redirigez vers un fichier.
 
 ## CommonJS, modules ES et TypeScript
 
-Le paquet fonctionne de la même façon partout.
+Le paquet fonctionne de la même façon partout. Le guide utilise CommonJS.
 
 ```js
 // CommonJS
@@ -53,9 +83,11 @@ import nc = require("@ix-xs/node-comfort");
 import { schema as s, type Infer } from "@ix-xs/node-comfort";
 ```
 
-Toute la boîte à outils est aussi exportée sous les noms `nc` et `nodeComfort` : `const { nc } = require("@ix-xs/node-comfort")` fonctionne donc aussi. Dans un module ES ou un fichier TypeScript, commencez à taper `nc` et laissez votre éditeur ajouter l'import.
+Toute la boîte à outils est aussi exportée sous les noms `nc` et
+`nodeComfort` : `const { nc } = require("@ix-xs/node-comfort")` fonctionne
+donc aussi.
 
-## Importer un seul espace de noms
+## Charger un seul espace de noms
 
 Chaque espace de noms a son propre point d'entrée :
 
@@ -65,28 +97,15 @@ import SQLite from "@ix-xs/node-comfort/sqlite";
 const { get, set } = require("@ix-xs/node-comfort/obj");
 ```
 
-Dans les modules ES, c'est le moyen de ne charger que ce que vous utilisez, car Node.js lit tous les exports du paquet racine quand vous l'importez. Les chiffres se trouvent sur la page [Performances](/start/performance/).
+En modules ES, cela ne charge que ce que vous utilisez : Node.js lit tous les
+exports du paquet racine quand vous l'importez. Les chiffres se trouvent sur la
+page [Performances](/help/performance/).
 
-Les points d'entrée sont : `logger`, `fs`, `checker`, `utils`, `str`, `num`, `arr`, `obj`, `func`, `time`, `id`, `crypto`, `color`, `cli`, `sys`, `async`, `schema`, `http`, `env`, `errors`, `sqlite`, `cache` et `emitter`.
+Les points d'entrée sont `logger`, `fs`, `checker`, `utils`, `str`, `num`,
+`arr`, `obj`, `func`, `time`, `id`, `crypto`, `color`, `cli`, `sys`, `async`,
+`schema`, `http`, `env`, `errors`, `sqlite`, `cache` et `emitter`.
 
-## Le fichier `.env`
-
-Quand vous chargez le paquet, il lit le fichier `.env` du répertoire de travail s'il y en a un. Les variables déjà définies ne sont jamais écrasées : les vraies variables d'environnement l'emportent toujours.
-
-```bash
-# .env
-DATABASE_URL=postgres://localhost/app
-PORT=3000
-```
-
-```js
-const nc = require("@ix-xs/node-comfort");
-const port = nc.env.port("PORT", { default: 8080 }); // 3000
-```
-
-Pour désactiver ce chargement, définissez `NODE_COMFORT_DOTENV=false`. Pour charger d'autres fichiers, appelez vous-même `nc.env.load()`. Le [guide env](/essentials/env/) détaille la validation.
-
-## Les variables d'environnement qui changent le comportement
+## Les variables qui changent le comportement
 
 | Variable | Effet |
 | --- | --- |
@@ -95,10 +114,4 @@ Pour désactiver ce chargement, définissez `NODE_COMFORT_DOTENV=false`. Pour ch
 | `DEBUG` | Affiche les logs `debug` : `DEBUG=1` pour tous, `DEBUG=db,http:*` pour les loggers qui ont ces portées |
 | `NO_COLOR` | Désactive les couleurs |
 | `FORCE_COLOR=1\|2\|3` | Force les couleurs, en 16, 256 ou 16 millions de couleurs |
-| `NODE_COMFORT_DOTENV=false` | Ne charge pas `.env` automatiquement |
-
-## Et ensuite
-
-- [Votre éditeur](/start/editor/) montre comment obtenir la complétion et la vérification des types, y compris en JavaScript.
-- Les guides des modules, dans la barre latérale, parcourent chaque espace de noms.
-- La [référence de l'API](/reference/) liste toutes les fonctions.
+| `NODE_COMFORT_DOTENV=false` | Ne charge pas `.env` au chargement du paquet ([en savoir plus](/project/configuration/#write-the-env-file)) |

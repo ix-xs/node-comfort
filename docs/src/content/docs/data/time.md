@@ -216,4 +216,4 @@ time.nextRun("0 0 1 * *"); // when it would run next
 
 Expressions have five fields (`minute hour day month weekday`), or six with seconds first. They support lists, ranges, steps, month and day names, `L` in the day field for the last day of the month, and the `@hourly`, `@daily`, `@weekly`, `@monthly` and `@yearly` shortcuts.
 
-Both return a task with `stop()`, `next()`, `isRunning()` and `runs()`. On Node.js 24 and later, a task declared with `using` stops at the end of its block ([more on `using`](/recipes/#cleaning-up-with-using)). Every function is listed in the [reference](/reference/time/).
+Both return a task with `stop()`, `next()`, `isRunning()` and `runs()`. On Node.js 24 and later, a task declared with `using` stops at the end of its block ([more on `using`](/recipes/cli-tool/#cleaning-up-with-using)). Every function is listed in the [reference](/reference/time/).

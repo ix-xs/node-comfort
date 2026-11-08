@@ -37,5 +37,6 @@
   "Reads that found nothing or an expired entry.": "Lectures qui n'ont rien trouvé, ou une entrée expirée.",
   "Entries dropped because the cache was full.": "Entrées évincées parce que le cache était plein.",
   "Entries dropped because they expired.": "Entrées supprimées parce qu'elles avaient expiré.",
-  "From 0 to 1.": "De 0 à 1."
+  "From 0 to 1.": "De 0 à 1.",
+  "What the cache keeps for a key: the value, when it expires, its time to live and how long it may still be served once expired.": "Ce que le cache garde pour une clé : la valeur, sa date d'expiration, sa durée de vie et combien de temps elle peut encore servir une fois expirée."
 }

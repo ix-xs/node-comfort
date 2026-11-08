@@ -126,6 +126,6 @@ Not required, but worth a look once you're on 2.2:
 - [`totpStep()` and `after`](/system/crypto/#two-factor-authentication) to refuse a two-factor code that was already used.
 - [`SQLite.op` and `operators: "tagged"`](/system/sqlite/#values-from-a-request) for filters built from request values.
 - [`maxDepth`](/data/schema/#recursive-data) for schemas that read deeply nested input.
-- [`using`](/recipes/#cleaning-up-with-using) with watchers, schedules, spinners and listeners on Node.js 24 and later.
+- [`using`](/recipes/cli-tool/#cleaning-up-with-using) with watchers, schedules, spinners and listeners on Node.js 24 and later.
 
 The [changelog](https://github.com/ix-xs/node-comfort/blob/main/CHANGELOG.md) has the complete list.

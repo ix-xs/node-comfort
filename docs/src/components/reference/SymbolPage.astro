@@ -1,0 +1,214 @@
+---
+// The page of one member or one type: what it is, how to import it, its
+// declaration, then its parameters, properties and methods, its examples, and
+// the pages that mention it.
+import StarlightPage from "@astrojs/starlight/components/StarlightPage.astro";
+import { Code } from "@astrojs/starlight/components";
+import type { ApiSymbol } from "../../reference/model";
+import { example, find, model, namespaceOf, nsKind, pathOf, sidebar, translate, untranslated, words } from "../../reference/model";
+import { href, render } from "../../reference/markdown";
+import { guideTitle } from "../../reference/guide";
+import Tokens from "./Tokens.astro";
+import Callable from "./Callable.astro";
+
+interface Props {
+  symbol: ApiSymbol;
+  locale: string | undefined;
+}
+
+const { symbol, locale } = Astro.props;
+const w = words(locale);
+const ns = namespaceOf(symbol.ns);
+const key = ns.key;
+const isType = symbol.kind === "interface" || symbol.kind === "type";
+const options = { here: key, self: pathOf(symbol.ref) };
+
+const text = translate(key, symbol.text, locale);
+const pending = untranslated(key, symbol.text, locale);
+// The first paragraph leads the page; the rest follows the declaration.
+const [first = "", ...rest] = (text ?? "").split(/\n\s*\n/);
+const leadHtml = await render(first, locale, { ...options, inline: true });
+const moreHtml = await render(rest.join("\n\n"), locale, options);
+const deprecatedHtml = symbol.deprecated !== undefined ? await render(symbol.deprecated ? translate(key, symbol.deprecated, locale) : w.avoid, locale, { ...options, inline: true }) : "";
+
+// How to get it: from the package, or from its own entry point.
+const pkg = model.package.name;
+const variable = key;
+const importCode = isType
+  ? `import type { ${symbol.name} } from "${pkg}";`
+  : [
+      `const { ${variable} } = require("${pkg}");`,
+      w.orAlone,
+      `const ${variable} = require("${ns.module}");`,
+      ...(symbol.flat ? [w.topLevel, `const { ${symbol.name} } = require("${pkg}");`] : []),
+    ].join("\n");
+const typedefCode = isType ? `/** @typedef {import("${pkg}").${symbol.name}} ${symbol.name} */` : "";
+const examples = (symbol.examples ?? []).map((code) => example(key, code, locale));
+
+/** A property or a method, ready to show. */
+async function member<T extends { name: string; text?: string; inheritedFrom?: string }>(item: T) {
+  return {
+    ...item,
+    html: await render(translate(key, item.text, locale), locale, options),
+    pending: untranslated(key, item.text, locale),
+    from: item.inheritedFrom ? find(item.inheritedFrom) : undefined,
+  };
+}
+const properties = await Promise.all((symbol.properties ?? []).map(member));
+const methods = await Promise.all((symbol.methods ?? []).map(member));
+// A member named like a section of the page gets another id.
+const SECTIONS = new Set(["parameters", "constructor", "values", "example", "properties", "methods", "used-by", "declaration"]);
+const idOf = (name: string) => (SECTIONS.has(name.toLowerCase()) ? `${name}-member` : name);
+
+const guide = await guideTitle(ns.guide, locale);
+const usedBy = (symbol.usedBy ?? []).map(find).filter((s): s is ApiSymbol => Boolean(s));
+const callable = symbol.kind === "function" || symbol.kind === "method" || symbol.kind === "constructor";
+
+const headings = [
+  ...(callable && symbol.overloads?.length ? [{ depth: 2, slug: "parameters", text: w.parameters }] : []),
+  ...(symbol.ctor ? [{ depth: 2, slug: "constructor", text: w.constructor }] : []),
+  ...(symbol.values?.length ? [{ depth: 2, slug: "values", text: w.values }] : []),
+  ...(examples.length ? [{ depth: 2, slug: "example", text: examples.length > 1 ? w.examples : w.example }] : []),
+  ...(properties.length ? [{ depth: 2, slug: "properties", text: w.properties }, ...properties.map((p) => ({ depth: 3, slug: idOf(p.name), text: p.name }))] : []),
+  ...(methods.length ? [{ depth: 2, slug: "methods", text: w.methods }, ...methods.map((m) => ({ depth: 3, slug: idOf(m.name), text: `${m.name}()` }))] : []),
+  ...(usedBy.length ? [{ depth: 2, slug: "used-by", text: w.usedBy }] : []),
+];
+---
+
+<StarlightPage
+  frontmatter={{
+    title: symbol.title,
+    description: first.replace(/\[([^\]]+)\]\([^)]*\)/g, "$1").replace(/`/g, "").replace(/\s+/g, " ").slice(0, 200),
+    tableOfContents: { minHeadingLevel: 2, maxHeadingLevel: 3 },
+    editUrl: false,
+    pagefind: true,
+  }}
+  sidebar={sidebar(locale, key)}
+  headings={headings}
+>
+  <div class="nc-rf-meta">
+    <span class="nc-rf-kind" data-kind={symbol.kind}>{w.kinds[symbol.kind]}</span>
+    <a class="nc-rf-owner" href={href(pathOf(ns.slug), locale)} data-kind={nsKind(ns)} translate="no">{ns.title}</a>
+    <a class="nc-rf-source" href={symbol.source} rel="noopener">{w.source}<span aria-hidden="true"> ↗</span></a>
+  </div>
+
+  {symbol.deprecated !== undefined && (
+    <aside class="nc-rf-deprecated">
+      <strong>{w.deprecated}</strong>
+      {deprecatedHtml && <span set:html={deprecatedHtml} />}
+    </aside>
+  )}
+
+  {leadHtml && <p class="nc-lead nc-rf-lead" set:html={leadHtml} lang={pending && locale ? "en" : undefined} />}
+
+  <Code code={importCode} lang={isType ? "ts" : "js"} />
+  {typedefCode && <Code code={typedefCode} lang="js" />}
+
+  {callable && symbol.overloads ? (
+    symbol.overloads.map((signature, i) => (
+      <section class="nc-rf-section" aria-labelledby={i === 0 ? "parameters" : undefined}>
+        {i === 0 && <h2 id="parameters">{w.parameters}</h2>}
+        {symbol.overloads!.length > 1 && <p class="nc-rf-form">{w.form} {i + 1}</p>}
+        <Callable signature={signature} ns={key} self={symbol.ref} locale={locale} keyword={symbol.kind === "function" ? "function" : undefined} />
+      </section>
+    ))
+  ) : symbol.code ? (
+    <pre class="nc-rf-code nc-rf-declaration" translate="no"><code><Tokens tokens={symbol.code} locale={locale} keywords /></code></pre>
+  ) : null}
+
+  {moreHtml && <div class="nc-rf-more" set:html={moreHtml} lang={pending && locale ? "en" : undefined} />}
+
+  {guide && (
+    <a class="nc-rf-guide" href={href(ns.guide, locale)}>
+      <span class="nc-rf-label">{w.guide}</span>
+      <span class="nc-rf-guide-title">{guide}</span>
+      <span aria-hidden="true">→</span>
+    </a>
+  )}
+
+  {symbol.ctor && (
+    <section class="nc-rf-section">
+      <h2 id="constructor">{w.constructor}</h2>
+      <Callable signature={symbol.ctor} ns={key} self={symbol.ref} locale={locale} />
+    </section>
+  )}
+
+  {symbol.values?.length ? (
+    <section class="nc-rf-section">
+      <h2 id="values">{w.values}</h2>
+      <ul class="nc-rf-values" translate="no">
+        {symbol.values.map((value) => <li><code>"{value}"</code></li>)}
+      </ul>
+    </section>
+  ) : null}
+
+  {examples.length > 0 && (
+    <section class="nc-rf-section">
+      <h2 id="example">{examples.length > 1 ? w.examples : w.example}</h2>
+      {examples.map((code) => <Code code={code} lang="js" />)}
+    </section>
+  )}
+
+  {properties.length > 0 && (
+    <section class="nc-rf-section">
+      <h2 id="properties">{w.properties}</h2>
+      {properties.map((prop) => (
+        <article class="nc-rf-member">
+          <h3 id={idOf(prop.name)} translate="no">
+            <a href={`#${idOf(prop.name)}`}>{prop.name}</a>
+          </h3>
+          <span class="nc-rf-tags">
+            {prop.static && <span class="nc-rf-tag">{w.static}</span>}
+            {prop.readonly && <span class="nc-rf-tag">{w.readonly}</span>}
+            {prop.optional && <span class="nc-rf-tag">{w.optional}</span>}
+          </span>
+          <pre class="nc-rf-code nc-rf-small" translate="no"><code>{prop.name}{prop.optional ? "?" : ""}: <Tokens tokens={prop.type} locale={locale} keywords /></code></pre>
+          {prop.html && <div class="nc-rf-text" set:html={prop.html} lang={prop.pending && locale ? "en" : undefined} />}
+          {prop.default && <p class="nc-rf-default">{w.default} <code translate="no">{prop.default}</code></p>}
+          {prop.from && (
+            <p class="nc-rf-inherited">{w.inherited} <a href={href(pathOf(prop.from.ref), locale)} translate="no">{prop.from.name}</a></p>
+          )}
+        </article>
+      ))}
+    </section>
+  )}
+
+  {methods.length > 0 && (
+    <section class="nc-rf-section">
+      <h2 id="methods">{w.methods}</h2>
+      {methods.map((method) => (
+        <article class="nc-rf-member">
+          <h3 id={idOf(method.name)} translate="no">
+            <a href={`#${idOf(method.name)}`}>{method.name}()</a>
+          </h3>
+          <span class="nc-rf-tags">
+            {method.static && <span class="nc-rf-tag">{w.static}</span>}
+          </span>
+          {method.html && <div class="nc-rf-text" set:html={method.html} lang={method.pending && locale ? "en" : undefined} />}
+          {method.overloads.map((signature, i) => (
+            <>
+              {method.overloads.length > 1 && <p class="nc-rf-form">{w.form} {i + 1}</p>}
+              <Callable signature={signature} ns={key} self={symbol.ref} locale={locale} />
+            </>
+          ))}
+          {method.from && (
+            <p class="nc-rf-inherited">{w.inherited} <a href={href(pathOf(method.from.ref), locale)} translate="no">{method.from.name}</a></p>
+          )}
+          {method.examples?.map((code) => <Code code={example(key, code, locale)} lang="js" />)}
+        </article>
+      ))}
+    </section>
+  )}
+
+  {usedBy.length > 0 && (
+    <section class="nc-rf-section">
+      <h2 id="used-by">{w.usedBy}</h2>
+      <p class="nc-rf-hint">{w.usedByText}</p>
+      <ul class="nc-rf-chips" translate="no">
+        {usedBy.map((other) => (
+          <li><a href={href(pathOf(other.ref), locale)} data-kind={other.kind}>{other.title}</a></li>
+        ))}
+      </ul>
+    </section>
+  )}
+</StarlightPage>

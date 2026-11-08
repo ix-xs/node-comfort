@@ -97,7 +97,7 @@ nc.sys.onShutdown(() => db.close());
 nc.sys.onShutdown((reason) => nc.info(`Stopping (${reason})`));
 ```
 
-Les gestionnaires s'exécutent dans l'ordre inverse (le dernier enregistré passe en premier), puis le processus se termine. Chacun reçoit la raison : le signal, comme `"SIGINT"` ou `"SIGTERM"`, ou `"shutdown"` quand vous l'avez demandé vous-même. S'ils prennent plus de 10 secondes (à changer avec `{ timeout: "30s" }`), la sortie est forcée. Un second Ctrl+C quitte immédiatement. `onShutdown` renvoie une fonction qui retire le gestionnaire. Avec Node.js 24 ou plus récent, déclarez-la avec `using` pour retirer le gestionnaire à la fin d'un bloc ([en savoir plus sur `using`](/recipes/#cleaning-up-with-using)).
+Les gestionnaires s'exécutent dans l'ordre inverse (le dernier enregistré passe en premier), puis le processus se termine. Chacun reçoit la raison : le signal, comme `"SIGINT"` ou `"SIGTERM"`, ou `"shutdown"` quand vous l'avez demandé vous-même. S'ils prennent plus de 10 secondes (à changer avec `{ timeout: "30s" }`), la sortie est forcée. Un second Ctrl+C quitte immédiatement. `onShutdown` renvoie une fonction qui retire le gestionnaire. Avec Node.js 24 ou plus récent, déclarez-la avec `using` pour retirer le gestionnaire à la fin d'un bloc ([en savoir plus sur `using`](/recipes/cli-tool/#cleaning-up-with-using)).
 
 Pour arrêter de vous-même, appelez `shutdown` plutôt que `process.exit()`, qui sauterait les gestionnaires :
 

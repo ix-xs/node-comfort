@@ -1,0 +1,97 @@
+---
+// One way of calling a function or a method: the call itself, each parameter
+// with what it accepts, what comes back, and what it throws.
+import type { Signature } from "../../reference/model";
+import { find, pathOf, translate, untranslated, words } from "../../reference/model";
+import { href, render } from "../../reference/markdown";
+import Tokens from "./Tokens.astro";
+import Fields from "./Fields.astro";
+
+interface Props {
+  signature: Signature;
+  /** The namespace whose catalog translates the descriptions. */
+  ns: string;
+  /** The page being written, which does not link to itself. */
+  self?: string;
+  locale: string | undefined;
+  /** "function" before the name, for a function of a namespace. */
+  keyword?: string;
+  /** Shows the parameters and the return value under the call. */
+  details?: boolean;
+}
+
+const { signature, ns, self, locale, keyword, details = true } = Astro.props;
+const w = words(locale);
+const options = { inline: true, here: ns, self: self && pathOf(self) };
+const params = await Promise.all(
+  (signature.params ?? []).map(async (param) => ({
+    ...param,
+    html: await render(translate(ns, param.text, locale), locale, options),
+    pending: untranslated(ns, param.text, locale),
+    // A parameter typed with an options type of the package: what it accepts
+    // is shown here too, so that the page answers without a click.
+    shape: shapeOf(param.type),
+  })),
+);
+function shapeOf(type: Signature["returns"]["type"]) {
+  const refs = type.filter((t) => t[1]?.ref);
+  if (refs.length !== 1) return undefined;
+  const target = find(refs[0][1]!.ref!);
+  if (!target || target.kind !== "interface" || !target.properties?.length) return undefined;
+  return target;
+}
+const returnsHtml = await render(translate(ns, signature.returns.text, locale), locale, options);
+const returnsVoid = /^(void|Promise<void>|undefined)$/.test(signature.returns.type.map((t) => t[0]).join(""));
+const throws = await Promise.all(
+  (signature.throws ?? []).map(async (thrown) => ({ ...thrown, html: await render(translate(ns, thrown.text, locale), locale, options) })),
+);
+---
+
+<pre class="nc-rf-code" translate="no"><code>{keyword && <span class="nc-rf-kw">{keyword} </span>}<Tokens tokens={signature.code} locale={locale} keywords /></code></pre>
+
+{details && params.length > 0 && (
+  <dl class="nc-rf-params" aria-label={w.parameters}>
+    {params.map((param) => (
+      <div class="nc-rf-param">
+        <dt>
+          <code class="nc-rf-name" translate="no">{param.rest ? "..." : ""}{param.name}</code>
+          <code class="nc-rf-type" translate="no"><Tokens tokens={param.type} locale={locale} /></code>
+          {param.optional && <span class="nc-rf-tag">{w.optional}</span>}
+        </dt>
+        <dd>
+          {param.html && <p set:html={param.html} lang={param.pending && locale ? "en" : undefined} />}
+          {param.default && <p class="nc-rf-default">{w.default} <code translate="no">{param.default}</code></p>}
+          {param.shape && (
+            <details class="nc-rf-accepts" open={params.length === 1}>
+              <summary>{w.accepts}</summary>
+              <Fields fields={param.shape.properties!} ns={param.shape.ns} locale={locale} />
+              <p class="nc-rf-more-link"><a href={href(pathOf(param.shape.ref), locale)} translate="no">{param.shape.name}</a> →</p>
+            </details>
+          )}
+          {param.fields && (
+            <details class="nc-rf-accepts" open={params.length === 1}>
+              <summary>{w.accepts}</summary>
+              <Fields fields={param.fields} ns={ns} locale={locale} />
+            </details>
+          )}
+        </dd>
+      </div>
+    ))}
+  </dl>
+)}
+
+{details && !returnsVoid && (
+  <p class="nc-rf-returns">
+    <span class="nc-rf-label">{w.returns}</span>
+    <code class="nc-rf-type" translate="no"><Tokens tokens={signature.returns.type} locale={locale} /></code>
+    {returnsHtml && <span set:html={returnsHtml} />}
+  </p>
+)}
+
+{details && throws.map((thrown) => (
+  <p class="nc-rf-returns">
+    <span class="nc-rf-label">{w.throws}</span>
+    {thrown.type && <code class="nc-rf-type" translate="no"><Tokens tokens={thrown.type} locale={locale} /></code>}
+    {thrown.html && <span set:html={thrown.html} />}
+  </p>
+))}

@@ -4,9 +4,9 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "showcase": "node scripts/showcase.mjs",
-    "dev": "node scripts/showcase.mjs && astro dev",
-    "build": "node scripts/showcase.mjs && astro build && node scripts/legacy-pages.mjs",
+    "scenes": "node scripts/scenes.mjs",
+    "dev": "node scripts/scenes.mjs && astro dev",
+    "build": "node scripts/scenes.mjs && astro build && node scripts/legacy-pages.mjs",
     "preview": "astro preview",
     "check-links": "node scripts/check-links.mjs",
     "check-translation": "node scripts/check-translation.mjs"

@@ -1,0 +1,99 @@
+---
+title: "La configuration"
+description: "Lisez les réglages de l'outil status dans des variables d'environnement et un fichier .env, typés et vérifiés une fois au démarrage."
+sidebar:
+  order: 2
+---
+
+import { Aside } from '@astrojs/starlight/components';
+import TerminalDemo from '../../../../components/demo/TerminalDemo.astro';
+
+Certaines valeurs changent d'une machine à l'autre : l'emplacement de la liste
+des sites, le temps qu'un site a pour répondre. Elles n'ont rien à faire dans
+le code. Elles vont dans des variables d'environnement, vérifiées une fois, au
+démarrage du programme.
+
+## Décrire les variables
+
+Créez `config.js` :
+
+```js title="config.js"
+const nc = require("@ix-xs/node-comfort");
+
+function loadConfig() {
+  return nc.env.validate({
+    SITES_FILE: { type: "string", description: "The JSON file that lists the sites" },
+    TIMEOUT: { type: "duration", default: "5s" },
+    CONCURRENCY: { type: "number", integer: true, min: 1, default: 4 },
+    DATABASE_PATH: { type: "string", default: "data/status.sqlite" },
+  });
+}
+
+module.exports = { loadConfig };
+```
+
+| Variable | Type | Utilisée dans |
+| --- | --- | --- |
+| `SITES_FILE` | texte, obligatoire | [Lire la liste des sites](/project/input/) |
+| `TIMEOUT` | une durée, `5s` par défaut | [Vérifier les sites](/project/requests/) |
+| `CONCURRENCY` | un nombre entier à partir de 1, `4` par défaut | [Vérifier les sites](/project/requests/) |
+| `DATABASE_PATH` | texte, `data/status.sqlite` par défaut | [Garder les résultats](/project/storage/) |
+
+`nc.env.validate()` vérifie chaque variable, la convertit (`"5s"` devient
+`5000`, en millisecondes) et renvoie un objet figé. Une variable sans
+`default` est obligatoire.
+
+## La lire au démarrage
+
+Remplacez `status.js` :
+
+```js title="status.js"
+const nc = require("@ix-xs/node-comfort");
+const { loadConfig } = require("./config");
+
+async function main() {
+  const config = loadConfig();
+  nc.info("Configuration", config);
+}
+
+main().catch((error) => {
+  nc.error(error.message);
+  process.exitCode = 1;
+});
+```
+
+- **Pourquoi `main()` :** les pages suivantes attendent des requêtes, avec
+  `await`. Le programme vit désormais dans une fonction `async`.
+- **Pourquoi le `catch` :** un problème devient une ligne lisible au lieu
+  d'une pile d'appels, et `process.exitCode = 1` dit à un script que
+  l'exécution a échoué.
+
+## Le lancer sans `.env`
+
+<TerminalDemo scene="project/configuration/missing" />
+
+Le programme s'arrête avant de faire quoi que ce soit, et dit quoi corriger.
+Quand plusieurs variables posent problème, une seule erreur les liste toutes.
+
+## Écrire le fichier `.env`
+
+Créez `.env` à côté de `status.js` :
+
+```bash title=".env"
+# The JSON file that lists the sites
+SITES_FILE=sites.json
+# How long a site has to answer
+TIMEOUT=5s
+```
+
+<TerminalDemo scene="project/configuration/loaded" />
+
+Le paquet lit le `.env` du dossier courant quand il se charge. Une variable
+déjà définie dans l'environnement l'emporte sur le fichier : un serveur peut
+donc changer n'importe quelle valeur sans y toucher.
+
+<Aside type="tip" title="Gardez .env hors de git">
+`.env` contient souvent des secrets. Ajoutez-le à `.gitignore`, et partagez
+plutôt un `.env.example` : [`env.example()`](/essentials/env/#a-envexample-from-the-same-spec)
+l'écrit à partir de la même description.
+</Aside>

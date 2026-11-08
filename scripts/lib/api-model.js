@@ -2,7 +2,8 @@
 
 // Builds a plain JSON description of the public API from the generated type
 // declarations: namespaces, members, signatures, parameters, examples and
-// types. Both docs/API.md and the documentation site are rendered from it.
+// types. scripts/build-reference.js turns it into the data of the reference
+// pages of the documentation site.
 
 const fs = require("node:fs");
 const path = require("node:path");
@@ -16,10 +17,13 @@ const FLAT = ["logger", "fs", "checker", "utils"];
 const INSTANCE = /** @type {Record<string, string>} */ ({ SQLite: "db", Cache: "cache", Emitter: "events" });
 
 /**
- * @typedef {{ name: string, type: string, optional: boolean, rest: boolean, defaultValue?: string, description: string }} Param
- * @typedef {{ code: string, description: string, params: Param[], returns?: { type: string, description: string }, throws: Array<{ type: string, description: string }>, examples: string[], deprecated?: string }} Signature
- * @typedef {{ name: string, qualified: string, kind: "function" | "method" | "property" | "constructor", description: string, signatures: Signature[], type?: string, deprecated?: string }} Member
- * @typedef {{ name: string, description: string, definition: string, properties: Array<{ name: string, type: string, optional: boolean, description: string }> }} TypeInfo
+ * @typedef {{ name: string, type: string, optional: boolean, description: string }} Field
+ * @typedef {{ name: string, type: string, optional: boolean, rest: boolean, defaultValue?: string, description: string, fields?: Field[] }} Param
+ * @typedef {{ code: string, typeParams: string, returnType: string, description: string, params: Param[], returns?: { type: string, description: string }, throws: Array<{ type: string, description: string }>, examples: string[], deprecated?: string }} Signature
+ * @typedef {{ name: string, type: string, optional: boolean, readonly: boolean, static: boolean, description: string, inheritedFrom?: string }} ClassProperty
+ * @typedef {{ name: string, static: boolean, description: string, signatures: Signature[], inheritedFrom?: string }} ClassMethod
+ * @typedef {{ name: string, qualified: string, kind: "function" | "method" | "property" | "constructor" | "class", static?: boolean, description: string, signatures: Signature[], type?: string, deprecated?: string, examples?: string[], properties?: ClassProperty[], methods?: ClassMethod[], extends?: string }} Member
+ * @typedef {{ name: string, description: string, definition: string, typeParams: string, values?: string[], examples: string[], properties: Array<{ name: string, type: string, optional: boolean, description: string }> }} TypeInfo
  * @typedef {{ key: string, module: string, title: string, kind: "namespace" | "class", flat: boolean, subpath: string, description: string, examples: string[], members: Member[], extra: string[], types: TypeInfo[] }} Namespace
  */
 
@@ -151,12 +155,40 @@ function buildModel() {
   /** @param {string} text */
   const clean = (text) =>
     text
-      .replace(/typeof import\("[^"]*\/types\/(?:src\/)?(\w+)(?:\.js)?"\)/g, (_, mod) => (mod === "index" ? "typeof nc" : `typeof nc.${moduleKeys.get(mod) ?? mod}`))
+      .replace(/typeof import\("(?:[^"]*\/types\/(?:src\/)?|\.\/)(\w+)(?:\.js)?"\)/g, (_, mod) => (mod === "index" ? "typeof nc" : `typeof nc.${moduleKeys.get(mod) ?? mod}`))
       .replace(/import\("[^"]*"\)\./g, "")
       .replace(/\?: ((?:[^,()<>]|<[^<>]*>)*?) \| undefined(?=[,);])/g, "?: $1");
 
   /** @param {ts.Symbol} symbol */
   const resolve = (symbol) => (symbol.flags & ts.SymbolFlags.Alias ? checker.getAliasedSymbol(symbol) : symbol);
+
+  /** Whether a declaration comes from the package's own types, not from Node or TypeScript. */
+  const TYPES_DIR = path.join(ROOT, "types").split(path.sep).join("/").toLowerCase() + "/";
+  const own = (/** @type {ts.Declaration | undefined} */ decl) => Boolean(decl && decl.getSourceFile().fileName.split("\\").join("/").toLowerCase().startsWith(TYPES_DIR));
+  /** A type without the `| undefined` an optional value always carries. */
+  const optionalType = (/** @type {string} */ text) => text.replace(/ \| undefined$/, "");
+  /** `T` -> `T[]`, `A | B` -> `(A | B)[]`. */
+  const arrayOf = (/** @type {string} */ text) => ((/^[\w.$<>, ]+$/.test(text) && !/\s/.test(text.replace(/<[^<>]*>/g, ""))) || /^\(.*\)$/.test(text) ? `${text}[]` : `(${text})[]`);
+
+  /**
+   * What an object written inline accepts (`{ cwd?: string, type?: "file" }`):
+   * the properties of the parts of the type that have no name of their own.
+   * @param {ts.Type} type
+   * @param {ts.Node} at
+   * @returns {Field[] | undefined}
+   */
+  const fieldsOf = (type, at) => {
+    const anonymous = (/** @type {ts.Type} */ t) => Boolean(t.flags & ts.TypeFlags.Object) && !t.aliasSymbol && /^__(type|object)$/.test(t.symbol?.getName() ?? "") && !t.getCallSignatures().length;
+    const parts = type.isIntersection() ? type.types.filter(anonymous) : anonymous(type) ? [type] : [];
+    const props = parts.flatMap((part) => part.getProperties());
+    if (!props.length) return undefined;
+    return props.map((p) => ({
+      name: p.getName(),
+      type: optionalType(clean(checker.typeToString(checker.getTypeOfSymbolAtLocation(p, at), at, FORMAT))),
+      optional: Boolean(p.flags & ts.SymbolFlags.Optional),
+      description: links(ts.displayPartsToString(p.getDocumentationComment(checker))),
+    }));
+  };
 
   /**
    * @param {ts.Signature} signature
@@ -172,20 +204,28 @@ function buildModel() {
     const params = signature.getParameters().map((p) => {
       const decl = /** @type {ts.ParameterDeclaration | undefined} */ (p.valueDeclaration);
       const tag = paramTags.get(p.getName());
-      const printed = decl ? checker.typeToString(checker.getTypeOfSymbolAtLocation(p, decl), decl, FORMAT) : "unknown";
+      const type = decl ? checker.getTypeOfSymbolAtLocation(p, decl) : undefined;
+      const printed = type && decl ? checker.typeToString(type, decl, FORMAT) : "unknown";
+      const optional = Boolean(decl && (decl.questionToken || decl.initializer || tag?.optional));
+      const fields = type && decl ? fieldsOf(checker.getNonNullableType(type), decl) : undefined;
       return {
         name: p.getName(),
-        type: clean(tag?.type ?? printed),
-        optional: Boolean(decl && (decl.questionToken || decl.initializer || tag?.optional)),
+        // A JSDoc rest parameter is written `{...T}`: it is a `T[]`.
+        type: tag?.type ? clean(decl?.dotDotDotToken && tag.type.startsWith("...") ? arrayOf(tag.type.slice(3)) : tag.type) : optional ? optionalType(clean(printed)) : clean(printed),
+        optional,
         rest: Boolean(decl?.dotDotDotToken),
         defaultValue: tag?.defaultValue,
         description: links(tag?.text ?? ts.displayPartsToString(p.getDocumentationComment(checker))),
+        ...(fields ? { fields } : {}),
       };
     });
     const ret = parsed.tags.find((t) => t.tag === "returns" || t.tag === "return");
     const deprecated = parsed.tags.find((t) => t.tag === "deprecated");
+    const typeParams = declaration && "typeParameters" in declaration && declaration.typeParameters?.length ? `<${declaration.typeParameters.map((tp) => clean(tp.getText())).join(", ")}>` : "";
     return {
       code: clean(`${name}${checker.signatureToString(signature, undefined, FORMAT)}`),
+      typeParams,
+      returnType: clean(checker.typeToString(signature.getReturnType(), undefined, FORMAT)),
       description: links(parsed.description),
       params,
       returns: ret ? { type: clean(ret.type ?? checker.typeToString(signature.getReturnType(), undefined, FORMAT)), description: links(ret.text) } : undefined,
@@ -200,19 +240,76 @@ function buildModel() {
    * @param {string} qualified
    * @param {ts.Symbol} symbol
    * @param {Member["kind"]} kind
+   * @param {boolean} [isStatic] Carried by the class itself, like `SQLite.op`.
    * @returns {Member}
    */
-  const memberOf = (name, qualified, symbol, kind) => {
+  const memberOf = (name, qualified, symbol, kind, isStatic = false) => {
     const target = resolve(symbol);
     const type = checker.getTypeOfSymbolAtLocation(target, source);
     const callables = type.getCallSignatures();
     const description = links(ts.displayPartsToString(target.getDocumentationComment(checker)));
+    const statics = isStatic ? { static: true } : {};
     if (callables.length) {
       const signatures = callables.map((s) => signatureOf(s, name));
       if (!signatures[0].description) signatures[0].description = description;
-      return { name, qualified, kind, description: signatures[0].description || description, signatures, deprecated: signatures.find((s) => s.deprecated)?.deprecated };
+      return { name, qualified, kind, ...statics, description: signatures[0].description || description, signatures, deprecated: signatures.find((s) => s.deprecated)?.deprecated };
     }
-    return { name, qualified, kind: "property", description, signatures: [], type: clean(checker.typeToString(type, undefined, FORMAT)) };
+    const raw = jsDocOf(target.valueDeclaration ?? target.declarations?.[0]);
+    const examples = raw ? parseJSDoc(raw).tags.filter((t) => t.tag === "example").map((t) => plain(t.text)) : [];
+    // A class held by a namespace, like nc.errors.HttpError.
+    const constructs = type.getConstructSignatures();
+    if (constructs.length) {
+      const declaration = target.valueDeclaration ?? target.declarations?.[0];
+      const heritage = declaration && ts.isClassDeclaration(declaration) ? declaration.heritageClauses?.find((h) => h.token === ts.SyntaxKind.ExtendsKeyword)?.types[0]?.getText() : undefined;
+      return {
+        name,
+        qualified,
+        kind: "class",
+        description,
+        examples,
+        signatures: constructs.map((s) => signatureOf(s, `new ${name}`)),
+        ...(heritage ? { extends: heritage } : {}),
+        ...classMembers(constructs[0].getReturnType(), type, name),
+      };
+    }
+    return { name, qualified, kind: "property", ...statics, description, examples, signatures: [], type: clean(checker.typeToString(type, undefined, FORMAT)) };
+  };
+
+  /**
+   * The public properties and methods of a class held by a namespace, its own
+   * and those it gets from another class of the package.
+   * @param {ts.Type} instance
+   * @param {ts.Type} statics
+   * @param {string} className
+   * @returns {{ properties: ClassProperty[], methods: ClassMethod[] }}
+   */
+  const classMembers = (instance, statics, className) => {
+    /** @type {ClassProperty[]} */
+    const properties = [];
+    /** @type {ClassMethod[]} */
+    const methods = [];
+    const visit = (/** @type {ts.Type} */ type, /** @type {boolean} */ isStatic) => {
+      for (const p of type.getProperties()) {
+        const decl = p.valueDeclaration ?? p.declarations?.[0];
+        const name = p.getName();
+        if (!own(decl) || name.startsWith("_") || name.startsWith("__@") || name === "prototype") continue;
+        if (ts.getCombinedModifierFlags(/** @type {ts.Declaration} */ (decl)) & (ts.ModifierFlags.Private | ts.ModifierFlags.Protected)) continue;
+        const parent = /** @type {ts.Declaration} */ (decl).parent;
+        const parentName = parent && ts.isClassDeclaration(parent) ? parent.name?.getText() : undefined;
+        const inherited = parentName && parentName !== className ? { inheritedFrom: parentName } : {};
+        const value = checker.getTypeOfSymbolAtLocation(p, /** @type {ts.Node} */ (decl));
+        const description = links(ts.displayPartsToString(p.getDocumentationComment(checker)));
+        if (p.flags & ts.SymbolFlags.Method) {
+          methods.push({ name, static: isStatic, description, signatures: value.getCallSignatures().map((s) => signatureOf(s, name)), ...inherited });
+        } else {
+          const readonly = Boolean(ts.getCombinedModifierFlags(/** @type {ts.Declaration} */ (decl)) & ts.ModifierFlags.Readonly);
+          properties.push({ name, type: optionalType(clean(checker.typeToString(value, undefined, FORMAT))), optional: Boolean(p.flags & ts.SymbolFlags.Optional), readonly, static: isStatic, description, ...inherited });
+        }
+      }
+    };
+    visit(statics, true);
+    visit(instance, false);
+    return { properties, methods };
   };
 
   /**
@@ -242,7 +339,12 @@ function buildModel() {
             description: links(ts.displayPartsToString(p.getDocumentationComment(checker))),
           }))
         : [];
-      list.push({ name: symbol.getName(), description: links(ts.displayPartsToString(target.getDocumentationComment(checker))), definition, properties });
+      const typeParams = decl && (ts.isTypeAliasDeclaration(decl) || ts.isInterfaceDeclaration(decl)) && decl.typeParameters?.length ? `<${decl.typeParameters.map((tp) => clean(tp.getText())).join(", ")}>` : "";
+      // A list of strings to choose from: the values, one by one.
+      const values = declared.isUnion() && declared.types.every((t) => t.isStringLiteral()) ? declared.types.map((t) => /** @type {ts.StringLiteralType} */ (t).value) : undefined;
+      const raw = jsDocOf(decl);
+      const examples = raw ? parseJSDoc(raw).tags.filter((t) => t.tag === "example").map((t) => plain(t.text)) : [];
+      list.push({ name: symbol.getName(), description: links(ts.displayPartsToString(target.getDocumentationComment(checker))), definition, typeParams, ...(values ? { values } : {}), examples, properties });
     }
     return list.sort((a, b) => a.name.localeCompare(b.name));
   };
@@ -280,7 +382,7 @@ function buildModel() {
       for (const name of Object.getOwnPropertyNames(value)) {
         if (name === "length" || name === "name" || name === "prototype") continue;
         const prop = classType.getProperty(name);
-        if (prop) members.push(memberOf(name, `nc.${key}.${name}`, prop, "static"));
+        if (prop) members.push(memberOf(name, `nc.${key}.${name}`, prop, "method", true));
       }
       const instance = checker.getDeclaredTypeOfSymbol(target);
       const variable = INSTANCE[key] ?? key.toLowerCase();

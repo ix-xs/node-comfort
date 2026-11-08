@@ -1,9 +1,11 @@
 ---
 title: "Your editor"
-description: "node-comfort is written in JavaScript with detailed JSDoc, and ships TypeScript declarations generated from it. Editors built on the TypeScript language service (VS Code, Cursor, WebStorm, Zed, Neovim with an LSP...) use those declarations even in plain JavaScript files."
+description: "Completions, documentation on hover and type checking for node-comfort, in JavaScript as in TypeScript."
 sidebar:
   order: 3
 ---
+
+node-comfort is written in JavaScript with detailed JSDoc, and ships TypeScript declarations generated from it. Editors built on the TypeScript language service (VS Code, Cursor, WebStorm, Zed, Neovim with an LSP...) use those declarations even in plain JavaScript files.
 
 ## What you get
 

@@ -1,0 +1,102 @@
+---
+title: "Vérifier les sites"
+description: "Interrogez chaque site avec nc.http, avec un délai et de nouvelles tentatives, et vérifiez plusieurs sites à la fois avec nc.async.map()."
+sidebar:
+  order: 4
+---
+
+import { Aside } from '@astrojs/starlight/components';
+import TerminalDemo from '../../../../components/demo/TerminalDemo.astro';
+
+Place au vrai travail : demander sa page à chaque site. Un site peut être lent,
+en panne une seconde, ou en panne pour de bon. Le programme doit attendre un
+temps limité, réessayer quand l'échec peut passer, et ne jamais laisser un site
+arrêter les autres.
+
+## Vérifier un site, puis tous
+
+Créez `check.js` :
+
+```js title="check.js"
+const nc = require("@ix-xs/node-comfort");
+
+async function checkSite(site, config) {
+  try {
+    const response = await nc.http.get(site.url, {
+      timeout: config.TIMEOUT,
+      retry: { attempts: 3, delay: "300ms" },
+      responseType: "text",
+    });
+    return { name: site.name, up: true, status: response.status, attempts: response.attempts };
+  } catch (error) {
+    return { name: site.name, up: false, status: error.status ?? 0, error: error.message };
+  }
+}
+
+function checkAll(sites, config) {
+  return nc.async.map(sites, (site) => checkSite(site, config), { concurrency: config.CONCURRENCY });
+}
+
+module.exports = { checkAll };
+```
+
+| Option | Pourquoi |
+| --- | --- |
+| `timeout` | un site qui ne répond jamais échoue après `TIMEOUT` au lieu de bloquer la vérification |
+| `retry` | 3 tentatives en tout, à 300 ms puis 600 ms d'écart |
+| `responseType: "text"` | la page est lue comme du texte : une page HTML n'est pas du JSON |
+| `concurrency` | au plus `CONCURRENCY` requêtes en même temps |
+
+`nc.http.get()` lève une erreur quand la réponse n'est pas un succès : un
+statut hors de 2xx, une erreur réseau, un délai dépassé. Le `catch` en fait un
+résultat : un site en panne n'arrête pas les autres. `nc.async.map()` renvoie
+les résultats dans l'ordre des sites, quel que soit l'ordre dans lequel ils
+finissent.
+
+Seuls les échecs qui peuvent passer sont retentés : les erreurs réseau, les
+délais dépassés, et les statuts 408, 413, 429, 500, 502, 503 et 504. Un `404`
+ne l'est pas : redemander donne la même réponse.
+
+## Afficher les résultats
+
+Remplacez `status.js` :
+
+```js title="status.js" ins={4,9,11-16}
+const nc = require("@ix-xs/node-comfort");
+const { loadConfig } = require("./config");
+const { loadSites } = require("./sites");
+const { checkAll } = require("./check");
+
+async function main() {
+  const config = loadConfig();
+  const sites = loadSites(config.SITES_FILE);
+  nc.info(`Checking ${sites.length} sites`);
+
+  const results = await checkAll(sites, config);
+  for (const result of results) {
+    if (!result.up) nc.error(`${result.name} is down: ${result.error}`);
+    else if (result.attempts > 1) nc.warn(`${result.name} is up, after ${result.attempts} attempts`);
+    else nc.success(`${result.name} is up`);
+  }
+}
+
+main().catch((error) => {
+  nc.error(error.message);
+  process.exitCode = 1;
+});
+```
+
+<TerminalDemo scene="project/requests/checked" />
+
+L'API a d'abord répondu `503`, puis `200` à la deuxième tentative. La boutique
+a refusé la connexion trois fois : elle est en panne.
+
+<Aside type="note" title="Ces sites ne sont pas réels">
+Personne ne peut utiliser les adresses sous `example.com`. Pour construire
+cette page, le programme a tourné contre un serveur local qui répond comme ces
+quatre sites. Mettez vos propres sites dans `sites.json`.
+</Aside>
+
+La [page HTTP](/system/http/) présente les clients, les hooks et la
+vérification des réponses, et la [page async](/flow/async/) les files et les
+limites de débit.

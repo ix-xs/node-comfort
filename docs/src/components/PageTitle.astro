@@ -1,7 +1,6 @@
 ---
-// The head of a page: which part of the docs this is, the title, and the
-// page's description as a lead paragraph. Descriptions are written like the
-// rest of the docs, with `code` in backticks.
+// The head of a documentation page: which part of the docs this is, the title,
+// and the page's description as a lead paragraph.
 import type { StarlightRouteData } from "@astrojs/starlight/route-data";
 
 type Entry = StarlightRouteData["sidebar"][number];
@@ -19,6 +18,15 @@ function trail(entries: Entry[], path: string[] = []): string[] | undefined {
   return undefined;
 }
 
+const { entry, sidebar } = Astro.locals.starlightRoute;
+const groups = trail(sidebar) ?? [];
+// A page of the API reference sets its own lead, with its code and its links.
+const symbolPage = /\/reference\/[^/]+\/[^/]+\/$/.test(Astro.url.pathname);
+// The pages of the guide's path open with their own first paragraph: the
+// description would repeat it. It stays for search engines and link previews.
+const path = Astro.url.pathname.slice(import.meta.env.BASE_URL.replace(/\/$/, "").length).replace(/^\/fr(?=\/)/, "");
+const guidePath = path === "/" || path === "" || path.startsWith("/start/") || path.startsWith("/project/");
+const lead = symbolPage || guidePath ? undefined : entry.data.description;
 const escape = (text: string) => text.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
 /** Backticks become code, everything else is plain text. */
 const withCode = (text: string) =>
@@ -26,10 +34,6 @@ const withCode = (text: string) =>
     .split("`")
     .map((piece, index) => (index % 2 === 1 ? `<code>${escape(piece)}</code>` : escape(piece)))
     .join("");
-
-const { entry, sidebar } = Astro.locals.starlightRoute;
-const groups = trail(sidebar) ?? [];
-const lead = entry.data.description;
 ---
 
 {groups.length > 0 && <p class="nc-eyebrow">{groups.join(" / ")}</p>}

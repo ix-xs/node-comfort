@@ -1,0 +1,39 @@
+---
+// The properties of an object passed to a function: its name, its type, and
+// what it does.
+import type { Field } from "../../reference/model";
+import { translate, untranslated, words } from "../../reference/model";
+import { render } from "../../reference/markdown";
+import Tokens from "./Tokens.astro";
+
+interface Props {
+  fields: Field[];
+  /** The namespace whose catalog translates the descriptions. */
+  ns: string;
+  locale: string | undefined;
+}
+
+const { fields, ns, locale } = Astro.props;
+const w = words(locale);
+const rows = await Promise.all(
+  fields.map(async (field) => ({
+    ...field,
+    html: await render(translate(ns, field.text, locale), locale, { inline: true, here: ns }),
+    pending: untranslated(ns, field.text, locale),
+  })),
+);
+---
+
+<ul class="nc-rf-fields">
+  {rows.map((field) => (
+    <li>
+      <span class="nc-rf-field-head">
+        <code class="nc-rf-name" translate="no">{field.name}</code>
+        <code class="nc-rf-type" translate="no"><Tokens tokens={field.type} locale={locale} /></code>
+        {field.optional && <span class="nc-rf-tag">{w.optional}</span>}
+      </span>
+      {field.html && <span class="nc-rf-field-text" set:html={field.html} lang={field.pending && locale ? "en" : undefined} />}
+      {field.default && <span class="nc-rf-default">{w.default} <code translate="no">{field.default}</code></span>}
+    </li>
+  ))}
+</ul>

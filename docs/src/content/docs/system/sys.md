@@ -97,7 +97,7 @@ nc.sys.onShutdown(() => db.close());
 nc.sys.onShutdown((reason) => nc.info(`Stopping (${reason})`));
 ```
 
-Handlers run in reverse order (the last one registered runs first), then the process exits. Each one gets the reason: the signal, like `"SIGINT"` or `"SIGTERM"`, or `"shutdown"` when you asked for it yourself. If they take longer than 10 seconds (change it with `{ timeout: "30s" }`), the exit is forced. Pressing Ctrl+C a second time exits right away. `onShutdown` returns a function that removes the handler. On Node.js 24 and later, declare it with `using` to remove the handler at the end of a block ([more on `using`](/recipes/#cleaning-up-with-using)).
+Handlers run in reverse order (the last one registered runs first), then the process exits. Each one gets the reason: the signal, like `"SIGINT"` or `"SIGTERM"`, or `"shutdown"` when you asked for it yourself. If they take longer than 10 seconds (change it with `{ timeout: "30s" }`), the exit is forced. Pressing Ctrl+C a second time exits right away. `onShutdown` returns a function that removes the handler. On Node.js 24 and later, declare it with `using` to remove the handler at the end of a block ([more on `using`](/recipes/cli-tool/#cleaning-up-with-using)).
 
 To stop on your own, call `shutdown` instead of `process.exit()`, which would skip the handlers:
 

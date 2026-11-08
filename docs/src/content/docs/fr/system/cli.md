@@ -204,7 +204,7 @@ bar.stop();
 
 Les spinners et les barres de progression écrivent sur stderr : ils ne se mélangent donc pas aux données que vous affichez sur stdout. Le format de progression peut utiliser `{bar}`, `{percent}`, `{value}`, `{total}`, `{eta}`, `{elapsed}`, `{rate}` et `{label}`.
 
-Avec Node.js 24 ou plus récent, `using spin = cli.spinner(...).start()` ou `using bar = cli.progress(...)` les arrête à la fin du bloc : une erreur ne peut donc pas laisser un spinner tourner ou le curseur caché. Voyez [Faire le ménage avec `using`](/recipes/#cleaning-up-with-using).
+Avec Node.js 24 ou plus récent, `using spin = cli.spinner(...).start()` ou `using bar = cli.progress(...)` les arrête à la fin du bloc : une erreur ne peut donc pas laisser un spinner tourner ou le curseur caché. Voyez [Faire le ménage avec `using`](/recipes/cli-tool/#cleaning-up-with-using).
 
 ## Tableaux et encadrés
 

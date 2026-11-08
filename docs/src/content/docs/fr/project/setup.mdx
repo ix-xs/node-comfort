@@ -1,0 +1,68 @@
+---
+title: "Préparer le projet"
+description: "Créez le dossier de l'outil status, installez node-comfort et écrivez un premier script avec le logger."
+sidebar:
+  order: 1
+---
+
+import TerminalDemo from '../../../../components/demo/TerminalDemo.astro';
+
+Au fil des sept pages qui suivent, vous construisez **status**, un petit outil
+qui vérifie que vos sites répondent, garde un historique, et tourne tout seul
+sur un serveur. Cette page crée le projet et son premier script.
+
+| Page | Ce que vous ajoutez |
+| --- | --- |
+| Préparer le projet | le dossier, le paquet, le logger |
+| [La configuration](/project/configuration/) | des réglages lus dans `.env`, vérifiés au démarrage |
+| [Lire la liste des sites](/project/input/) | un fichier JSON, vérifié par un schéma |
+| [Vérifier les sites](/project/requests/) | des requêtes avec délai, nouvelles tentatives, plusieurs à la fois |
+| [Garder les résultats](/project/storage/) | une base SQLite et une disponibilité par site |
+| [Une vraie commande](/project/command-line/) | des options, une page d'aide, un spinner, un tableau |
+| [En production](/project/production/) | une vérification toutes les quelques minutes, un fichier de log, un arrêt propre |
+
+## Créer le dossier
+
+```bash
+mkdir status
+cd status
+npm init -y
+npm install @ix-xs/node-comfort
+```
+
+`npm init -y` écrit `package.json`, qui décrit le projet. `npm install` y
+ajoute node-comfort, ainsi que dans `node_modules/`.
+
+## Écrire le premier script
+
+```js title="status.js"
+const nc = require("@ix-xs/node-comfort");
+
+nc.info("Starting the status check");
+nc.success("node-comfort works");
+nc.warn("There is no site to check yet");
+```
+
+<TerminalDemo scene="project/setup/first-run" />
+
+Le programme raconte ce qu'il fait grâce au logger, que vous utiliserez à
+chaque page. Il ne demande aucune préparation :
+
+| Appel | Badge | Va vers |
+| --- | --- | --- |
+| `nc.info()` | `ℹ INFO` | stdout |
+| `nc.success()` | `✔ OK` | stdout |
+| `nc.warn()` | `⚠ WARN` | stderr |
+| `nc.error()` | `✖ ERROR` | stderr |
+
+- **Pourquoi l'heure :** quand le programme tourne des heures, vous savez quand
+  chaque ligne est arrivée.
+- **Pourquoi deux sorties :** les avertissements et les erreurs vont sur
+  stderr, si bien que `node status.js > out.txt` les laisse à l'écran.
+- **Pourquoi pas de couleurs dans un fichier :** les couleurs sont pour un
+  terminal. Redirigées vers un fichier, les mêmes lignes sont du texte brut.
+
+`LOG_LEVEL=warn` masque `info` et `success`, et `LOG_LEVEL=silent` masque
+tout. La [page du logger](/essentials/logger/) dit le reste.
+
+Ensuite, les réglages qui changent d'une machine à l'autre.

@@ -1,9 +1,11 @@
 ---
 title: "Votre éditeur"
-description: "node-comfort est écrit en JavaScript avec une JSDoc détaillée, et fournit des déclarations TypeScript générées à partir de celle-ci. Les éditeurs qui reposent sur le service de langage TypeScript (VS Code, Cursor, WebStorm, Zed, Neovim avec un LSP...) utilisent ces déclarations même dans de simples fichiers JavaScript."
+description: "La complétion, la documentation au survol et la vérification des types pour node-comfort, en JavaScript comme en TypeScript."
 sidebar:
   order: 3
 ---
+
+node-comfort est écrit en JavaScript avec une JSDoc détaillée, et fournit des déclarations TypeScript générées à partir de celle-ci. Les éditeurs qui reposent sur le service de langage TypeScript (VS Code, Cursor, WebStorm, Zed, Neovim avec un LSP...) utilisent ces déclarations même dans de simples fichiers JavaScript.
 
 ## Ce que vous y gagnez
 

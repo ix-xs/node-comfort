@@ -1,0 +1,25 @@
+---
+// A dev-only page that feeds the terminal the scenes of the guide and the
+// worst realistic output, to see what breaks. Nothing is built in production:
+// getStaticPaths is empty there. Open /node-comfort/dev/demo/,
+// /node-comfort/dev/worst/ or /node-comfort/dev/one/ on the dev server.
+import StarlightPage from "@astrojs/starlight/components/StarlightPage.astro";
+import TerminalDemo from "../../components/demo/TerminalDemo.astro";
+import { demo, worst, one } from "../../components/demo/fixtures";
+
+export function getStaticPaths() {
+  if (!import.meta.env.DEV) return [];
+  return ["demo", "worst", "one"].map((state) => ({ params: { state } }));
+}
+
+const { state } = Astro.params;
+const data = state === "worst" ? worst : state === "one" ? one : demo;
+---
+
+<StarlightPage frontmatter={{ title: `Scenes: ${state}`, pagefind: false }}>
+  <p>
+    <a href="../demo/">Scenes of the guide</a> · <a href="../worst/">Worst case</a> · <a href="../one/">Smallest</a>
+  </p>
+  {data.scenes.map((scene) => <TerminalDemo scene={scene} />)}
+  {data.terminal.map((t) => <TerminalDemo command={t.command} units={t.units} />)}
+</StarlightPage>
