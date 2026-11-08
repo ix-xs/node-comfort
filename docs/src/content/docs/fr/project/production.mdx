@@ -1,0 +1,135 @@
+---
+title: "En production"
+description: "Faites tourner l'outil status tout seul : une vérification toutes les quelques minutes avec time.every(), des logs dans un fichier, un arrêt propre avec sys.onShutdown()."
+sidebar:
+  order: 7
+---
+
+import TerminalDemo from '../../../../components/demo/TerminalDemo.astro';
+
+Sur un serveur, personne ne tape la commande. status doit vérifier les sites
+encore et encore, garder ses logs dans un fichier, survivre à une mauvaise
+série, et s'arrêter proprement quand le serveur le redémarre.
+
+## Vérifier encore et encore
+
+Remplacez `status.js`. La vérification de la page précédente passe dans
+`checkOnce()`, et `--watch` lance `watch()` à la place :
+
+```js title="status.js" ins={10-11,14,36-55,63-64}
+const nc = require("@ix-xs/node-comfort");
+const { loadConfig } = require("./config");
+const { loadSites } = require("./sites");
+const { checkAll } = require("./check");
+const { openStore } = require("./store");
+
+const { flags } = nc.cli.args({
+  site: { type: "string", short: "s", description: "Check only the site with this name" },
+  json: { type: "boolean", description: "Print the results as JSON" },
+  watch: { type: "boolean", short: "w", description: "Check again and again, until stopped" },
+  every: { type: "string", default: "5m", env: "CHECK_EVERY", description: "How long --watch waits between two checks" },
+}, { name: "status", description: "Checks that your sites answer.", version: "1.0.0" });
+
+async function checkOnce(sites, config, store) {
+  const results = await nc.cli.spin(`Checking ${nc.str.plural(sites.length, { one: "site", other: "sites" })}`, checkAll(sites, config), {
+    success: (done) => `${done.filter((result) => result.up).length} of ${done.length} up`,
+  });
+  store.save(results);
+  const rows = results.map((result) => ({
+    site: result.name,
+    state: result.up ? "up" : "down",
+    status: result.status,
+    uptime: store.uptime(result.name),
+  }));
+  store.close();
+
+  if (flags.json) {
+    console.log(JSON.stringify(rows, null, 2));
+    return;
+  }
+  nc.table(rows, {
+    columns: ["site", { key: "state", format: (state) => (state === "up" ? nc.color.green(state) : nc.color.red(state)) }, "status", "uptime"],
+  });
+}
+
+function watch(sites, config, store) {
+  const every = nc.time.parseDuration(flags.every);
+  if (!every) throw new Error(`--every: "${flags.every}" is not a duration`);
+  nc.configure({ file: { path: "logs/status.log", maxSize: "10MB", maxFiles: 5 } });
+  nc.info(`Checking ${nc.str.plural(sites.length, { one: "site", other: "sites" })} every ${nc.time.formatDuration(every)}`);
+
+  const job = nc.time.every(every, async () => {
+    const results = await checkAll(sites, config);
+    store.save(results);
+    const down = results.filter((result) => !result.up);
+    for (const result of down) nc.error(`${result.name} is down: ${result.error}`);
+    nc.info(`${results.length - down.length} of ${results.length} up`);
+  }, { immediate: true, onError: (error) => nc.error(error) });
+
+  nc.sys.onShutdown(() => {
+    job.stop();
+    store.close();
+    nc.info("Stopped");
+  });
+}
+
+async function main() {
+  const config = loadConfig();
+  const sites = loadSites(config.SITES_FILE).filter((site) => !flags.site || site.name === flags.site);
+  if (sites.length === 0) throw new Error(`No site is named "${flags.site}"`);
+  const store = openStore(config.DATABASE_PATH);
+
+  if (flags.watch) watch(sites, config, store);
+  else await checkOnce(sites, config, store);
+}
+
+main().catch((error) => {
+  nc.error(error.message);
+  process.exitCode = 1;
+});
+```
+
+| Code | Pourquoi |
+| --- | --- |
+| `--every`, `env: "CHECK_EVERY"` | l'attente entre deux séries, depuis la ligne de commande ou depuis l'environnement |
+| `nc.time.every()` | lance une série à cet intervalle ; une série lente retarde la suivante au lieu de s'empiler |
+| `immediate: true` | la première série démarre tout de suite, pas après cinq minutes |
+| `onError` | une erreur dans une série est écrite dans les logs, et la série suivante a quand même lieu |
+| `nc.configure({ file })` | chaque ligne de log va aussi dans `logs/status.log`, sans couleurs |
+| `maxSize`, `maxFiles` | au-delà de 10 Mo le fichier tourne, et les cinq plus récents sont gardés |
+| `nc.sys.onShutdown()` | sur Ctrl+C ou un arrêt demandé par le serveur, arrête les séries et ferme la base |
+
+## Le lancer
+
+Pour voir deux séries sans attendre cinq minutes, demandez-en une toutes les
+deux secondes, puis appuyez sur Ctrl+C :
+
+<TerminalDemo scene="project/production/watch" />
+
+Le blog est tombé entre les deux séries. Ctrl+C a lancé le gestionnaire de
+`onShutdown()` : les séries se sont arrêtées et la base a été fermée avant que
+le programme ne quitte.
+
+## Le garder en marche
+
+Donnez à votre gestionnaire de processus (systemd, pm2, Docker...) la commande
+`node status.js --watch`, et les variables de `.env` si vous préférez les
+définir là. Il relance le programme quand la machine redémarre, et lui demande
+de s'arrêter avec un signal que `onShutdown()` gère.
+
+Pour vérifier à heures fixes plutôt qu'à intervalle régulier, utilisez une
+expression cron : `nc.time.cron("*/5 * * * *", task)` s'exécute à la minute
+0, 5, 10 et ainsi de suite.
+
+## Pour aller plus loin
+
+Le projet est terminé. Les pages thématiques vont plus loin avec ce qu'il a
+utilisé :
+
+| Page | Pour |
+| --- | --- |
+| [Logger](/essentials/logger/) | des logs JSON pour un collecteur, masquer les secrets, les portées |
+| [Client HTTP](/system/http/) | des clients avec une URL de base, des hooks, la vérification des réponses |
+| [SQLite](/system/sqlite/) | les filtres, les transactions, les migrations, les sauvegardes |
+| [Outils en ligne de commande](/system/cli/) | les questions, les menus, les barres de progression |
+| [Exemples complets](/recipes/api-server/) | un serveur d'API, un outil en ligne de commande, une tâche planifiée |

@@ -32,7 +32,7 @@ npm run check
 
 | Script | What it does |
 | --- | --- |
-| `npm run build` | Compiles the JSDoc into `types/` (fails on any type error) and regenerates the reference pages of the website. |
+| `npm run build` | Compiles the JSDoc into `types/` (fails on any type error) and regenerates the data of the website's reference (`docs/src/data/api.json`). |
 | `npm test` | Runs every `test/*.test.js` file with the Node.js test runner. |
 | `npm run test:types` | Installs the package in a temporary project and checks the editor experience: hover documentation for every export, completions, auto-imports, and a TypeScript consumer that must compile. |
 
@@ -56,8 +56,8 @@ test/               node --test suites
 docs/               the documentation website (Astro Starlight), a project of its own
   src/content/docs/           the guides, written by hand, in English
   src/content/docs/fr/        their French translation
-  src/content/docs/reference/ generated from the types (npm run build, committed)
-  src/showcase/samples/       the files the landing page runs and shows
+  src/data/api.json           the reference, generated from the types (npm run build, committed)
+  src/scenes/                 the files the terminals of the guide run and show
 ```
 
 ## Adding a function
@@ -91,15 +91,15 @@ npm run docs:build     # builds docs/dist, then checks every link and every tran
 
 - The guides are plain Markdown in `docs/src/content/docs/`. Examples are meant to run: check yours
   before sending it.
-- The reference pages are generated from the types by `npm run build`. Do not edit them: change the
-  JSDoc instead. CI fails when they are out of date. Their French version is generated the same way,
-  from the sentences in `docs/src/reference-i18n/fr/`: a sentence that changed stays in English until
+- The reference pages, one per export, are built from `docs/src/data/api.json`, which `npm run build`
+  generates from the types. Do not edit it: change the JSDoc instead, and commit the new file. CI fails
+  when it is out of date. The French pages take each sentence from `docs/src/reference-i18n/fr/`: a sentence that changed stays in English until
   its translation is updated (`node scripts/build-reference.js --missing` lists them).
 - The French pages in `docs/src/content/docs/fr/` mirror the English ones: same headings, same code,
   same links. `npm run check-translation --prefix docs` says what differs. A page without a
   translation shows in English.
-- The examples of the landing page are real files in `docs/src/showcase/samples/`. They run against
-  the package at every build, and the page shows what they printed.
+- The terminals of the guide show real runs: the files in `docs/src/scenes/` run against the package at
+  every build, and must match the code blocks of their page.
 
 ## Pull requests
 

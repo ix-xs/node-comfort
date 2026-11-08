@@ -1,0 +1,95 @@
+---
+// The front page of the reference: how to read it, then every namespace and
+// class, in the order of the guide, with what it is for and its members.
+import StarlightPage from "@astrojs/starlight/components/StarlightPage.astro";
+import type { ApiSymbol } from "../../reference/model";
+import { find, firstSentence, model, namespaceOf, nsKind, pathOf, shortName, sidebar, translate, words } from "../../reference/model";
+import { href, render } from "../../reference/markdown";
+
+interface Props {
+  locale: string | undefined;
+}
+
+const { locale } = Astro.props;
+const w = words(locale);
+
+async function row(symbol: ApiSymbol) {
+  const summary = firstSentence(translate(symbol.ns, symbol.text, locale));
+  return {
+    symbol,
+    html: await render(symbol.deprecated !== undefined ? `${w.deprecated}. ${summary}` : summary, locale, { inline: true, here: symbol.ns }),
+  };
+}
+
+const groups = await Promise.all(
+  model.groups.map(async (group) => ({
+    ...group,
+    spaces: await Promise.all(
+      group.keys.map(async (key) => {
+        const ns = namespaceOf(key);
+        return {
+          ns,
+          intro: await render(firstSentence(translate(key, ns.text, locale)), locale, { inline: true, here: key }),
+          rows: await Promise.all(ns.members.map((ref) => find(ref)!).filter(Boolean).map(row)),
+        };
+      }),
+    ),
+  })),
+);
+const legend = await Promise.all(
+  (["namespace", "function", "method", "class", "interface", "type"] as const).map(async (kind) => ({
+    kind,
+    html: await render(w.kindHelp[kind], locale, { inline: true }),
+  })),
+);
+
+const headings = [
+  { depth: 2, slug: "how-to-read", text: w.howToRead },
+  ...groups.flatMap((group) => [
+    { depth: 2, slug: group.id, text: w.groups[group.id] ?? group.id },
+    ...group.spaces.map(({ ns }) => ({ depth: 3, slug: ns.slug, text: ns.title })),
+  ]),
+];
+---
+
+<StarlightPage
+  frontmatter={{ title: w.title, description: w.lead, tableOfContents: { minHeadingLevel: 2, maxHeadingLevel: 3 }, editUrl: false, pagefind: true }}
+  sidebar={sidebar(locale)}
+  headings={headings}
+>
+  <h2 id="how-to-read">{w.howToRead}</h2>
+  <p>{w.howToReadText}</p>
+  <dl class="nc-rf-legend">
+    {legend.map((item) => (
+      <div>
+        <dt><span class="nc-rf-kind" data-kind={item.kind}>{w.kinds[item.kind]}</span></dt>
+        <dd set:html={item.html} />
+      </div>
+    ))}
+  </dl>
+
+  {groups.map((group) => (
+    <section class="nc-rf-topic">
+      <h2 id={group.id}>{w.groups[group.id] ?? group.id}</h2>
+      {group.spaces.map(({ ns, intro, rows }) => (
+        <div class="nc-rf-ns">
+          <h3 id={ns.slug} translate="no">
+            <a href={href(pathOf(ns.slug), locale)} data-kind={nsKind(ns)}>{ns.title}</a>
+          </h3>
+          <p class="nc-rf-ns-intro">
+            <span set:html={intro} />
+            <span class="nc-rf-count">{w.count(ns.members.length, ns.types?.length ?? 0)}</span>
+          </p>
+          <ul class="nc-rf-list">
+            {rows.map(({ symbol, html }) => (
+              <li>
+                <a href={href(pathOf(symbol.ref), locale)} data-kind={symbol.kind} translate="no">{shortName(symbol)}</a>
+                <span set:html={html} />
+              </li>
+            ))}
+          </ul>
+        </div>
+      ))}
+    </section>
+  ))}
+</StarlightPage>

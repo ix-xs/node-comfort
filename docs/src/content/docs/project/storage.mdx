@@ -1,0 +1,117 @@
+---
+title: "Keeping the results"
+description: "Save every check in SQLite, the database built into Node.js, and compute the uptime of each site."
+sidebar:
+  order: 5
+---
+
+import { Aside } from '@astrojs/starlight/components';
+import TerminalDemo from '../../../components/demo/TerminalDemo.astro';
+
+One check says whether a site is up now. A history says how often it is up.
+Keep every result in SQLite, the database built into Node.js: one file,
+nothing to install, nothing to run next to the program.
+
+## Open the database
+
+Create `store.js`:
+
+```js title="store.js"
+const nc = require("@ix-xs/node-comfort");
+
+function openStore(file) {
+  const db = new nc.SQLite(file);
+  db.createTable({
+    name: "checks",
+    columns: {
+      id: { type: "INTEGER", primaryKey: true, autoincrement: true },
+      site: { type: "TEXT", notNull: true },
+      up: { type: "BOOLEAN", notNull: true },
+      status: { type: "INTEGER", notNull: true },
+      checked_at: { type: "DATETIME", notNull: true },
+    },
+    indexes: [{ columns: ["site"] }],
+  });
+
+  return {
+    save(results) {
+      const now = new Date();
+      db.insertMany("checks", results.map((result) => ({
+        site: result.name,
+        up: result.up,
+        status: result.status,
+        checked_at: now,
+      })));
+    },
+    uptime(site) {
+      const total = db.count("checks", { site });
+      const up = db.count("checks", { site, up: true });
+      return `${nc.num.percent(up, total, 0)}% of ${nc.str.plural(total, { one: "check", other: "checks" })}`;
+    },
+    close: () => db.close(),
+  };
+}
+
+module.exports = { openStore };
+```
+
+| Code | Why |
+| --- | --- |
+| `new nc.SQLite(file)` | opens the file, and creates it and its folder the first time |
+| `createTable()` | does nothing when the table exists, so it can run at every start |
+| `BOOLEAN`, `DATETIME` | `up` comes back as `true` or `false`, and the `Date` is kept as ISO text |
+| `indexes` | counting the checks of one site stays fast as the table grows |
+| `insertMany()` | all the results in one transaction: all saved, or none |
+| `count()` with a filter | the number of rows that match, here per site and state |
+
+## Save each check
+
+Replace `status.js`:
+
+```js title="status.js" ins={5,10,14,16-18,20}
+const nc = require("@ix-xs/node-comfort");
+const { loadConfig } = require("./config");
+const { loadSites } = require("./sites");
+const { checkAll } = require("./check");
+const { openStore } = require("./store");
+
+async function main() {
+  const config = loadConfig();
+  const sites = loadSites(config.SITES_FILE);
+  const store = openStore(config.DATABASE_PATH);
+  nc.info(`Checking ${sites.length} sites`);
+
+  const results = await checkAll(sites, config);
+  store.save(results);
+  for (const result of results) {
+    const uptime = store.uptime(result.name);
+    if (result.up) nc.success(`${result.name} is up (${uptime})`);
+    else nc.error(`${result.name} is down (${uptime}): ${result.error}`);
+  }
+  store.close();
+}
+
+main().catch((error) => {
+  nc.error(error.message);
+  process.exitCode = 1;
+});
+```
+
+<TerminalDemo scene="project/storage/first" />
+
+## Run it again
+
+Each run adds to the history:
+
+<TerminalDemo scene="project/storage/second" />
+
+The blog answered `404` this time: it was up for one check out of two. The
+history is in `data/status.sqlite`, and stays there between runs.
+
+<Aside type="tip" title="Keep data out of git">
+Add `data/` to `.gitignore`: the database belongs to the machine that runs
+the program.
+</Aside>
+
+The [SQLite page](/system/sqlite/) covers filters, transactions, migrations and
+backups.

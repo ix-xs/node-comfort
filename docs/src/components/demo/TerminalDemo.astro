@@ -1,0 +1,183 @@
+---
+/**
+ * A terminal that types a command and prints what the program answered, once
+ * when it comes into view (and again from the replay button). Without
+ * JavaScript, or with reduced motion, the whole output is already there.
+ *
+ *   <TerminalDemo scene="project/setup/first-run" />
+ *
+ * A scene is a real run: `scripts/scenes.mjs` runs its sample before the build
+ * and keeps what it printed in `src/scenes/output.json`. What the program
+ * printed in one write (a table, a box, an object) appears as one unit, and a
+ * unit that the program made the reader wait for (a spinner, a request) comes
+ * after a pause. `command` and `units` give the same thing by hand, for the
+ * dev page only.
+ */
+import output from "../../scenes/output.json";
+
+interface Unit {
+  /** Lines as HTML, each one a `<span class="nc-line">`. */
+  html: string;
+  /** The program made the reader wait before this unit. */
+  wait?: boolean;
+}
+
+interface Props {
+  scene?: string;
+  command?: string;
+  units?: Unit[];
+}
+
+const fr = Astro.locals.starlightRoute?.locale === "fr";
+const scenes = output as Record<string, { command: string; units: Unit[] } | null>;
+const { scene } = Astro.props;
+const run = scene ? scenes[scene] : { command: Astro.props.command ?? "", units: Astro.props.units ?? [] };
+if (!run) throw new Error(`TerminalDemo: no scene "${scene}" in src/scenes/output.json. Is it listed in src/scenes/scenes.mjs?`);
+const title = "Terminal";
+/** Box-drawing characters: a table or a box keeps its shape and scrolls rather than wraps. */
+const drawn = /[─-╿]/;
+---
+
+<figure class="nc-td not-content" data-td aria-label={`${title}: ${run.command}`}>
+  <div class="nc-td-window" translate="no">
+    <div class="nc-td-bar">
+      <i aria-hidden="true"></i><i aria-hidden="true"></i><i aria-hidden="true"></i><span aria-hidden="true">{title}</span>
+      <button class="nc-td-replay" type="button" data-td-replay hidden>
+        <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M3 8a5 5 0 1 0 1.6-3.7M3 2.5v2.8h2.8" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" /></svg>
+        {fr ? "Rejouer" : "Replay"}
+      </button>
+    </div>
+    <pre class="nc-td-screen" tabindex="0"><code><span class="nc-td-cmd"><span class="nc-td-prompt">{"$ "}</span><span data-td-command data-text={run.command}>{run.command}</span><span class="nc-td-caret" aria-hidden="true"></span></span>{run.units.map((unit) => (
+      <span class:list={["nc-td-unit", { "nc-td-drawn": drawn.test(unit.html) }]} data-td-unit data-wait={unit.wait ? "" : undefined} set:html={unit.html} />
+    ))}</code></pre>
+  </div>
+</figure>
+
+<script>
+  const reduced = matchMedia("(prefers-reduced-motion: reduce)");
+  /** Before the command, per character, before the output, between two units, and where the program made you wait. */
+  const TIMING = { start: 300, char: 40, enter: 350, unit: 160, wait: 900 };
+
+  for (const root of document.querySelectorAll<HTMLElement>("[data-td]")) {
+    const command = root.querySelector<HTMLElement>("[data-td-command]")!;
+    const units = [...root.querySelectorAll<HTMLElement>("[data-td-unit]")];
+    const screen = root.querySelector<HTMLElement>(".nc-td-screen")!;
+    const replay = root.querySelector<HTMLButtonElement>("[data-td-replay]")!;
+    const text = command.dataset.text ?? "";
+    // Each play has a number: a play that a newer one replaced stops at its next step.
+    let run = 0;
+    const sleep = (ms: number, current: number) => new Promise<boolean>((resolve) => setTimeout(() => resolve(current === run), ms));
+
+    async function play(): Promise<void> {
+      const current = ++run;
+      // The screen keeps the height of the whole output, so that the page does not move.
+      screen.style.minHeight = "";
+      for (const unit of units) unit.setAttribute("data-on", "");
+      screen.style.minHeight = `${screen.offsetHeight}px`;
+      for (const unit of units) unit.removeAttribute("data-on");
+      root.setAttribute("data-playing", "");
+      if (reduced.matches) {
+        command.textContent = text;
+      } else {
+        command.textContent = "";
+        if (!(await sleep(TIMING.start, current))) return;
+        for (const char of text) {
+          command.textContent += char;
+          if (!(await sleep(TIMING.char, current))) return;
+        }
+      }
+      if (!(await sleep(TIMING.enter, current))) return;
+      for (const unit of units) {
+        if (!(await sleep(unit.hasAttribute("data-wait") ? TIMING.wait : TIMING.unit, current))) return;
+        unit.setAttribute("data-on", "");
+      }
+      root.removeAttribute("data-playing");
+    }
+
+    for (const unit of units) unit.setAttribute("data-on", "");
+    root.setAttribute("data-ready", "");
+    replay.hidden = false;
+    replay.addEventListener("click", () => void play());
+    if (reduced.matches) continue;
+    const watcher = new IntersectionObserver(
+      (entries) => {
+        if (!entries.some((entry) => entry.isIntersecting)) return;
+        watcher.disconnect();
+        void play();
+      },
+      { threshold: 0.6 },
+    );
+    watcher.observe(root);
+  }
+</script>
+
+<style is:global>
+  /* The terminal is dark in both themes, so its colours are its own: the ones
+     the dark theme gives to what a terminal prints. */
+  .nc-td {
+    --nc-td-bg: #141413;
+    --nc-td-fg: #e6e3da;
+    --nc-td-dim: #8f8c82;
+    --nc-td-rule: #2b2a26;
+    --nc-ansi-black: #4b4943;
+    --nc-ansi-red: #e5645c;
+    --nc-ansi-green: #34d399;
+    --nc-ansi-yellow: #e3b24c;
+    --nc-ansi-blue: #7aa7f0;
+    --nc-ansi-magenta: #c79bf0;
+    --nc-ansi-cyan: #6fd3dc;
+    --nc-ansi-white: #edebe4;
+    --nc-ansi-gray: #8a877d;
+    margin: 1.75rem 0 0;
+  }
+  .nc-td-window { overflow: hidden; border: 1px solid var(--nc-line); border-radius: var(--nc-radius); background: var(--nc-td-bg); }
+  .nc-td-bar { display: flex; align-items: center; gap: 0.375rem; height: 2.25rem; padding: 0 0.375rem 0 0.875rem; border-bottom: 1px solid var(--nc-td-rule); }
+  .nc-td-bar i { flex: none; width: 0.625rem; height: 0.625rem; border-radius: 50%; background: #3a3934; }
+  .nc-td-bar > span { margin-left: 0.5rem; font-family: var(--sl-font-mono); font-size: 0.6875rem; letter-spacing: 0.06em; color: var(--nc-td-dim); }
+  .nc-td-replay {
+    display: inline-flex; align-items: center; gap: 0.375rem; margin-inline-start: auto; padding: 0.375rem 0.5rem;
+    border: 0; border-radius: var(--nc-radius); background: none; color: var(--nc-td-dim);
+    font-family: var(--sl-font-mono); font-size: 0.6875rem; letter-spacing: 0.02em; cursor: pointer;
+    transition: transform 160ms var(--ease-out);
+  }
+  .nc-td-replay:active { transform: scale(0.97); }
+  .nc-td-replay[hidden] { display: none; }
+  .nc-td-replay svg { width: 0.8125rem; height: 0.8125rem; color: var(--nc-ansi-green); }
+  @media (hover: hover) and (pointer: fine) {
+    .nc-td-replay:hover { color: var(--nc-td-fg); background: rgb(255 255 255 / 0.06); }
+  }
+  :root .sl-markdown-content .nc-td pre.nc-td-screen, .nc-td pre.nc-td-screen {
+    margin: 0; padding: 1rem 1.25rem; border: 0; border-radius: 0; background: none; overflow-x: auto; overscroll-behavior-x: contain;
+    scrollbar-width: thin; scrollbar-color: var(--nc-td-rule) transparent;
+    font-family: var(--sl-font-mono); font-size: 0.8125rem; line-height: 1.6; color: var(--nc-td-fg);
+  }
+  .nc-td-screen:focus-visible { outline: 2px solid var(--nc-ansi-green); outline-offset: -2px; }
+  .nc-td-screen code { display: grid; grid-template-columns: minmax(0, 1fr); padding: 0; background: none; font: inherit; color: inherit; }
+  .nc-td-cmd, .nc-td .nc-line { display: block; white-space: pre-wrap; overflow-wrap: anywhere; }
+  /* A table or a box keeps its columns: it scrolls with the screen instead of wrapping. */
+  .nc-td-drawn .nc-line { white-space: pre; overflow-wrap: normal; width: max-content; }
+  .nc-td-prompt { color: var(--nc-ansi-green); }
+  .nc-td .b { font-weight: 700; }
+  .nc-td .d { opacity: 0.6; }
+  .nc-td .i { font-style: italic; }
+  .nc-td .u { text-decoration: underline; }
+  .nc-td-caret { display: none; width: 0.55em; height: 1.1em; margin-left: 1px; vertical-align: -0.15em; background: var(--nc-td-fg); }
+  .nc-td[data-playing] .nc-td-caret { display: inline-block; animation: nc-td-blink 1s steps(1) infinite; }
+  .nc-td-unit { display: block; }
+  .nc-td[data-ready] .nc-td-unit { display: none; }
+  .nc-td[data-ready] .nc-td-unit[data-on] {
+    display: block;
+    transition: opacity 180ms var(--ease-out), transform 180ms var(--ease-out);
+    @starting-style { opacity: 0; transform: translateY(4px); }
+  }
+  @keyframes nc-td-blink { 50% { opacity: 0; } }
+  @media (max-width: 30rem) {
+    :root .sl-markdown-content .nc-td pre.nc-td-screen, .nc-td pre.nc-td-screen { padding: 0.875rem 1rem; font-size: 0.75rem; }
+  }
+  @media (prefers-reduced-motion: reduce) {
+    .nc-td[data-ready] .nc-td-unit[data-on] { transition: opacity 180ms ease; @starting-style { opacity: 0; transform: none; } }
+    .nc-td[data-playing] .nc-td-caret { animation: none; }
+    .nc-td-replay { transition: none; }
+    .nc-td-replay:active { transform: none; }
+  }
+</style>

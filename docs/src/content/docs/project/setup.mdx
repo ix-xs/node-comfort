@@ -1,0 +1,68 @@
+---
+title: "Set up the project"
+description: "Create the folder of the status tool, install node-comfort and write a first script with the logger."
+sidebar:
+  order: 1
+---
+
+import TerminalDemo from '../../../components/demo/TerminalDemo.astro';
+
+Over the next seven pages you build **status**, a small tool that checks that
+your websites answer, keeps a history, and runs on its own on a server. This
+page creates the project and its first script.
+
+| Page | What you add |
+| --- | --- |
+| Set up the project | the folder, the package, the logger |
+| [The configuration](/project/configuration/) | settings read from `.env`, checked at startup |
+| [Reading the list of sites](/project/input/) | a JSON file, checked by a schema |
+| [Checking the sites](/project/requests/) | requests with a timeout, retries, several at once |
+| [Keeping the results](/project/storage/) | a SQLite database and an uptime per site |
+| [A real command](/project/command-line/) | options, a help page, a spinner, a table |
+| [Running in production](/project/production/) | a check every few minutes, a log file, a clean stop |
+
+## Create the folder
+
+```bash
+mkdir status
+cd status
+npm init -y
+npm install @ix-xs/node-comfort
+```
+
+`npm init -y` writes `package.json`, which describes the project.
+`npm install` adds node-comfort to it, and to `node_modules/`.
+
+## Write the first script
+
+```js title="status.js"
+const nc = require("@ix-xs/node-comfort");
+
+nc.info("Starting the status check");
+nc.success("node-comfort works");
+nc.warn("There is no site to check yet");
+```
+
+<TerminalDemo scene="project/setup/first-run" />
+
+The program tells you what it does through the logger, which you will use on
+every page. It needs no setup:
+
+| Call | Badge | Goes to |
+| --- | --- | --- |
+| `nc.info()` | `ℹ INFO` | stdout |
+| `nc.success()` | `✔ OK` | stdout |
+| `nc.warn()` | `⚠ WARN` | stderr |
+| `nc.error()` | `✖ ERROR` | stderr |
+
+- **Why the time:** when the program runs for hours, you know when each line
+  happened.
+- **Why two outputs:** warnings and errors go to stderr, so that
+  `node status.js > out.txt` keeps them on screen.
+- **Why no colors in a file:** colors are for a terminal. Redirected to a
+  file, the same lines are plain text.
+
+`LOG_LEVEL=warn` hides `info` and `success`, and `LOG_LEVEL=silent` hides
+everything. The [logger page](/essentials/logger/) has the rest.
+
+Next, the settings that change from one machine to another.

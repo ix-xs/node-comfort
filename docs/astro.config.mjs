@@ -1,9 +1,11 @@
 import { defineConfig } from "astro/config";
 import { unified } from "@astrojs/markdown-remark";
 import starlight from "@astrojs/starlight";
-import { normalizeBase, remarkBaseLinks, withBase } from "./plugins/base-links.mjs";
+import { LOCALES, normalizeBase, remarkBaseLinks, withBase } from "./plugins/base-links.mjs";
+import { remarkApiLinks } from "./plugins/api-links.mjs";
 import { rehypeSharedHeadingIds } from "./plugins/heading-ids.mjs";
 import { rehypeWrapTables } from "./plugins/wrap-tables.mjs";
+import { MOVED } from "./redirects.mjs";
 import { comfortDark, comfortLight } from "./src/styles/code-themes.mjs";
 
 // Where the site is served from. Both can be set from the environment, so
@@ -18,17 +20,32 @@ import { comfortDark, comfortLight } from "./src/styles/code-themes.mjs";
 const site = process.env.DOCS_SITE || "https://ix-xs.github.io";
 const base = normalizeBase(process.env.DOCS_BASE || "/node-comfort");
 
-/** One section of the sidebar: every page of a folder, in the order the pages give themselves. */
-const section = (label, fr, directory, collapsed = false) => ({ label, translations: { fr }, collapsed, items: [{ autogenerate: { directory } }] });
+/** One group of the sidebar, its pages in reading order. */
+const group = (label, fr, items, collapsed = true) => ({
+  label,
+  translations: { fr },
+  collapsed,
+  items: items.map((item) => (typeof item === "string" ? { slug: item } : item)),
+});
 
 // https://starlight.astro.build/reference/configuration/
 export default defineConfig({
   site,
   base: base || "/",
+  // Addresses of the previous structure, each pointing at its new home, in
+  // every language.
+  redirects: Object.fromEntries(
+    Object.entries(MOVED).flatMap(([from, to]) => [
+      [from, withBase(to, base)],
+      ...LOCALES.map((code) => [`/${code}${from}`, withBase(`/${code}${to === "/" ? "/" : to}`, base)]),
+    ]),
+  ),
   markdown: {
     // The plugins below are written for unified, not for Astro's default processor.
     processor: unified({
-      remarkPlugins: [[remarkBaseLinks, { base }]],
+      // Names of the API in code become links to the reference, then every
+      // internal link gets the language of its page and the base.
+      remarkPlugins: [remarkApiLinks, [remarkBaseLinks, { base }]],
       rehypePlugins: [rehypeSharedHeadingIds, rehypeWrapTables],
     }),
   },
@@ -62,13 +79,13 @@ export default defineConfig({
         "@fontsource/fragment-mono/400.css",
         "@fontsource/fragment-mono/400-italic.css",
         "./src/styles/comfort.css",
+        "./src/styles/reference.css",
       ],
       components: {
         Header: "./src/components/Header.astro",
         ThemeSelect: "./src/components/ThemeSelect.astro",
         LanguageSelect: "./src/components/LanguageSelect.astro",
         PageTitle: "./src/components/PageTitle.astro",
-        Hero: "./src/components/Hero.astro",
       },
       expressiveCode: {
         themes: [comfortDark, comfortLight],
@@ -99,24 +116,26 @@ export default defineConfig({
       },
       tableOfContents: { minHeadingLevel: 2, maxHeadingLevel: 3 },
       lastUpdated: false,
-      // One page per namespace, grouped by what it's for.
+      // The guide, in reading order: first the setup, then one project built
+      // page by page, then a page per namespace, to read when it is needed.
+      // The reference is a section of its own, from the header.
       sidebar: [
-        section("Start", "Démarrer", "start"),
-        section("Essentials", "Essentiels", "essentials"),
-        section("Data", "Données", "data"),
-        section("Functions and async", "Fonctions et asynchrone", "flow"),
-        section("System and network", "Système et réseau", "system"),
-        {
-          label: "Going further",
-          translations: { fr: "Aller plus loin" },
-          items: [{ slug: "recipes" }],
-        },
-        {
-          label: "Reference",
-          translations: { fr: "Référence" },
-          collapsed: true,
-          items: [{ autogenerate: { directory: "reference" } }],
-        },
+        group("Getting started", "Pour commencer", [{ slug: "index", label: "Introduction" }, "start/installation", "start/editor"], false),
+        group("Your first project", "Votre premier projet", [
+          "project/setup",
+          "project/configuration",
+          "project/input",
+          "project/requests",
+          "project/storage",
+          "project/command-line",
+          "project/production",
+        ], false),
+        group("Essentials", "Essentiels", ["essentials/logger", "essentials/fs", "essentials/env", "essentials/checker", "essentials/errors", "essentials/utils"]),
+        group("Data", "Données", ["data/str", "data/num", "data/arr", "data/obj", "data/schema", "data/time", "data/id"]),
+        group("Functions and async", "Fonctions et asynchrone", ["flow/async", "flow/func", "flow/cache", "flow/emitter"]),
+        group("System and network", "Système et réseau", ["system/http", "system/sqlite", "system/crypto", "system/cli", "system/color", "system/sys"]),
+        group("Complete examples", "Exemples complets", ["recipes/api-server", "recipes/cli-tool", "recipes/scheduled-job"]),
+        group("Help", "Aide", ["help/upgrade-2-2", "help/migration", "help/performance", "help/faq"]),
       ],
     }),
   ],

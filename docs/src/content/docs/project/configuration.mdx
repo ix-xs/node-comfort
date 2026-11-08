@@ -1,0 +1,97 @@
+---
+title: "The configuration"
+description: "Read the settings of the status tool from environment variables and a .env file, typed and checked once at startup."
+sidebar:
+  order: 2
+---
+
+import { Aside } from '@astrojs/starlight/components';
+import TerminalDemo from '../../../components/demo/TerminalDemo.astro';
+
+Some values change from one machine to another: where the list of sites is,
+how long a site has to answer. They don't belong in the code. They go in
+environment variables, checked once, when the program starts.
+
+## Describe the variables
+
+Create `config.js`:
+
+```js title="config.js"
+const nc = require("@ix-xs/node-comfort");
+
+function loadConfig() {
+  return nc.env.validate({
+    SITES_FILE: { type: "string", description: "The JSON file that lists the sites" },
+    TIMEOUT: { type: "duration", default: "5s" },
+    CONCURRENCY: { type: "number", integer: true, min: 1, default: 4 },
+    DATABASE_PATH: { type: "string", default: "data/status.sqlite" },
+  });
+}
+
+module.exports = { loadConfig };
+```
+
+| Variable | Type | Used on |
+| --- | --- | --- |
+| `SITES_FILE` | text, required | [Reading the list of sites](/project/input/) |
+| `TIMEOUT` | a duration, `5s` by default | [Checking the sites](/project/requests/) |
+| `CONCURRENCY` | a whole number from 1, `4` by default | [Checking the sites](/project/requests/) |
+| `DATABASE_PATH` | text, `data/status.sqlite` by default | [Keeping the results](/project/storage/) |
+
+`nc.env.validate()` checks every variable, converts it (`"5s"` becomes
+`5000`, in milliseconds) and returns a frozen object. A variable without a
+`default` is required.
+
+## Read it at startup
+
+Replace `status.js`:
+
+```js title="status.js"
+const nc = require("@ix-xs/node-comfort");
+const { loadConfig } = require("./config");
+
+async function main() {
+  const config = loadConfig();
+  nc.info("Configuration", config);
+}
+
+main().catch((error) => {
+  nc.error(error.message);
+  process.exitCode = 1;
+});
+```
+
+- **Why `main()`:** the next pages wait for requests, with `await`. The
+  program lives in an `async` function from now on.
+- **Why the `catch`:** a problem becomes one readable line instead of a stack
+  trace, and `process.exitCode = 1` tells a script that the run failed.
+
+## Run it without `.env`
+
+<TerminalDemo scene="project/configuration/missing" />
+
+The program stops before doing anything, and says what to fix. When several
+variables are wrong, one error lists them all.
+
+## Write the `.env` file
+
+Create `.env` next to `status.js`:
+
+```bash title=".env"
+# The JSON file that lists the sites
+SITES_FILE=sites.json
+# How long a site has to answer
+TIMEOUT=5s
+```
+
+<TerminalDemo scene="project/configuration/loaded" />
+
+The package reads `.env` from the current folder when it loads. A variable
+already set in the environment wins over the file, so a server can change any
+value without touching it.
+
+<Aside type="tip" title="Keep .env out of git">
+`.env` often holds secrets. Add it to `.gitignore`, and share a
+`.env.example` instead: [`env.example()`](/essentials/env/#a-envexample-from-the-same-spec)
+writes it from the same description.
+</Aside>

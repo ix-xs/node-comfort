@@ -216,4 +216,4 @@ time.nextRun("0 0 1 * *"); // le moment de sa prochaine exécution
 
 Les expressions ont cinq champs (`minute hour day month weekday`), ou six avec les secondes en premier. Elles acceptent les listes, les intervalles, les pas, les noms de mois et de jours, `L` dans le champ du jour pour le dernier jour du mois, et les raccourcis `@hourly`, `@daily`, `@weekly`, `@monthly` et `@yearly`.
 
-Les deux renvoient une tâche dotée de `stop()`, `next()`, `isRunning()` et `runs()`. Avec Node.js 24 ou plus récent, une tâche déclarée avec `using` s'arrête à la fin de son bloc ([en savoir plus sur `using`](/recipes/#cleaning-up-with-using)). Toutes les fonctions sont listées dans la [référence](/reference/time/).
+Les deux renvoient une tâche dotée de `stop()`, `next()`, `isRunning()` et `runs()`. Avec Node.js 24 ou plus récent, une tâche déclarée avec `using` s'arrête à la fin de son bloc ([en savoir plus sur `using`](/recipes/cli-tool/#cleaning-up-with-using)). Toutes les fonctions sont listées dans la [référence](/reference/time/).

@@ -52,7 +52,7 @@ nc.dontCrash()
   });
 ```
 
-Elle ne retire jamais que ses propres gestionnaires ; les écouteurs de votre code ou d'autres bibliothèques restent en place. Appelé sur l'objet renvoyé, `dispose()` retire tout ce qu'elle a installé, tout comme la fin du bloc avec `using` sur Node.js 24 ou plus récent ([en savoir plus sur `using`](/recipes/#cleaning-up-with-using)). Pour un arrêt propre complet, avec des timeouts, voyez [`sys.onShutdown()`](/system/sys/).
+Elle ne retire jamais que ses propres gestionnaires ; les écouteurs de votre code ou d'autres bibliothèques restent en place. Appelé sur l'objet renvoyé, `dispose()` retire tout ce qu'elle a installé, tout comme la fin du bloc avec `using` sur Node.js 24 ou plus récent ([en savoir plus sur `using`](/recipes/cli-tool/#cleaning-up-with-using)). Pour un arrêt propre complet, avec des timeouts, voyez [`sys.onShutdown()`](/system/sys/).
 
 ## when
 

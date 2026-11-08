@@ -1,0 +1,4 @@
+# The JSON file that lists the sites
+SITES_FILE=sites.json
+# How long a site has to answer
+TIMEOUT=5s

@@ -1,0 +1,6 @@
+[
+  { "name": "Website", "url": "https://www.example.com/" },
+  { "name": "API", "url": "https://api.example.com/health" },
+  { "name": "Blog", "url": "https://blog.example.com/" },
+  { "name": "Shop", "url": "https://shop.example.com/" }
+]

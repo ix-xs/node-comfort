@@ -1,0 +1,21 @@
+---
+// The API reference in English. Its French twin is ../fr/reference/.
+// /reference/ is the overview, /reference/str/ a namespace, and
+// /reference/str/slugify/ one of its members or types.
+import IndexPage from "../../components/reference/IndexPage.astro";
+import NamespacePage from "../../components/reference/NamespacePage.astro";
+import SymbolPage from "../../components/reference/SymbolPage.astro";
+import { namespaces, symbols } from "../../reference/model";
+
+export function getStaticPaths() {
+  return [
+    { params: { slug: undefined }, props: {} },
+    ...namespaces.map((ns) => ({ params: { slug: ns.slug }, props: { ns } })),
+    ...symbols.map((symbol) => ({ params: { slug: symbol.ref }, props: { symbol } })),
+  ];
+}
+
+const { ns, symbol } = Astro.props;
+---
+
+{symbol ? <SymbolPage symbol={symbol} locale={undefined} /> : ns ? <NamespacePage ns={ns} locale={undefined} /> : <IndexPage locale={undefined} />}

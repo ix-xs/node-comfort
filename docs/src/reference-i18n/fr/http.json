@@ -72,5 +72,14 @@
   "Statuses worth retrying. Defaults to 408, 413, 429, 500, 502, 503 and 504.": "Statuts qui méritent une nouvelle tentative. Par défaut : 408, 413, 429, 500, 502, 503 et 504.",
   "Methods retried when you give no number of attempts. POST and PATCH aren't, by default, so nothing gets created twice.": "Méthodes retentées quand vous ne donnez pas de nombre de tentatives. POST et PATCH ne le sont pas, par défaut, pour que rien ne soit créé deux fois.",
   "Query string values. `null` and `undefined` are skipped, arrays repeat the key, dates are sent in ISO format.": "Valeurs de la chaîne de requête. `null` et `undefined` sont ignorés, les tableaux répètent la clé, les dates sont envoyées au format ISO.",
-  "What the `schema` option takes: a `nc.schema`, or anything else with a `parse()` method that returns the checked value or throws.": "Ce qu'accepte l'option `schema` : un `nc.schema`, ou tout autre objet doté d'une méthode `parse()` qui renvoie la valeur vérifiée ou lève une erreur."
+  "What the `schema` option takes: a `nc.schema`, or anything else with a `parse()` method that returns the checked value or throws.": "Ce qu'accepte l'option `schema` : un `nc.schema`, ou tout autre objet doté d'une méthode `parse()` qui renvoie la valeur vérifiée ou lève une erreur.",
+  "URLs in it have their secret query values masked.": "Les valeurs secrètes des paramètres des URL qu'il contient sont masquées.",
+  "HTTP status, like `404`. `0` when no response came back.": "Statut HTTP, comme `404`. `0` quand aucune réponse n'est revenue.",
+  "HTTP status text, like `\"Not Found\"`.": "Texte du statut HTTP, comme `\"Not Found\"`.",
+  "The requested URL, with `***` for the values of query parameters that look secret.": "L'URL demandée, avec `***` à la place des valeurs des paramètres qui semblent secrètes.",
+  "The HTTP method, like `\"GET\"`.": "La méthode HTTP, comme `\"GET\"`.",
+  "Response headers, with lower-cased names.": "Les en-têtes de la réponse, avec des noms en minuscules.",
+  "The response body: parsed JSON when possible, text otherwise.": "Le corps de la réponse : du JSON analysé quand c'est possible, du texte sinon.",
+  "Stable, machine-readable code.": "Code stable, lisible par une machine.",
+  "What `JSON.stringify()` writes for the error: its name, code, message and own fields, without the stack. Handy for API responses and logs.": "Ce que `JSON.stringify()` écrit pour l'erreur : son nom, son code, son message et ses propres champs, sans la pile d'appels. Pratique pour les réponses d'API et les logs."
 }

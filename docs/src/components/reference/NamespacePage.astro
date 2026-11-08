@@ -1,0 +1,119 @@
+---
+// The page of a namespace or a class: what it is for, how to import it, then
+// its members and its types, each a link to its own page.
+import StarlightPage from "@astrojs/starlight/components/StarlightPage.astro";
+import { Code } from "@astrojs/starlight/components";
+import type { ApiSymbol, Namespace } from "../../reference/model";
+import { example, find, firstSentence, model, nsKind, pathOf, shortName, sidebar, translate, untranslated, words } from "../../reference/model";
+import { href, render } from "../../reference/markdown";
+import { guideTitle } from "../../reference/guide";
+
+interface Props {
+  ns: Namespace;
+  locale: string | undefined;
+}
+
+const { ns, locale } = Astro.props;
+const w = words(locale);
+const key = ns.key;
+const options = { here: key, self: pathOf(ns.slug) };
+
+const text = translate(key, ns.text, locale) ?? "";
+const pending = untranslated(key, ns.text, locale);
+// The first paragraph is the lead of the page (its description); the rest follows.
+const [first = "", ...rest] = text.split(/\n\s*\n/);
+const moreHtml = await render(rest.join("\n\n"), locale, options);
+
+const pkg = model.package.name;
+const importCode = [`const { ${key} } = require("${pkg}");`, w.orAlone, `const ${key} = require("${ns.module}");`].join("\n");
+const flat = model.flat[key] ?? [];
+const flatHtml = flat.length ? await render(w.topLevelText(`nc.${flat[0]}()`, `nc.${key}.${flat[0]}()`), locale, { inline: true }) : "";
+const examples = (ns.examples ?? []).map((code) => example(key, code, locale));
+const guide = await guideTitle(ns.guide, locale);
+
+async function row(symbol: ApiSymbol) {
+  const summary = firstSentence(translate(key, symbol.text, locale));
+  return {
+    symbol,
+    html: await render(symbol.deprecated !== undefined ? `${w.deprecated}. ${summary}` : summary, locale, { ...options, inline: true }),
+  };
+}
+const members = await Promise.all(ns.members.map((ref) => find(ref)!).filter(Boolean).map(row));
+const types = await Promise.all((ns.types ?? []).map((ref) => find(ref)!).filter(Boolean).map(row));
+const alsoHtml = ns.extra?.length ? await render(w.alsoText, locale, { inline: true }) : "";
+
+const headings = [
+  { depth: 2, slug: "members", text: w.members },
+  ...(types.length ? [{ depth: 2, slug: "types", text: w.types }] : []),
+  ...(ns.extra?.length ? [{ depth: 2, slug: "also-available", text: w.also }] : []),
+];
+---
+
+<StarlightPage
+  frontmatter={{
+    title: ns.title,
+    description: first.replace(/\[([^\]]+)\]\([^)]*\)/g, "$1").replace(/\s+/g, " ").trim(),
+    tableOfContents: { minHeadingLevel: 2, maxHeadingLevel: 2 },
+    editUrl: false,
+    pagefind: true,
+  }}
+  sidebar={sidebar(locale, key)}
+  headings={headings}
+>
+  <div class="nc-rf-meta">
+    <span class="nc-rf-kind" data-kind={nsKind(ns)}>{w.kinds[nsKind(ns)]}</span>
+    <code class="nc-rf-module" translate="no">{ns.module}</code>
+    <a class="nc-rf-source" href={ns.source} rel="noopener">{w.source}<span aria-hidden="true"> ↗</span></a>
+  </div>
+
+  {moreHtml && <div class="nc-rf-more nc-rf-intro" set:html={moreHtml} lang={pending && locale ? "en" : undefined} />}
+
+  <Code code={importCode} lang="js" />
+  {flatHtml && <p set:html={flatHtml} />}
+  {examples.map((code) => <Code code={code} lang="js" />)}
+
+  {guide && (
+    <a class="nc-rf-guide" href={href(ns.guide, locale)}>
+      <span class="nc-rf-label">{w.guide}</span>
+      <span class="nc-rf-guide-title">{guide}</span>
+      <span aria-hidden="true">→</span>
+    </a>
+  )}
+
+  <section class="nc-rf-section">
+    <h2 id="members">{w.members}</h2>
+    <ul class="nc-rf-list">
+      {members.map(({ symbol, html }) => (
+        <li>
+          <a href={href(pathOf(symbol.ref), locale)} data-kind={symbol.kind} translate="no">{shortName(symbol)}</a>
+          <span set:html={html} />
+        </li>
+      ))}
+    </ul>
+  </section>
+
+  {types.length > 0 && (
+    <section class="nc-rf-section">
+      <h2 id="types">{w.types}</h2>
+      <p class="nc-rf-hint">{w.typesText}</p>
+      <ul class="nc-rf-list">
+        {types.map(({ symbol, html }) => (
+          <li>
+            <a href={href(pathOf(symbol.ref), locale)} data-kind={symbol.kind} translate="no">{symbol.name}</a>
+            <span set:html={html} />
+          </li>
+        ))}
+      </ul>
+    </section>
+  )}
+
+  {ns.extra?.length ? (
+    <section class="nc-rf-section">
+      <h2 id="also-available">{w.also}</h2>
+      <p class="nc-rf-hint" set:html={alsoHtml} />
+      <ul class="nc-rf-chips" translate="no">
+        {ns.extra.map((name) => <li><code>{name}</code></li>)}
+      </ul>
+    </section>
+  ) : null}
+</StarlightPage>

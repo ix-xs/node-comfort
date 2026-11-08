@@ -1,0 +1,94 @@
+---
+title: "A real command"
+description: "Give the status tool options and a help page with nc.cli.args(), a spinner while it works, and a table or JSON at the end."
+sidebar:
+  order: 6
+---
+
+import TerminalDemo from '../../../components/demo/TerminalDemo.astro';
+
+status works. Now make it pleasant to use from a terminal: options and a help
+page, a spinner while the sites answer, a table at the end, and JSON for other
+programs.
+
+## Options, a spinner and a table
+
+Replace `status.js`:
+
+```js title="status.js"
+const nc = require("@ix-xs/node-comfort");
+const { loadConfig } = require("./config");
+const { loadSites } = require("./sites");
+const { checkAll } = require("./check");
+const { openStore } = require("./store");
+
+const { flags } = nc.cli.args({
+  site: { type: "string", short: "s", description: "Check only the site with this name" },
+  json: { type: "boolean", description: "Print the results as JSON" },
+}, { name: "status", description: "Checks that your sites answer.", version: "1.0.0" });
+
+async function main() {
+  const config = loadConfig();
+  const sites = loadSites(config.SITES_FILE).filter((site) => !flags.site || site.name === flags.site);
+  if (sites.length === 0) throw new Error(`No site is named "${flags.site}"`);
+  const store = openStore(config.DATABASE_PATH);
+
+  const results = await nc.cli.spin(`Checking ${nc.str.plural(sites.length, { one: "site", other: "sites" })}`, checkAll(sites, config), {
+    success: (done) => `${done.filter((result) => result.up).length} of ${done.length} up`,
+  });
+  store.save(results);
+  const rows = results.map((result) => ({
+    site: result.name,
+    state: result.up ? "up" : "down",
+    status: result.status,
+    uptime: store.uptime(result.name),
+  }));
+  store.close();
+
+  if (flags.json) {
+    console.log(JSON.stringify(rows, null, 2));
+    return;
+  }
+  nc.table(rows, {
+    columns: ["site", { key: "state", format: (state) => (state === "up" ? nc.color.green(state) : nc.color.red(state)) }, "status", "uptime"],
+  });
+}
+
+main().catch((error) => {
+  nc.error(error.message);
+  process.exitCode = 1;
+});
+```
+
+| Code | What it does |
+| --- | --- |
+| `nc.cli.args()` | reads `--site API`, `-s API` and `--json`, and answers `--help` and `--version` |
+| `nc.cli.spin()` | a spinner while the checks run, then `✔` and the text of `success` |
+| `nc.table()` | a table whose columns fit their content |
+| `format` | colors one column: green when up, red when down |
+
+## The help page
+
+`nc.cli.args()` writes it from the options you described:
+
+<TerminalDemo scene="project/command-line/help" />
+
+An unknown option stops the program with a suggestion: `--sitee` gives
+`Unknown option --sitee. Did you mean --site?`.
+
+## The table
+
+<TerminalDemo scene="project/command-line/table" />
+
+The spinner draws itself on stderr, and the table goes to stdout. `0` in the
+status column means that no answer came.
+
+## JSON for other programs
+
+<TerminalDemo scene="project/command-line/json" />
+
+With `--json`, stdout holds nothing but the JSON, so another program can read
+it: `node status.js --json > results.json`.
+
+The [CLI page](/system/cli/) has prompts, menus, progress bars, boxes and
+trees.

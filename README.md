@@ -15,7 +15,7 @@ One package, zero dependencies, documented right in your editor.
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](./LICENSE)
 
 [Documentation](https://ix-xs.github.io/node-comfort/) •
-[Getting started](https://ix-xs.github.io/node-comfort/start/getting-started/) •
+[Getting started](https://ix-xs.github.io/node-comfort/start/installation/) •
 [API reference](https://ix-xs.github.io/node-comfort/reference/) •
 [Recipes](https://ix-xs.github.io/node-comfort/recipes/) •
 [Changelog](./CHANGELOG.md)
@@ -104,7 +104,7 @@ import nc from "@ix-xs/node-comfort";
 import { slugify } from "@ix-xs/node-comfort/str";   // loads only what it needs
 ```
 
-Every namespace has its own entry point (`@ix-xs/node-comfort/http`, `/sqlite`, `/schema`...). In an ES module, importing from these keeps startup lean. See [Performance](https://ix-xs.github.io/node-comfort/start/performance/).
+Every namespace has its own entry point (`@ix-xs/node-comfort/http`, `/sqlite`, `/schema`...). In an ES module, importing from these keeps startup lean. See [Performance](https://ix-xs.github.io/node-comfort/help/performance/).
 
 TypeScript needs no setup: the types ship with the package.
 
@@ -188,7 +188,7 @@ const spinner = nc.cli.spinner(`Deploying to ${env}`).start();
 spinner.succeed("Deployed");
 ```
 
-That's a small part of it. The [guide](https://ix-xs.github.io/node-comfort/start/introduction/) walks through every namespace, and the [recipes](https://ix-xs.github.io/node-comfort/recipes/) show them working together: a small API server, a CLI, a scheduled job.
+That's a small part of it. The [guide](https://ix-xs.github.io/node-comfort/) walks through every namespace, and the [recipes](https://ix-xs.github.io/node-comfort/recipes/) show them working together: a small API server, a CLI, a scheduled job.
 
 ## Coming from 1.x
 
@@ -199,7 +199,7 @@ That's a small part of it. The [guide](https://ix-xs.github.io/node-comfort/star
 - `warn` and `error` write to stderr.
 - Deep imports (`@ix-xs/node-comfort/src/...`) are replaced by official entry points (`@ix-xs/node-comfort/str`).
 
-The [migration guide](https://ix-xs.github.io/node-comfort/start/migration/) lists every change with before and after examples.
+The [migration guide](https://ix-xs.github.io/node-comfort/help/migration/) lists every change with before and after examples.
 
 Coming from 2.0, there is nothing to change: 2.1 adds functions, makes the existing ones faster and corrects edge cases. The [changelog](./CHANGELOG.md) has the details.
 

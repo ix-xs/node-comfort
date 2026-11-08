@@ -1,94 +1,84 @@
 ---
-title: node-comfort
-description: The zero-dependency standard library for Node.js. Logger, files, SQLite, validation, HTTP, CLI, dates, ids, crypto and hundreds of typed helpers in one package.
-template: splash
-hero:
-  title: Node.js, made <em>comfortable.</em>
-  tagline: One package for what every project ends up installing. A logger, files, SQLite, validation, an HTTP client, a CLI toolkit, dates, ids, crypto and hundreds of typed helpers. No dependencies, and nothing loads until you use it.
-  actions:
-    - text: Get started
-      link: /start/getting-started/
-      variant: primary
-    - text: Browse the reference
-      link: /reference/
-      variant: secondary
+title: "Introduction"
+description: "node-comfort is the zero-dependency standard library for Node.js. This guide builds one small program with it, page by page."
 ---
 
-import Showcase from '../../components/showcase/Showcase.astro';
+import TerminalDemo from '../../components/demo/TerminalDemo.astro';
 
-<div class="nc-landing not-content">
+This guide teaches you **node-comfort**, from installation to a program that
+runs on a server. Each step tells you **what to do** and **why**.
 
-<section class="nc-section">
-  <header data-reveal><span>01</span><h2>Real code, real output</h2></header>
-  <p data-reveal>Every example below is a file that ran against the package when this page was built. Pick a subject, change the variation, run it again.</p>
-  <div data-reveal><Showcase /></div>
-</section>
+## What node-comfort is
 
-<section class="nc-section">
-  <header data-reveal><span>02</span><h2>Twenty-three namespaces, one require</h2></header>
-  <p data-reveal>Each one replaces a package or two you would otherwise install, and they are designed together: a duration is always <code>"5m"</code> or milliseconds, options always come last, every error has a stable <code>code</code>.</p>
-  <ul class="nc-names" data-reveal>
-    <li><a href="/essentials/logger/"><strong>nc.logger</strong><small>Colored logs in development, JSON in production, files that rotate.</small></a></li>
-    <li><a href="/essentials/fs/"><strong>nc.fs</strong><small>Read, write atomically, copy, move, glob and watch, without try/catch.</small></a></li>
-    <li><a href="/system/sqlite/"><strong>nc.SQLite</strong><small>The database built into Node, with filters, migrations and JSON columns.</small></a></li>
-    <li><a href="/data/schema/"><strong>nc.schema</strong><small>Validate data and get the TypeScript type from the same description.</small></a></li>
-    <li><a href="/system/http/"><strong>nc.http</strong><small>fetch with JSON, timeouts, safe retries, typed errors and downloads.</small></a></li>
-    <li><a href="/system/cli/"><strong>nc.cli</strong><small>Typed arguments, prompts, menus, spinners, progress bars, tables.</small></a></li>
-    <li><a href="/essentials/env/"><strong>nc.env</strong><small>Load .env files and check your whole configuration at startup.</small></a></li>
-    <li><a href="/data/time/"><strong>nc.time</strong><small>Format, parse and compare dates in any language and time zone.</small></a></li>
-    <li><a href="/system/crypto/"><strong>nc.crypto</strong><small>Password hashing, encryption, JWT and two-factor codes, the safe way.</small></a></li>
-    <li><a href="/data/id/"><strong>nc.id</strong><small>UUID v4, v5 and v7, ULID, nanoid-style ids, tokens and short codes.</small></a></li>
-    <li><a href="/flow/async/"><strong>nc.async</strong><small>Concurrency limits, queues, rate limits, polling, abortable work.</small></a></li>
-    <li><a href="/flow/func/"><strong>nc.func</strong><small>debounce, throttle, memoize, retry, timeout, batch and dedupe.</small></a></li>
-    <li><a href="/flow/cache/"><strong>nc.Cache</strong><small>An LRU cache with expiry, stale-while-revalidate and shared loads.</small></a></li>
-    <li><a href="/flow/emitter/"><strong>nc.Emitter</strong><small>A typed event emitter you can await and loop over.</small></a></li>
-    <li><a href="/data/str/"><strong>nc.str</strong><small>Slugs, cases, truncation, templates, plurals and fuzzy matching.</small></a></li>
-    <li><a href="/data/num/"><strong>nc.num</strong><small>Rounding that is right, formatting, bytes, statistics, random.</small></a></li>
-    <li><a href="/data/arr/"><strong>nc.arr</strong><small>Group, sort by several keys, chunk, paginate, set operations.</small></a></li>
-    <li><a href="/data/obj/"><strong>nc.obj</strong><small>Deep get, set, merge, clone, equal and diff, safe from prototype pollution.</small></a></li>
-    <li><a href="/essentials/checker/"><strong>nc.checker</strong><small>More than seventy type guards and format checks, up to <code>isIBAN</code>.</small></a></li>
-    <li><a href="/system/color/"><strong>nc.color</strong><small>Terminal colors you can chain, with truecolor and automatic fallback.</small></a></li>
-    <li><a href="/system/sys/"><strong>nc.sys</strong><small>Run commands, shut down cleanly, find a free port, open a URL.</small></a></li>
-    <li><a href="/essentials/errors/"><strong>nc.errors</strong><small>One family of errors with codes, so you never parse a message.</small></a></li>
-    <li><a href="/essentials/utils/"><strong>nc.utils</strong><small>wait, when, JSON that never throws, and a crash guard.</small></a></li>
-  </ul>
-</section>
+Almost every Node.js project ends up installing the same tools: a logger,
+dotenv, a validation library, an HTTP client, a retry helper, a date library,
+a CLI toolkit. node-comfort puts them in **one package with no
+dependencies**, built only on what Node.js ships: `fetch`, `Intl`,
+`node:crypto`, `node:sqlite`.
 
-<section class="nc-section">
-  <header data-reveal><span>03</span><h2>What you stop worrying about</h2></header>
-  <ul class="nc-points">
-    <li data-reveal><h3>The dependency tree</h3><p>Zero runtime dependencies. One package to review, one version to pin, one changelog to read. Nothing arrives in <code>node_modules</code> that you did not ask for.</p></li>
-    <li data-reveal><h3>Startup time</h3><p><code>require("@ix-xs/node-comfort")</code> takes about 4 ms. Each namespace loads the first time you use it, and can be imported on its own.</p></li>
-    <li data-reveal><h3>Guessing what a function takes</h3><p>Written in JavaScript with complete JSDoc, shipped with generated declarations: completions, documentation on hover and inferred types, in plain JS as in TypeScript.</p></li>
-    <li data-reveal><h3>The unsafe default</h3><p>Atomic writes, constant-time comparisons, bounded password hashing, object helpers that ignore <code>__proto__</code>, retries that leave a POST alone unless you ask.</p></li>
-    <li data-reveal><h3>What a failure looks like</h3><p>What can fail in normal life returns <code>undefined</code> or <code>false</code>. What fails because something is wrong throws an error with a <code>code</code> and the context you need.</p></li>
-    <li data-reveal><h3>Whether it runs on your machine</h3><p>More than five hundred tests on Windows, macOS and Linux, on Node 22, 24 and 26, and every example of this site is run before it is published.</p></li>
-  </ul>
-</section>
+```js
+const nc = require("@ix-xs/node-comfort");
 
-<section class="nc-section">
-  <header data-reveal><span>04</span><h2>Fast where it is called a million times</h2></header>
-  <p data-reveal>Operations per second on one core of a laptop, with Node 24. The slow parts of JavaScript (<code>Intl</code>, random bytes, stack traces) are set up once and reused.</p>
-  <ul class="nc-numbers">
-    <li data-reveal><strong>2.9<small>M/s</small></strong><span>log lines formatted by <code>nc.info()</code></span></li>
-    <li data-reveal><strong>7.3<small>M/s</small></strong><span>sortable ids from <code>id.uuidv7()</code></span></li>
-    <li data-reveal><strong>1.6<small>M/s</small></strong><span>objects checked by a five-field schema</span></li>
-    <li data-reveal><strong>52<small>M/s</small></strong><span>events through <code>emitter.emit()</code></span></li>
-    <li data-reveal><strong>460<small>k/s</small></strong><span>rows read by key with <code>db.get()</code></span></li>
-    <li data-reveal><strong>4<small>ms</small></strong><span>to load the package, whatever you use later</span></li>
-  </ul>
-</section>
+const config = nc.env.validate({ PORT: { type: "port", default: 3000 } });
+const users = nc.readJSON("data/users.json", []);
+nc.success(`Loaded ${users.length} users, port ${config.PORT}`);
+```
 
-<section class="nc-section">
-  <header data-reveal><span>05</span><h2>Where to go next</h2></header>
-  <ul class="nc-paths">
-    <li data-reveal><a href="/start/getting-started/"><span>01</span><div><strong>Getting started</strong><small>Install it, write a first script, use it from CommonJS, ES modules or TypeScript.</small></div></a></li>
-    <li data-reveal><a href="/start/introduction/"><span>02</span><div><strong>Introduction</strong><small>What is in the box, how the API is laid out, and what it replaces.</small></div></a></li>
-    <li data-reveal><a href="/essentials/logger/"><span>03</span><div><strong>Essentials</strong><small>The logger, files, type checks, configuration and errors.</small></div></a></li>
-    <li data-reveal><a href="/system/http/"><span>04</span><div><strong>System and network</strong><small>HTTP, SQLite, command-line tools, processes and crypto.</small></div></a></li>
-    <li data-reveal><a href="/recipes/"><span>05</span><div><strong>Recipes</strong><small>Complete programs to copy: a typed config, an API client, a CLI, a job runner.</small></div></a></li>
-    <li data-reveal><a href="/reference/"><span>06</span><div><strong>Reference</strong><small>Every function, with its signature, its options and an example.</small></div></a></li>
-  </ul>
-</section>
+| Why | What it means for you |
+| --- | --- |
+| One dependency instead of twenty | One version to follow, one changelog to read. Nothing runs at install time. |
+| One way of doing things | Durations are `"5m"` or milliseconds, options come last, errors carry a stable `code`. |
+| Documentation in your editor | Every function, option and type is described, in JavaScript as in TypeScript. |
+| Fast to load | About 4 ms. Each namespace loads the first time you use it. |
 
-</div>
+## What is inside
+
+| Namespace | What it does |
+| --- | --- |
+| [`logger`](/essentials/logger/) | Logs with levels, colors, JSON output and log files |
+| [`fs`](/essentials/fs/) | Files and folders: atomic writes, JSON, glob, watch |
+| [`env`](/essentials/env/) | `.env` loading and a typed, checked configuration |
+| [`checker`](/essentials/checker/) | Type checks and validators that are also TypeScript type guards |
+| [`schema`](/data/schema/) | Validation, with the TypeScript type inferred for you |
+| [`str`](/data/str/), [`num`](/data/num/), [`arr`](/data/arr/), [`obj`](/data/obj/) | Everyday helpers for strings, numbers, arrays and objects |
+| [`time`](/data/time/) | Dates in any language and time zone, durations, schedules |
+| [`id`](/data/id/), [`crypto`](/system/crypto/) | Ids, tokens, password hashing, encryption, JWT, 2FA codes |
+| [`async`](/flow/async/), [`func`](/flow/func/) | Concurrency limits, queues, retry, debounce, memoize |
+| [`Cache`](/flow/cache/), [`Emitter`](/flow/emitter/) | An LRU cache and a typed event emitter |
+| [`http`](/system/http/) | A `fetch` client with JSON, retries, timeouts and hooks |
+| [`SQLite`](/system/sqlite/) | The database built into Node.js, with filters and migrations |
+| [`cli`](/system/cli/), [`color`](/system/color/), [`sys`](/system/sys/) | Arguments, prompts, spinners, tables, colors, processes |
+
+## What you will build
+
+One program, page after page: **status**, a tool that checks that your
+websites answer. This is what it prints at the end of
+[Your first project](/project/setup/):
+
+<TerminalDemo scene="project/command-line/table" />
+
+1. **Getting started**: install Node.js and the package, set up your editor.
+2. **Your first project**: the logger, a configuration, a file to read,
+   requests, a database, a real command, then the program running on its own.
+3. **The topic pages**: one per namespace, in reading order. Read them when you
+   need them.
+
+The [reference](/reference/) describes every function, option and type.
+
+## What you should know first
+
+- **The basics of JavaScript**: functions, objects, `require`, `async` and
+  `await`.
+- **How to open a terminal** in a folder and type a command there.
+
+You don't need TypeScript. The guide uses CommonJS, the default of Node.js;
+[Installation](/start/installation/#commonjs-es-modules-and-typescript) shows
+the same code in ES modules and TypeScript.
+
+## How to read this guide
+
+- A code block with a **file name** is a file to create, or to replace, at
+  that place in the project. Highlighted lines are the new ones.
+- A terminal shows what the code of the page prints. It ran when this site was
+  built, so the output is real. **Replay** runs the scene again.
+- **Next**, at the bottom of the page, takes you to the following step.

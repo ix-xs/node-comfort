@@ -1,0 +1,119 @@
+---
+title: "Garder les résultats"
+description: "Enregistrez chaque vérification dans SQLite, la base de données intégrée à Node.js, et calculez la disponibilité de chaque site."
+sidebar:
+  order: 5
+---
+
+import { Aside } from '@astrojs/starlight/components';
+import TerminalDemo from '../../../../components/demo/TerminalDemo.astro';
+
+Une vérification dit si un site répond maintenant. Un historique dit à quelle
+fréquence il répond. Gardez chaque résultat dans SQLite, la base de données
+intégrée à Node.js : un fichier, rien à installer, rien à faire tourner à côté
+du programme.
+
+## Ouvrir la base
+
+Créez `store.js` :
+
+```js title="store.js"
+const nc = require("@ix-xs/node-comfort");
+
+function openStore(file) {
+  const db = new nc.SQLite(file);
+  db.createTable({
+    name: "checks",
+    columns: {
+      id: { type: "INTEGER", primaryKey: true, autoincrement: true },
+      site: { type: "TEXT", notNull: true },
+      up: { type: "BOOLEAN", notNull: true },
+      status: { type: "INTEGER", notNull: true },
+      checked_at: { type: "DATETIME", notNull: true },
+    },
+    indexes: [{ columns: ["site"] }],
+  });
+
+  return {
+    save(results) {
+      const now = new Date();
+      db.insertMany("checks", results.map((result) => ({
+        site: result.name,
+        up: result.up,
+        status: result.status,
+        checked_at: now,
+      })));
+    },
+    uptime(site) {
+      const total = db.count("checks", { site });
+      const up = db.count("checks", { site, up: true });
+      return `${nc.num.percent(up, total, 0)}% of ${nc.str.plural(total, { one: "check", other: "checks" })}`;
+    },
+    close: () => db.close(),
+  };
+}
+
+module.exports = { openStore };
+```
+
+| Code | Pourquoi |
+| --- | --- |
+| `new nc.SQLite(file)` | ouvre le fichier, et le crée avec son dossier la première fois |
+| `createTable()` | ne fait rien si la table existe : il peut s'exécuter à chaque démarrage |
+| `BOOLEAN`, `DATETIME` | `up` revient en `true` ou `false`, et la `Date` est gardée en texte ISO |
+| `indexes` | compter les vérifications d'un site reste rapide quand la table grandit |
+| `insertMany()` | tous les résultats en une transaction : tous enregistrés, ou aucun |
+| `count()` avec un filtre | le nombre de lignes qui correspondent, ici par site et par état |
+
+## Enregistrer chaque vérification
+
+Remplacez `status.js` :
+
+```js title="status.js" ins={5,10,14,16-18,20}
+const nc = require("@ix-xs/node-comfort");
+const { loadConfig } = require("./config");
+const { loadSites } = require("./sites");
+const { checkAll } = require("./check");
+const { openStore } = require("./store");
+
+async function main() {
+  const config = loadConfig();
+  const sites = loadSites(config.SITES_FILE);
+  const store = openStore(config.DATABASE_PATH);
+  nc.info(`Checking ${sites.length} sites`);
+
+  const results = await checkAll(sites, config);
+  store.save(results);
+  for (const result of results) {
+    const uptime = store.uptime(result.name);
+    if (result.up) nc.success(`${result.name} is up (${uptime})`);
+    else nc.error(`${result.name} is down (${uptime}): ${result.error}`);
+  }
+  store.close();
+}
+
+main().catch((error) => {
+  nc.error(error.message);
+  process.exitCode = 1;
+});
+```
+
+<TerminalDemo scene="project/storage/first" />
+
+## Le relancer
+
+Chaque exécution complète l'historique :
+
+<TerminalDemo scene="project/storage/second" />
+
+Le blog a répondu `404` cette fois : il a répondu à une vérification sur deux.
+L'historique est dans `data/status.sqlite`, et y reste d'une exécution à
+l'autre.
+
+<Aside type="tip" title="Gardez les données hors de git">
+Ajoutez `data/` à `.gitignore` : la base appartient à la machine qui fait
+tourner le programme.
+</Aside>
+
+La [page SQLite](/system/sqlite/) présente les filtres, les transactions, les
+migrations et les sauvegardes.

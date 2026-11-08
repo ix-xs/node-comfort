@@ -7,19 +7,20 @@
 // that the script below moves into place.
 import { getCollection } from "astro:content";
 import { href, useT, type UiKey } from "../i18n";
+import { words as referenceWords } from "../reference/model";
 
 const { locale } = Astro.locals.starlightRoute;
 const t = useT(locale);
 
 /** Pages offered first, in this order. Titles come from the pages themselves. */
 const STARTING_POINTS = [
-  "start/getting-started",
+  "start/installation",
+  "project/setup",
   "essentials/logger",
-  "essentials/fs",
   "data/schema",
   "system/http",
   "system/sqlite",
-  "reference",
+  "reference", // not a content page: its title comes from the reference itself
 ];
 /** Searches that show what the index knows: a function, a concept, an option. */
 const QUERIES = ["slugify", "retry", "safeParse", "uuidv7", "paginate"];
@@ -34,7 +35,7 @@ function area(slug: string): string {
 const titles = new Map((await getCollection("docs")).map((entry) => [entry.id, entry.data.title]));
 const pages = STARTING_POINTS.map((slug) => {
   // The page in this language when it is translated, the English one otherwise.
-  const title = (locale && titles.get(`${locale}/${slug}`)) || titles.get(slug);
+  const title = (locale && titles.get(`${locale}/${slug}`)) || titles.get(slug) || (slug === "reference" ? referenceWords(locale).title : undefined);
   return title ? { title, area: area(slug), href: href(`/${slug}/`, locale) } : undefined;
 }).filter((page) => page !== undefined);
 ---

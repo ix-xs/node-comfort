@@ -1,0 +1,101 @@
+---
+title: "Reading the list of sites"
+description: "Read the sites to check from a JSON file with nc.readJSON(), and check its shape with a schema."
+sidebar:
+  order: 3
+---
+
+import TerminalDemo from '../../../components/demo/TerminalDemo.astro';
+
+The sites to check live in a JSON file that anyone can edit. Read it, then
+check its shape, so that a typo stops the program with a clear message instead
+of a strange failure three steps later.
+
+## Write the list
+
+Create `sites.json`, the file that `SITES_FILE` names:
+
+```json title="sites.json"
+[
+  { "name": "Website", "url": "https://www.example.com/" },
+  { "name": "API", "url": "https://api.example.com/health" },
+  { "name": "Blog", "url": "https://blog.example.com/" },
+  { "name": "Shop", "url": "https://shop.example.com/" }
+]
+```
+
+## Read and check it
+
+Create `sites.js`:
+
+```js title="sites.js"
+const nc = require("@ix-xs/node-comfort");
+const { schema: s } = nc;
+
+const Sites = s.array(
+  s.object({
+    name: s.string().trim().min(1),
+    url: s.string().url(),
+  }),
+).min(1);
+
+function loadSites(file) {
+  const data = nc.readJSON(file);
+  if (data === undefined) throw new Error(`${file} is missing or is not JSON`);
+  const result = Sites.safeParse(data);
+  if (!result.success) throw new Error(`${file}: ${result.error.message}`);
+  return result.data;
+}
+
+module.exports = { loadSites };
+```
+
+| Code | What it does |
+| --- | --- |
+| `s.array(...).min(1)` | a list with at least one site |
+| `s.string().trim().min(1)` | a name, spaces around it removed, not empty |
+| `s.string().url()` | a full address, with `https://` |
+| `nc.readJSON(file)` | the parsed file, or `undefined` if it is missing or broken: no `try` needed |
+| `Sites.safeParse(data)` | the checked data, or every problem found: it never throws |
+
+## Use it
+
+Replace `status.js`:
+
+```js title="status.js" ins={3,7-8}
+const nc = require("@ix-xs/node-comfort");
+const { loadConfig } = require("./config");
+const { loadSites } = require("./sites");
+
+async function main() {
+  const config = loadConfig();
+  const sites = loadSites(config.SITES_FILE);
+  nc.info(`${sites.length} sites to check: ${sites.map((site) => site.name).join(", ")}`);
+}
+
+main().catch((error) => {
+  nc.error(error.message);
+  process.exitCode = 1;
+});
+```
+
+<TerminalDemo scene="project/input/loaded" />
+
+## When the file is wrong
+
+Try a broken `sites.json`: an address without `https://`, and a site without a
+name.
+
+```json title="sites.json"
+[
+  { "name": "Website", "url": "www.example.com" },
+  { "url": "https://api.example.com/health" }
+]
+```
+
+<TerminalDemo scene="project/input/broken" />
+
+Each problem gives its place: `0.url` is the `url` of the first site. Put the
+correct file back before the next page.
+
+The [schema page](/data/schema/) shows the other types and checks.

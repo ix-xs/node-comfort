@@ -6,6 +6,7 @@ import { mkdir, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { normalizeBase } from "../plugins/base-links.mjs";
+import { MOVED } from "../redirects.mjs";
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const dist = path.resolve(here, "..", "dist");
@@ -31,7 +32,9 @@ for (const page of [...SECTIONS.essentials, ...SECTIONS.data, ...SECTIONS.flow, 
   moved.set(`api/${page}.html`, `/reference/${page}/`);
 }
 
-for (const [file, to] of moved) {
+for (const [file, address] of moved) {
+  // A page that moved again since then is sent straight to where it is now.
+  const to = MOVED[address] ?? address;
   const target = `${base}${to}`;
   const html = `<!doctype html>
 <html lang="en">
