@@ -1,18 +1,19 @@
 "use strict";
 
 /**
- * Function helpers: debounce, throttle, memoize, retry with backoff,
- * timeouts, error handling without try/catch, and typed composition.
+ * Function helpers: debounce, throttle, memoize, batching, error handling
+ * without try/catch, and typed composition. Retries and timeouts are in
+ * `nc.async`.
  *
  * @example
  * const save = func.debounce(persist, 300);
- * const data = await func.retry(() => fetchJSON(url), { attempts: 5, delay: 200, backoff: 2 });
- * const [error, user] = await func.to(getUser(id));
+ * const getUser = func.memoize((id) => db.get("users", { id }), { ttl: "1m" });
+ * const safeParse = func.attempt(JSON.parse);
  */
 
 const { types } = require("node:util");
-const { TimeoutError, AbortError } = require("./errors.js");
-const { toMs, sleep: _sleep, setLongTimeout, argsKey } = require("./internal/shared.js");
+const { toMs, sleep: _sleep, argsKey } = require("./internal/shared.js");
+const { deprecate } = require("./internal/deprecate.js");
 
 /**
  * Options for `debounce()`.
@@ -55,19 +56,6 @@ const { toMs, sleep: _sleep, setLongTimeout, argsKey } = require("./internal/sha
  * A memoized function, with its `cache`, `clear()` and `delete(...args)`.
  * @template {(...args: any[]) => any} F
  * @typedef {F & { cache: Map<unknown, { value: ReturnType<F>, expires: number }>, clear(): void, delete(...args: Parameters<F>): boolean }} MemoizedFunction
- */
-
-/**
- * Options for `retry()`.
- * @typedef {object} RetryOptions
- * @property {number} [attempts] Total attempts, the first one included. Defaults to `3`.
- * @property {number | string | ((attempt: number, error: unknown) => number)} [delay] Wait before the next attempt, in ms or like `"1s"`, or a function that computes it.
- * @property {number} [backoff] Multiplies the delay after each failure: `2` gives 200, 400, 800... Defaults to `1`.
- * @property {number | string} [maxDelay] Cap for the computed delay.
- * @property {number} [jitter] Randomizes the delay, from `0` (none) to `1` (anywhere between 0 and 2x). Stops many clients from retrying in sync.
- * @property {(error: unknown, attempt: number) => boolean | Promise<boolean>} [shouldRetry] Return `false` to give up early, for example on a 4xx error.
- * @property {(error: unknown, attempt: number, delay: number) => void} [onRetry] Called before each wait, for logs or metrics.
- * @property {AbortSignal} [signal] Stops retrying. The attempt in progress isn't interrupted.
  */
 
 /**
@@ -310,84 +298,6 @@ function memoize(fn, options = {}) {
 }
 
 /**
- * Calls `fn` until it succeeds, waiting between attempts. If every attempt
- * fails, the last error is thrown.
- *
- * @example
- * const data = await func.retry(() => fetchJSON(url), {
- *   attempts: 5,
- *   delay: 200,
- *   backoff: 2, // 200, 400, 800, 1600 ms
- *   shouldRetry: (error) => !(error instanceof nc.errors.HttpError && error.status < 500),
- * });
- *
- * @template T
- * @param {(attempt: number) => T | PromiseLike<T>} fn Receives the attempt number, starting at 1.
- * @param {RetryOptions} [options]
- * @returns {Promise<Awaited<T>>}
- * @throws The last error, or an `AbortError` if the signal fires.
- */
-async function retry(fn, options = {}) {
-  const attempts = Math.max(1, options.attempts ?? 3);
-  const backoff = options.backoff ?? 1;
-  const maxDelay = options.maxDelay === undefined ? Infinity : toMs(options.maxDelay, "maxDelay");
-  const delay = typeof options.delay === "function" || options.delay === undefined ? 0 : toMs(options.delay, "delay");
-  const jitter = Math.min(1, Math.max(0, options.jitter ?? 0));
-  /** @type {unknown} */
-  let lastError;
-  for (let attempt = 1; attempt <= attempts; attempt++) {
-    if (options.signal?.aborted) throw new AbortError(undefined, { cause: options.signal.reason });
-    try {
-      return await fn(attempt);
-    } catch (error) {
-      lastError = error;
-      if (attempt >= attempts) break;
-      // A cancelled operation was stopped on purpose: trying again would undo that.
-      if (error instanceof Error && error.name === "AbortError") break;
-      if (options.shouldRetry && !(await options.shouldRetry(error, attempt))) break;
-      const base = typeof options.delay === "function" ? options.delay(attempt, error) : delay * backoff ** (attempt - 1);
-      const wait = Math.max(0, Math.round(Math.min(base, maxDelay) * (1 + jitter * (Math.random() * 2 - 1))));
-      options.onRetry?.(error, attempt, wait);
-      if (wait > 0) await _sleep(wait, options.signal);
-    }
-  }
-  throw lastError;
-}
-
-/**
- * Rejects with a `TimeoutError` if the promise takes longer than `ms`. Pass
- * a function to get an `AbortSignal` that fires when time is up, so the work
- * actually stops instead of running on in the background.
- *
- * @example
- * const res = await func.timeout(fetch(url), 5000);
- * const rows = await func.timeout(() => slowQuery(), 2000, "Database too slow");
- *
- * @template T
- * @param {PromiseLike<T> | ((signal: AbortSignal) => PromiseLike<T> | T)} promise A promise, or a function that returns one. The function gets a signal that aborts on timeout.
- * @param {number | string} ms The limit, in ms or like `"5s"`. `Infinity` means no limit.
- * @param {string} [message]
- * @returns {Promise<Awaited<T>>}
- * @throws {TimeoutError}
- */
-function timeout(promise, ms, message) {
-  const limit = toMs(ms, "timeout");
-  const controller = typeof promise === "function" ? new AbortController() : undefined;
-  const target = Promise.resolve().then(() => (typeof promise === "function" ? promise(/** @type {AbortController} */ (controller).signal) : promise));
-  if (limit === Infinity) return /** @type {Promise<Awaited<T>>} */ (target);
-  /** @type {() => void} */
-  let cancel = () => {};
-  const expired = new Promise((_, reject) => {
-    cancel = setLongTimeout(() => {
-      const error = new TimeoutError(message ?? `Operation timed out after ${limit}ms`, { timeout: limit });
-      controller?.abort(error);
-      reject(error);
-    }, limit);
-  });
-  return /** @type {Promise<Awaited<T>>} */ (Promise.race([target, expired]).finally(() => cancel()));
-}
-
-/**
  * Waits `ms`, then calls `fn` with the arguments and resolves with its result.
  *
  * @example
@@ -402,28 +312,6 @@ function timeout(promise, ms, message) {
 async function delay(fn, ms, ...args) {
   await _sleep(toMs(ms, "delay"));
   return fn(...args);
-}
-
-/**
- * Awaits a promise and gives you `[error, value]` instead of throwing, so
- * you don't need a try/catch.
- *
- * @example
- * const [error, user] = await func.to(db.users.find(id));
- * if (error) return res.status(500).send(error.message);
- *
- * @template T
- * @template [E=Error]
- * @param {PromiseLike<T> | (() => PromiseLike<T> | T)} promise A promise, or a function (sync errors are caught too).
- * @returns {Promise<[E, undefined] | [null, Awaited<T>]>}
- */
-async function to(promise) {
-  try {
-    const value = await (typeof promise === "function" ? promise() : promise);
-    return [null, /** @type {Awaited<T>} */ (value)];
-  } catch (error) {
-    return [/** @type {E} */ (error), undefined];
-  }
 }
 
 /**
@@ -447,16 +335,18 @@ function attempt(fn) {
  * Turns a callback-style function into one that returns a promise.
  *
  * @example
- * const lookup = func.promisify(dns.lookup);
- * const address = await lookup("nodejs.org");
+ * const readFile = func.promisify(fs.readFile);
+ * const text = await readFile("notes.txt", "utf8");
  *
- * @param {(...args: any[]) => void} fn
- * @returns {(...args: any[]) => Promise<any>}
+ * @template {any[]} A
+ * @template [R=any]
+ * @param {(...args: [...A, (error: any, result: R) => void]) => void} fn Its last parameter is the callback `(error, result)`.
+ * @returns {(...args: A) => Promise<R>}
  */
 function promisify(fn) {
   return /** @this {any} */ function(...args) {
     return new Promise((resolve, reject) => {
-      fn.call(this, ...args, (/** @type {unknown} */ error, /** @type {unknown} */ result) => (error ? reject(error) : resolve(result)));
+      fn.call(this, ...args, (/** @type {unknown} */ error, /** @type {R} */ result) => (error ? reject(error) : resolve(result)));
     });
   };
 }
@@ -578,6 +468,35 @@ function pipe(...fns) {
  * const shout = func.compose((s) => s + "!", (s) => s.toUpperCase());
  * shout("hi"); // "HI!"
  *
+ * @template {any[]} A
+ * @template B
+ * @template C
+ * @overload
+ * @param {(b: B) => C} f2
+ * @param {(...args: A) => B} f1
+ * @returns {(...args: A) => C}
+ */
+/**
+ * Chains functions from right to left.
+ *
+ * @template {any[]} A
+ * @template B
+ * @template C
+ * @template D
+ * @overload
+ * @param {(c: C) => D} f3
+ * @param {(b: B) => C} f2
+ * @param {(...args: A) => B} f1
+ * @returns {(...args: A) => D}
+ */
+/**
+ * Chains any number of functions from right to left.
+ *
+ * @overload
+ * @param {...((...args: any[]) => any)} fns
+ * @returns {(...args: any[]) => any}
+ */
+/**
  * @param {...((...args: any[]) => any)} fns
  * @returns {(...args: any[]) => any}
  */
@@ -593,6 +512,50 @@ function compose(...fns) {
  * const publish = func.pipeAsync(loadDraft, renderMarkdown, uploadToCDN);
  * const url = await publish(postId);
  *
+ * @template {any[]} A
+ * @template B
+ * @template C
+ * @overload
+ * @param {(...args: A) => B} f1
+ * @param {(b: Awaited<B>) => C} f2
+ * @returns {(...args: A) => Promise<Awaited<C>>}
+ */
+/**
+ * Like `pipe()`, for functions that may be async.
+ *
+ * @template {any[]} A
+ * @template B
+ * @template C
+ * @template D
+ * @overload
+ * @param {(...args: A) => B} f1
+ * @param {(b: Awaited<B>) => C} f2
+ * @param {(c: Awaited<C>) => D} f3
+ * @returns {(...args: A) => Promise<Awaited<D>>}
+ */
+/**
+ * Like `pipe()`, for functions that may be async.
+ *
+ * @template {any[]} A
+ * @template B
+ * @template C
+ * @template D
+ * @template E
+ * @overload
+ * @param {(...args: A) => B} f1
+ * @param {(b: Awaited<B>) => C} f2
+ * @param {(c: Awaited<C>) => D} f3
+ * @param {(d: Awaited<D>) => E} f4
+ * @returns {(...args: A) => Promise<Awaited<E>>}
+ */
+/**
+ * Chains any number of functions, sync or async, from left to right.
+ *
+ * @overload
+ * @param {...((arg: any) => any)} fns
+ * @returns {(...args: any[]) => Promise<any>}
+ */
+/**
  * @param {...((...args: any[]) => any)} fns
  * @returns {(...args: any[]) => Promise<any>}
  */
@@ -816,6 +779,24 @@ function identity(value) {
   return value;
 }
 
+/**
+ * @deprecated Use `nc.async.retry()`. It will be removed in 4.0.
+ * @type {typeof import("./Async").retry}
+ */
+const retry = require("./Async.js").retry;
+
+/**
+ * @deprecated Use `nc.async.timeout()`. It will be removed in 4.0.
+ * @type {typeof import("./Async").timeout}
+ */
+const timeout = require("./Async.js").timeout;
+
+/**
+ * @deprecated Use `nc.async.to()`. It will be removed in 4.0.
+ * @type {typeof import("./Async").to}
+ */
+const to = require("./Async.js").to;
+
 module.exports = {
   debounce,
   throttle,
@@ -840,3 +821,9 @@ module.exports = {
   noop,
   identity,
 };
+
+deprecate(module.exports, "nc.func", {
+  retry: { use: "nc.async.retry()" },
+  timeout: { use: "nc.async.timeout()" },
+  to: { use: "nc.async.to()" },
+});

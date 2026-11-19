@@ -166,11 +166,17 @@ const _argon2 = (algorithm, password, salt, keylen, cost) =>
  */
 
 /**
+ * The hash behind TOTP codes, in capitals as in `otpauth://` links, or in
+ * lowercase as Node.js writes them.
+ * @typedef {"SHA1" | "SHA256" | "SHA512" | "sha1" | "sha256" | "sha512"} TOTPAlgorithm
+ */
+
+/**
  * Options for `totp()` and `verifyTOTP()`.
  * @typedef {object} TOTPOptions
  * @property {number} [digits] Defaults to `6`.
  * @property {number} [period] How long a code lasts, in seconds. Defaults to `30`.
- * @property {"SHA1" | "SHA256" | "SHA512"} [algorithm] Defaults to `"SHA1"`, which is what authenticator apps expect.
+ * @property {TOTPAlgorithm} [algorithm] Defaults to `"SHA1"`, which is what authenticator apps expect.
  * @property {Date | number} [time] Compute the code for this moment, as a `Date` or Unix milliseconds. Defaults to now.
  */
 
@@ -179,7 +185,7 @@ const _argon2 = (algorithm, password, salt, keylen, cost) =>
  * @typedef {object} VerifyTOTPOptions
  * @property {number} [digits] Defaults to `6`.
  * @property {number} [period] How long a code lasts, in seconds. Defaults to `30`.
- * @property {"SHA1" | "SHA256" | "SHA512"} [algorithm] Defaults to `"SHA1"`, which is what authenticator apps expect.
+ * @property {TOTPAlgorithm} [algorithm] Defaults to `"SHA1"`, which is what authenticator apps expect.
  * @property {Date | number} [time] Check the code at this moment, as a `Date` or Unix milliseconds. Defaults to now.
  * @property {number} [window] How many periods before and after now are accepted, from `0` to `10`. Defaults to `1`.
  * @property {number} [after] The time step of the last code you accepted, from `totpStep()`. Codes from that step or an earlier one are refused, so a code can't be used twice.
@@ -192,7 +198,7 @@ const _argon2 = (algorithm, password, salt, keylen, cost) =>
  * @property {string} [issuer] Your app's name.
  * @property {number} [digits] Defaults to `6`.
  * @property {number} [period] Defaults to `30`.
- * @property {"SHA1" | "SHA256" | "SHA512"} [algorithm] Defaults to `"SHA1"`.
+ * @property {TOTPAlgorithm} [algorithm] Defaults to `"SHA1"`.
  */
 
 const _BASE32 = "ABCDEFGHIJKLMNOPQRSTUVWXYZ234567";
@@ -1325,7 +1331,7 @@ function totpURI(secret, options) {
   const label = options.issuer ? `${encodeURIComponent(options.issuer)}:${encodeURIComponent(options.label)}` : encodeURIComponent(options.label);
   const params = new URLSearchParams({ secret: secret.replace(/\s/g, "").toUpperCase() });
   if (options.issuer) params.set("issuer", options.issuer);
-  params.set("algorithm", options.algorithm ?? "SHA1");
+  params.set("algorithm", (options.algorithm ?? "SHA1").toUpperCase());
   params.set("digits", String(options.digits ?? 6));
   params.set("period", String(options.period ?? 30));
   return `otpauth://totp/${label}?${params.toString().replace(/\+/g, "%20")}`;

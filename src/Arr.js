@@ -51,12 +51,12 @@
 /**
  * Options for `toSentence()`.
  * @typedef {object} ToSentenceOptions
- * @property {string} [locale] Language of the joining word. Defaults to `"en"`.
+ * @property {string} [locale] Language of the joining word. Defaults to the one set with `nc.config.set()`, `"en"` out of the box.
  * @property {"conjunction" | "disjunction" | "unit"} [type] `"conjunction"` joins with "and", `"disjunction"` with "or", `"unit"` with commas only. Defaults to `"conjunction"`.
  * @property {"long" | "short" | "narrow"} [style] Defaults to `"long"`.
  */
 
-const { intl, preciseSum } = require("./internal/shared.js");
+const { intl, preciseSum, config: _config } = require("./internal/shared.js");
 
 /**
  * @param {unknown} iteratee
@@ -194,15 +194,17 @@ function last(array, n) {
  *
  * @example
  * arr.paginate(products, 2, 20);
+ * arr.paginate(products, { page: 2, perPage: 20 }); // the same
  * // { items: [...], page: 2, perPage: 20, total: 95, pages: 5, hasPrev: true, hasNext: true }
  *
  * @template T
  * @param {readonly T[]} array
- * @param {number} [page=1]
+ * @param {number | { page?: number, perPage?: number }} [page=1] The page, or `{ page, perPage }`.
  * @param {number} [perPage=20]
  * @returns {Page<T>}
  */
 function paginate(array, page = 1, perPage = 20) {
+  if (page !== null && typeof page === "object") ({ page = 1, perPage = 20 } = page);
   const size = Math.max(1, Math.floor(perPage));
   const pages = Math.max(1, Math.ceil(array.length / size));
   const current = Math.min(Math.max(1, Math.floor(page) || 1), pages);
@@ -298,11 +300,12 @@ function keyBy(array, iteratee) {
  * arr.toMap(users, "id", (u) => u.name);  // Map<number, string>
  *
  * @template T
+ * @template {Iteratee<T>} K
  * @template [V=T]
  * @param {readonly T[]} array
- * @param {Iteratee<T>} key
+ * @param {K} key
  * @param {(item: T, index: number) => V} [value] The value to store. Defaults to the item.
- * @returns {Map<any, V>}
+ * @returns {Map<K extends (item: T, index: number) => infer R ? R : K extends keyof T ? T[K] : unknown, V>}
  */
 function toMap(array, key, value) {
   const keyFn = _fn(key);
@@ -340,16 +343,18 @@ function countBy(array, iteratee) {
  *
  * @example
  * arr.count(users, (u) => u.active);
+ * arr.count(users, "active"); // the same
  *
  * @template T
  * @param {readonly T[]} array
- * @param {(item: T, index: number) => unknown} predicate
+ * @param {Iteratee<T>} predicate A function, or a property name (its value is tested for truthiness).
  * @returns {number}
  */
 function count(array, predicate) {
+  const test = _fn(predicate);
   let total = 0;
   array.forEach((item, i) => {
-    if (predicate(item, i)) total++;
+    if (test(item, i)) total++;
   });
   return total;
 }
@@ -359,18 +364,20 @@ function count(array, predicate) {
  *
  * @example
  * const [adults, minors] = arr.partition(people, (p) => p.age >= 18);
+ * const [active, inactive] = arr.partition(users, "active");
  *
  * @template T
  * @param {readonly T[]} array
- * @param {(item: T, index: number) => unknown} predicate
+ * @param {Iteratee<T>} predicate A function, or a property name (its value is tested for truthiness).
  * @returns {[T[], T[]]}
  */
 function partition(array, predicate) {
+  const test = _fn(predicate);
   /** @type {T[]} */
   const pass = [];
   /** @type {T[]} */
   const fail = [];
-  array.forEach((item, i) => (predicate(item, i) ? pass : fail).push(item));
+  array.forEach((item, i) => (test(item, i) ? pass : fail).push(item));
   return [pass, fail];
 }
 
@@ -633,14 +640,16 @@ function without(array, ...values) {
  *
  * @example
  * arr.remove([1, 2, 3, 4], (n) => n % 2 === 0); // [1, 3]
+ * arr.remove(users, "banned");
  *
  * @template T
  * @param {readonly T[]} array
- * @param {(item: T, index: number) => unknown} predicate
+ * @param {Iteratee<T>} predicate A function, or a property name (its value is tested for truthiness).
  * @returns {T[]}
  */
 function remove(array, predicate) {
-  return array.filter((item, i) => !predicate(item, i));
+  const test = _fn(predicate);
+  return array.filter((item, i) => !test(item, i));
 }
 
 /**
@@ -979,15 +988,17 @@ function xor(...arrays) {
  *
  * @example
  * arr.takeWhile([1, 2, 5, 1], (n) => n < 3); // [1, 2]
+ * arr.takeWhile(steps, "done");
  *
  * @template T
  * @param {readonly T[]} array
- * @param {(item: T, index: number) => unknown} predicate
+ * @param {Iteratee<T>} predicate A function, or a property name (its value is tested for truthiness).
  * @returns {T[]}
  */
 function takeWhile(array, predicate) {
+  const test = _fn(predicate);
   let end = 0;
-  while (end < array.length && predicate(array[end], end)) end++;
+  while (end < array.length && test(array[end], end)) end++;
   return array.slice(0, end);
 }
 
@@ -996,15 +1007,17 @@ function takeWhile(array, predicate) {
  *
  * @example
  * arr.dropWhile([1, 2, 5, 1], (n) => n < 3); // [5, 1]
+ * arr.dropWhile(lines, "isHeader");
  *
  * @template T
  * @param {readonly T[]} array
- * @param {(item: T, index: number) => unknown} predicate
+ * @param {Iteratee<T>} predicate A function, or a property name (its value is tested for truthiness).
  * @returns {T[]}
  */
 function dropWhile(array, predicate) {
+  const test = _fn(predicate);
   let start = 0;
-  while (start < array.length && predicate(array[start], start)) start++;
+  while (start < array.length && test(array[start], start)) start++;
   return array.slice(start);
 }
 
@@ -1022,7 +1035,7 @@ function dropWhile(array, predicate) {
  */
 function toSentence(items, options = {}) {
   const list = Array.from(items, (item) => String(item));
-  return intl.list(options.locale ?? "en", { type: options.type ?? "conjunction", style: options.style ?? "long" }).format(list);
+  return intl.list(options.locale ?? _config.locale, { type: options.type ?? "conjunction", style: options.style ?? "long" }).format(list);
 }
 
 module.exports = {

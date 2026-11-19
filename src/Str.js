@@ -69,7 +69,7 @@
 /**
  * Options for `plural()`.
  * @typedef {object} PluralOptions
- * @property {string} [locale] Language whose plural rules apply. Defaults to `"en"`.
+ * @property {string} [locale] Language whose plural rules apply. Defaults to the one set with `nc.config.set()`, `"en"` out of the box.
  * @property {boolean} [includeCount] Put the formatted count before the word. Defaults to `true`.
  * @property {boolean} [ordinal] Use ordinal rules (1st, 2nd, 3rd).
  */
@@ -992,7 +992,7 @@ function initials(input, max = 2) {
  * @returns {string}
  */
 function plural(value, forms, options = {}) {
-  const locale = options.locale ?? "en";
+  const locale = options.locale ?? shared.config.locale;
   if (value === 0 && forms.zero !== undefined) return forms.zero;
   const category = intl.plural(locale, options.ordinal ? ORDINAL : undefined).select(value);
   const word = forms[category] ?? forms.other;

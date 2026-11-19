@@ -747,7 +747,7 @@ class StringSchema extends Schema {
    * @returns {this}
    */
   email(message = "Invalid email address") {
-    const { isEmail } = require("./Checker.js");
+    const { email: isEmail } = require("./Is.js");
     return this._rule(isEmail, "invalid_string", message, { validation: "email" }, { format: "email" });
   }
 
@@ -760,7 +760,7 @@ class StringSchema extends Schema {
    */
   url(options = "Invalid URL") {
     const opts = typeof options === "object" ? options : { message: options };
-    const { isURL } = require("./Checker.js");
+    const { url: isURL } = require("./Is.js");
     return this._rule((v) => !_URL_UNSAFE.test(v) && isURL(v, { protocols: opts.protocols }), "invalid_string", opts.message ?? "Invalid URL", { validation: "url" }, { format: "uri" });
   }
 
@@ -770,7 +770,7 @@ class StringSchema extends Schema {
    * @returns {this}
    */
   uuid(message = "Invalid UUID") {
-    const { isUUID } = require("./Checker.js");
+    const { uuid: isUUID } = require("./Is.js");
     return this._rule((v) => isUUID(v), "invalid_string", message, { validation: "uuid" }, { format: "uuid" });
   }
 
@@ -782,7 +782,7 @@ class StringSchema extends Schema {
    */
   ip(versionOrMessage, message = "Invalid IP address") {
     const version = typeof versionOrMessage === "number" ? versionOrMessage : undefined;
-    const { isIP } = require("./Checker.js");
+    const { ip: isIP } = require("./Is.js");
     return this._rule((v) => isIP(v, version), "invalid_string", typeof versionOrMessage === "number" ? message : versionOrMessage ?? message, { validation: "ip" }, version === 4 ? { format: "ipv4" } : version === 6 ? { format: "ipv6" } : undefined);
   }
 
@@ -792,7 +792,7 @@ class StringSchema extends Schema {
    * @returns {this}
    */
   datetime(message = "Invalid ISO date") {
-    const { isISODate } = require("./Checker.js");
+    const { isoDate: isISODate } = require("./Is.js");
     return this._rule(isISODate, "invalid_string", message, { validation: "datetime" }, { format: "date-time" });
   }
 
@@ -878,7 +878,7 @@ class StringSchema extends Schema {
    * @returns {this}
    */
   slug(message = "Invalid slug") {
-    const { isSlug } = require("./Checker.js");
+    const { slug: isSlug } = require("./Is.js");
     return this._rule(isSlug, "invalid_string", message, { validation: "slug" }, { pattern: "^[a-z0-9]+(?:-[a-z0-9]+)*$" });
   }
 
@@ -888,7 +888,7 @@ class StringSchema extends Schema {
    * @returns {this}
    */
   hex(message = "Invalid hexadecimal string") {
-    const { isHex } = require("./Checker.js");
+    const { hex: isHex } = require("./Is.js");
     return this._rule((v) => isHex(v), "invalid_string", message, { validation: "hex" }, { pattern: "^[0-9a-fA-F]+$" });
   }
 
@@ -898,7 +898,7 @@ class StringSchema extends Schema {
    * @returns {this}
    */
   base64(message = "Invalid Base64 string") {
-    const { isBase64 } = require("./Checker.js");
+    const { base64: isBase64 } = require("./Is.js");
     return this._rule((v) => isBase64(v), "invalid_string", message, { validation: "base64" }, { contentEncoding: "base64" });
   }
 
@@ -908,7 +908,7 @@ class StringSchema extends Schema {
    * @returns {this}
    */
   ulid(message = "Invalid ULID") {
-    const { isULID } = require("./Checker.js");
+    const { ulid: isULID } = require("./Is.js");
     return this._rule(isULID, "invalid_string", message, { validation: "ulid" });
   }
 
@@ -918,7 +918,7 @@ class StringSchema extends Schema {
    * @returns {this}
    */
   semver(message = "Invalid version") {
-    const { isSemver } = require("./Checker.js");
+    const { semver: isSemver } = require("./Is.js");
     return this._rule(isSemver, "invalid_string", message, { validation: "semver" });
   }
 
@@ -928,7 +928,7 @@ class StringSchema extends Schema {
    * @returns {this}
    */
   hostname(message = "Invalid host name") {
-    const { isHostname } = require("./Checker.js");
+    const { hostname: isHostname } = require("./Is.js");
     return this._rule((v) => isHostname(v), "invalid_string", message, { validation: "hostname" }, { format: "hostname" });
   }
 
@@ -2224,7 +2224,7 @@ function instanceOf(ctor, message = `Expected an instance of ${ctor.name}`) {
  * A schema from any test, usually a type guard.
  *
  * @example
- * const Color = s.custom(nc.isHexColor, "Expected a hex color");
+ * const Color = s.custom(nc.is.hexColor, "Expected a hex color");
  *
  * @template [T=unknown]
  * @param {((value: unknown) => value is T) | ((value: unknown) => boolean)} test

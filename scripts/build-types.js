@@ -6,10 +6,12 @@
  * 1. Compiles the JSDoc of every `src/*.js` module into `types/src/*.d.ts`
  *    (TypeScript keeps every description, `@param`, `@example`, ...).
  * 2. Generates `types/index.d.ts` from the real runtime exports of `index.js`.
- *    Every public value and every public type becomes a genuine named export
- *    (`export import name = _Module.name`), which is what gives editors:
- *    hover documentation, completions after `nc.`, and auto-imports of
- *    `nc`, `nodeComfort` or any helper straight from the package root.
+ *    Every namespace and every public type becomes a genuine named export
+ *    (`export import name = _Module`), which is what gives editors: hover
+ *    documentation, completions after `nc.`, and auto-imports of any
+ *    namespace straight from the package root. The deprecated names of the
+ *    root (`nc.info`, `nc.SQLite`...) are typed too, with a `@deprecated`
+ *    note that tells what to use instead, so editors strike them through.
  * 3. Fails loudly when runtime exports and typed exports drift apart, or when
  *    two modules export a type with the same name.
  *
@@ -54,6 +56,7 @@ if (diagnostics.length) {
 // map runtime exports
 
 const api = require(path.join(ROOT, "index.js"));
+const { peek, aliasesOf } = require(path.join(SRC, "internal", "deprecate.js"));
 const modules = fs
   .readdirSync(SRC)
   .filter((file) => file.endsWith(".js"))
@@ -63,26 +66,52 @@ const modules = fs
   });
 
 const byValue = new Map(modules.map((m) => [m.value, m]));
-const SELF = new Set(["nc", "nodeComfort"]);
 
-/** @type {Array<{ key: string, kind: "module"|"member"|"self", module?: typeof modules[number] }>} */
+/**
+ * The names a module has, deprecated ones included.
+ * @param {typeof modules[number]} m
+ * @returns {string[]}
+ */
+const namesOf = (m) => (m.value && (typeof m.value === "object" || typeof m.value === "function") ? Object.getOwnPropertyNames(m.value) : []);
+
+/** @type {Array<{ key: string, kind: "module"|"member"|"self", module?: typeof modules[number], member?: string, deprecated?: string }>} */
 const entries = [];
 
+// The namespaces: the only enumerable keys of the root.
 for (const key of Object.keys(api)) {
-  const value = api[key];
-  if (SELF.has(key)) {
-    if (value !== api) fail(`"${key}" must reference the package itself.`);
-    entries.push({ key, kind: "self" });
+  const whole = byValue.get(api[key]);
+  if (!whole) fail(`nc.${key} must be a whole src/ module: the root only holds namespaces.`);
+  entries.push({ key, kind: "module", module: whole });
+}
+
+// The deprecated names, hidden from listings. Read with peek(), so the build doesn't warn.
+for (const { name, use } of aliasesOf(api)) {
+  const deprecated = `Use ${use}. It will be removed in 4.0.`;
+  const value = peek(api, name);
+  if (value === api) {
+    entries.push({ key: name, kind: "self", deprecated });
     continue;
   }
   const whole = byValue.get(value);
   if (whole) {
-    entries.push({ key, kind: "module", module: whole });
+    entries.push({ key: name, kind: "module", module: whole, deprecated });
     continue;
   }
-  const owner = modules.find((m) => m.value && typeof m.value === "object" && m.value[key] === value);
-  if (!owner) fail(`Cannot find the module that exports "${key}". Export it from a src/ module.`);
-  entries.push({ key, kind: "member", module: owner });
+  // The same name in a module first (nc.isEmail is checker.isEmail), else any name with the same value.
+  let owner = modules.find((m) => namesOf(m).includes(name) && peek(m.value, name) === value);
+  let member = name;
+  if (!owner) {
+    for (const m of modules) {
+      const found = namesOf(m).find((n) => !["length", "name", "prototype"].includes(n) && peek(m.value, n) === value);
+      if (found) {
+        owner = m;
+        member = found;
+        break;
+      }
+    }
+  }
+  if (!owner) fail(`Cannot find the module that exports the value of the deprecated "nc.${name}".`);
+  entries.push({ key: name, kind: "member", module: owner, member, deprecated });
 }
 
 // collect exported type names
@@ -143,11 +172,12 @@ lines.push(` * **${pkg.name}**: ${pkg.description}`);
 lines.push(" *");
 lines.push(" * @example");
 lines.push(' * const nc = require("@ix-xs/node-comfort");');
-lines.push(' * nc.info("Server ready");');
+lines.push(' * nc.logger.info("Server ready");');
 lines.push(' * nc.str.slugify("Héllo World"); // "hello-world"');
 lines.push(" *");
 lines.push(" * @example");
-lines.push(' * import { nc, slugify, isEmail } from "@ix-xs/node-comfort";');
+lines.push(' * import nc from "@ix-xs/node-comfort";');
+lines.push(' * import { str, is } from "@ix-xs/node-comfort";');
 lines.push(" */");
 lines.push("declare namespace nodeComfort {");
 
@@ -166,15 +196,19 @@ const overview = (name) => {
   return match[1].split("\n").map((line) => `  ${line.trimStart().startsWith("*") ? ` ${line.trimStart()}` : line.trimStart()}`);
 };
 
-section("Namespaces and classes");
-for (const e of entries.filter((x) => x.kind === "module")) {
-  lines.push(...overview(e.module.name));
-  lines.push(`  export import ${e.key} = ${e.module.alias};`);
+/** @param {string} text */
+const deprecatedDoc = (text) => `  /** @deprecated ${text.split("*/").join("*\\/")} */`;
+
+section("Namespaces");
+for (const e of entries.filter((x) => x.kind === "module" && !x.deprecated)) {
+  lines.push(...overview(/** @type {any} */ (e.module).name));
+  lines.push(`  export import ${e.key} = ${/** @type {any} */ (e.module).alias};`);
 }
 
-section("Flat helpers (logger, fs, checker, utils)");
-for (const e of entries.filter((x) => x.kind === "member")) {
-  lines.push(`  export import ${e.key} = ${e.module.alias}.${e.key};`);
+section("Deprecated names of node-comfort 2, removed in 4.0");
+for (const e of entries.filter((x) => x.deprecated && x.kind !== "self")) {
+  lines.push(deprecatedDoc(/** @type {string} */ (e.deprecated)));
+  lines.push(`  export import ${e.key} = ${/** @type {any} */ (e.module).alias}${e.kind === "member" ? `.${e.member}` : ""};`);
 }
 
 section("Types");
@@ -182,14 +216,11 @@ for (const [name, owner] of [...typeOwners].sort(([a], [b]) => a.localeCompare(b
   lines.push(`  export import ${name} = ${aliasOf(owner)}.${name};`);
 }
 
-section("Self references");
-lines.push("  /**");
-lines.push("   * The whole toolkit. Lets you write `const { nc } = require(\"@ix-xs/node-comfort\")`");
-lines.push("   * or `import { nc } from \"@ix-xs/node-comfort\"`.");
-lines.push("   */");
-lines.push('  export const nc: typeof import("./index.js");');
-lines.push("  /** The whole toolkit (same object as `nc`). */");
-lines.push('  export const nodeComfort: typeof import("./index.js");');
+section("Deprecated self references");
+for (const e of entries.filter((x) => x.kind === "self")) {
+  lines.push(deprecatedDoc(/** @type {string} */ (e.deprecated)));
+  lines.push(`  export const ${e.key}: typeof import("./index.js");`);
+}
 lines.push("}");
 lines.push("");
 lines.push("export = nodeComfort;");
@@ -213,11 +244,11 @@ if (finalDiagnostics.length) {
 }
 
 const counts = {
-  namespaces: entries.filter((e) => e.kind === "module").length,
-  helpers: entries.filter((e) => e.kind === "member").length,
+  namespaces: entries.filter((e) => !e.deprecated).length,
+  deprecated: entries.filter((e) => e.deprecated).length,
   types: typeOwners.size,
 };
 console.log(
-  `[build-types] OK with TypeScript ${ts.version}: ${counts.namespaces} namespaces/classes, ` +
-    `${counts.helpers} flat helpers, ${counts.types} public types.`,
+  `[build-types] OK with TypeScript ${ts.version}: ${counts.namespaces} namespaces, ` +
+    `${counts.deprecated} deprecated names, ${counts.types} public types.`,
 );

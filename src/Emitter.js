@@ -7,7 +7,7 @@
  * events with `for await`.
  *
  * @example
- * const chat = new nc.Emitter<{ message: [text: string, from: string]; close: [] }>();
+ * const chat = nc.emitter.create<{ message: [text: string, from: string]; close: [] }>();
  * const off = chat.on("message", (text, from) => console.log(`${from}: ${text}`));
  * chat.emit("message", "hello", "ada");
  * off();
@@ -33,7 +33,7 @@ const { toMs, setLongTimeout, disposable } = require("./internal/shared.js");
  * Options for `waitFor()`.
  * @template {any[]} A
  * @typedef {object} WaitForOptions
- * @property {number | string} [timeout] Reject with a `TimeoutError` after this long.
+ * @property {number | string | false} [timeout] Reject with a `TimeoutError` after this long. `false` or `Infinity` means no limit, the default.
  * @property {AbortSignal} [signal] Reject with an `AbortError` when aborted.
  * @property {(...args: A) => boolean} [filter] Only resolve for events that pass this test.
  */
@@ -60,6 +60,21 @@ class Emitter {
   #listeners = new Map();
   /** @type {readonly _StoredListener[]} */
   #any = NONE;
+
+  /**
+   * Creates an emitter. Same as `new Emitter()`, and as `nc.emitter.create()`.
+   *
+   * @example
+   * const Emitter = require("@ix-xs/node-comfort/emitter");
+   * const events = Emitter.create();
+   * const chat = Emitter.create<{ message: [text: string] }>(); // TypeScript
+   *
+   * @template {EventMap} [E=EventMap]
+   * @returns {Emitter<E>}
+   */
+  static create() {
+    return new Emitter();
+  }
 
   /**
    * @param {keyof Events} event
@@ -140,7 +155,7 @@ class Emitter {
    * logging.
    *
    * @example
-   * emitter.onAny((event, ...args) => nc.debug(event, args));
+   * emitter.onAny((event, ...args) => nc.logger.debug(event, args));
    *
    * @param {(event: keyof Events & string, ...args: any[]) => unknown} listener
    * @returns {(() => void) & Disposable} Removes the listener. With `using`, at the end of the block.
@@ -222,7 +237,7 @@ class Emitter {
    */
   waitFor(event, options = {}) {
     return new Promise((resolve, reject) => {
-      const limit = options.timeout === undefined ? undefined : toMs(options.timeout, "timeout");
+      const limit = options.timeout === undefined || options.timeout === false ? undefined : toMs(options.timeout, "timeout");
       /** @type {() => void} */
       let cancelTimer = () => {};
       const cleanup = () => {

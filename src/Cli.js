@@ -22,6 +22,7 @@
 const { parseArgs } = require("node:util");
 const color = require("./Color.js");
 const { AbortError } = require("./errors.js");
+const { toMs } = require("./internal/shared.js");
 
 /**
  * Border styles for `table()` and `box()`.
@@ -64,7 +65,7 @@ const { AbortError } = require("./errors.js");
  * Options for `spinner()`.
  * @typedef {object} SpinnerOptions
  * @property {string[]} [frames] Animation frames. Defaults to braille dots.
- * @property {number} [interval] Milliseconds per frame. Defaults to `80`.
+ * @property {number | string} [interval] Time per frame, in ms or like `"80ms"`. Defaults to `80`.
  * @property {string} [color] A style name or hex code. Defaults to `"cyan"`.
  * @property {NodeJS.WriteStream} [stream] Defaults to stderr, which keeps stdout clean for data.
  */
@@ -120,6 +121,7 @@ const { AbortError } = require("./errors.js");
  * @property {(answer: string) => true | string | Promise<true | string>} [validate] Return `true` to accept, or a message to ask again.
  * @property {NodeJS.ReadableStream} [input] Defaults to stdin.
  * @property {NodeJS.WritableStream} [output] Defaults to stdout.
+ * @property {AbortSignal} [signal] Stops waiting for the answer: the promise rejects with an `AbortError`.
  */
 
 /**
@@ -128,6 +130,7 @@ const { AbortError } = require("./errors.js");
  * @property {boolean} [default] The answer when the user just presses Enter. Defaults to `false`.
  * @property {NodeJS.ReadableStream} [input] Defaults to stdin.
  * @property {NodeJS.WritableStream} [output] Defaults to stdout.
+ * @property {AbortSignal} [signal] Stops waiting for the answer: the promise rejects with an `AbortError`.
  */
 
 /**
@@ -145,6 +148,7 @@ const { AbortError } = require("./errors.js");
  * @property {number} [min] `multiselect()` only: minimum number of choices.
  * @property {NodeJS.ReadStream} [input] Defaults to stdin.
  * @property {NodeJS.WriteStream} [output] Defaults to stdout.
+ * @property {AbortSignal} [signal] Stops waiting for the answer: the promise rejects with an `AbortError`.
  */
 
 /**
@@ -198,9 +202,11 @@ const { AbortError } = require("./errors.js");
  */
 
 /**
- * Options for `spin()`: the spinner's, plus what to say at the end.
+ * Options for `spin()`: the spinner's, plus what to say at the end. `signal`
+ * stops waiting for the work (the spinner fails, the promise rejects with an
+ * `AbortError`); the work itself only stops if it listens to the signal too.
  * @template T
- * @typedef {SpinnerOptions & { success?: string | ((result: T) => string), fail?: string | ((error: unknown) => string) }} SpinOptions
+ * @typedef {SpinnerOptions & { success?: string | ((result: T) => string), fail?: string | ((error: unknown) => string), signal?: AbortSignal }} SpinOptions
  */
 
 /**
@@ -581,7 +587,7 @@ function spinner(text = "", options = {}) {
       _restoreCursorOnExit(stream);
       stream.write(HIDE_CURSOR);
       render();
-      timer = setInterval(render, options.interval ?? 80);
+      timer = setInterval(render, options.interval === undefined ? 80 : toMs(options.interval, "interval"));
       return self;
     },
     stop: () => finish("", undefined),
@@ -625,9 +631,12 @@ function spinner(text = "", options = {}) {
  * @returns {Promise<T>}
  */
 async function spin(text, task, options = {}) {
+  const signal = options.signal;
+  if (signal?.aborted) throw _aborted(signal);
   const current = spinner(text, options).start();
   try {
-    const result = await (typeof task === "function" ? task(current) : task);
+    const work = typeof task === "function" ? task(current) : task;
+    const result = await (signal ? _untilAbort(Promise.resolve(work), signal) : work);
     current.succeed(typeof options.success === "function" ? options.success(result) : options.success);
     return result;
   } catch (error) {
@@ -747,19 +756,63 @@ function progress(options) {
 }
 
 /**
+ * @param {AbortSignal} signal
+ * @returns {AbortError}
+ */
+const _aborted = (signal) => new AbortError(undefined, { cause: signal.reason });
+
+/** The input ended (a pipe, Ctrl+D) before the answer came. */
+const _inputClosed = () => new AbortError("Input closed before an answer was given", { code: "ERR_INPUT_CLOSED" });
+
+/**
+ * Rejects with an `AbortError` as soon as the signal fires.
+ * @template T
+ * @param {Promise<T>} promise
+ * @param {AbortSignal} signal
+ * @returns {Promise<T>}
+ */
+const _untilAbort = (promise, signal) =>
+  new Promise((resolve, reject) => {
+    const onAbort = () => reject(_aborted(signal));
+    signal.addEventListener("abort", onAbort, { once: true });
+    promise.then(resolve, reject).finally(() => signal.removeEventListener("abort", onAbort));
+  });
+
+/**
  * @param {string} question
  * @param {NodeJS.ReadableStream} input
  * @param {NodeJS.WritableStream} output
+ * @param {AbortSignal} [signal]
  * @returns {Promise<string>}
  */
-const _ask = (question, input, output) =>
+const _ask = (question, input, output, signal) =>
   new Promise((resolve, reject) => {
+    if (signal?.aborted) return reject(_aborted(signal));
     output.write(question);
     const reader = _reader(input);
     const buffered = reader.lines.shift();
     if (buffered !== undefined) return resolve(buffered);
-    if (reader.closed) return reject(new Error("Input closed before an answer was given"));
-    reader.waiting.push({ resolve, reject });
+    if (reader.closed) return reject(_inputClosed());
+    const waiter = { resolve, reject };
+    if (signal) {
+      // Aborted: this answer is no longer awaited, the next line goes to the next question.
+      const onAbort = () => {
+        const at = reader.waiting.indexOf(waiter);
+        if (at !== -1) reader.waiting.splice(at, 1);
+        if (!reader.waiting.length) reader.rl.pause();
+        reject(_aborted(signal));
+      };
+      signal.addEventListener("abort", onAbort, { once: true });
+      waiter.resolve = (line) => {
+        signal.removeEventListener("abort", onAbort);
+        resolve(line);
+      };
+      waiter.reject = (error) => {
+        signal.removeEventListener("abort", onAbort);
+        reject(error);
+      };
+    }
+    reader.waiting.push(waiter);
     reader.rl.resume();
   });
 
@@ -790,7 +843,7 @@ const _reader = (input) => {
   });
   rl.on("close", () => {
     reader.closed = true;
-    for (const pending of reader.waiting.splice(0)) pending.reject(new Error("Input closed before an answer was given"));
+    for (const pending of reader.waiting.splice(0)) pending.reject(_inputClosed());
   });
   _readers.set(input, reader);
   return reader;
@@ -821,6 +874,7 @@ const _releaseReader = (input) => {
  * @param {string} question
  * @param {PromptOptions} [options]
  * @returns {Promise<string>} Trimmed.
+ * @throws {AbortError} If the signal fires, or with the code `ERR_INPUT_CLOSED` if the input ends first.
  */
 async function prompt(question, options = {}) {
   const output = options.output ?? process.stdout;
@@ -828,7 +882,7 @@ async function prompt(question, options = {}) {
   const palette = color.create(color.detect(/** @type {any} */ (output)));
   const suffix = options.default !== undefined ? ` ${palette.level ? palette.gray(`(${options.default})`) : `(${options.default})`}` : "";
   for (;;) {
-    const raw = (await _ask(`${palette.level ? palette.cyan("?") : "?"} ${question}${suffix} `, input, output)).trim();
+    const raw = (await _ask(`${palette.level ? palette.cyan("?") : "?"} ${question}${suffix} `, input, output, options.signal)).trim();
     const answer = raw === "" && options.default !== undefined ? options.default : raw;
     const verdict = options.validate ? await options.validate(answer) : true;
     if (verdict === true) return answer;
@@ -843,8 +897,9 @@ async function prompt(question, options = {}) {
  * const token = await cli.password("API token?");
  *
  * @param {string} question
- * @param {{ mask?: string, input?: NodeJS.ReadStream, output?: NodeJS.WriteStream }} [options] `mask: ""` shows nothing at all.
+ * @param {{ mask?: string, input?: NodeJS.ReadStream, output?: NodeJS.WriteStream, signal?: AbortSignal }} [options] `mask: ""` shows nothing at all. `signal` stops waiting for the answer.
  * @returns {Promise<string>}
+ * @throws {AbortError} On Ctrl+C, if the signal fires, or with the code `ERR_INPUT_CLOSED` if the input ends first.
  */
 function password(question, options = {}) {
   const input = options.input ?? process.stdin;
@@ -852,7 +907,9 @@ function password(question, options = {}) {
   const mask = options.mask ?? "*";
   const palette = color.create(color.detect(output));
   const label = `${palette.level ? palette.cyan("?") : "?"} ${question} `;
-  if (!input.isTTY || typeof input.setRawMode !== "function") return _ask(label, input, output).then((a) => a.replace(/\r?\n$/, ""));
+  const signal = options.signal;
+  if (!input.isTTY || typeof input.setRawMode !== "function") return _ask(label, input, output, signal).then((a) => a.replace(/\r?\n$/, ""));
+  if (signal?.aborted) return Promise.reject(_aborted(signal));
   return new Promise((resolve, reject) => {
     let value = "";
     output.write(label);
@@ -895,11 +952,18 @@ function password(question, options = {}) {
         if (mask) output.write(mask);
       }
     };
+    const onAbort = () => {
+      cleanup();
+      output.write("\n");
+      reject(_aborted(/** @type {AbortSignal} */ (signal)));
+    };
     const cleanup = () => {
       input.off("data", onData);
+      signal?.removeEventListener("abort", onAbort);
       input.setRawMode(false);
       input.pause();
     };
+    signal?.addEventListener("abort", onAbort, { once: true });
     input.on("data", onData);
   });
 }
@@ -922,7 +986,7 @@ async function confirm(question, options = {}) {
   const palette = color.create(color.detect(/** @type {any} */ (output)));
   const hint = palette.level ? palette.gray(def ? "(Y/n)" : "(y/N)") : def ? "(Y/n)" : "(y/N)";
   for (;;) {
-    const answer = (await _ask(`${palette.level ? palette.cyan("?") : "?"} ${question} ${hint} `, input, output)).trim().toLowerCase();
+    const answer = (await _ask(`${palette.level ? palette.cyan("?") : "?"} ${question} ${hint} `, input, output, options.signal)).trim().toLowerCase();
     if (answer === "") return def;
     if (["y", "yes", "o", "oui", "true", "1"].includes(answer)) return true;
     if (["n", "no", "non", "false", "0"].includes(answer)) return false;
@@ -1002,8 +1066,14 @@ const _interactiveList = (rawQuestion, items, options, multiple) =>
       const clamped = Math.max(0, Math.min(items.length - 1, target));
       cursor = usable.reduce((best, i) => (Math.abs(i - clamped) < Math.abs(best - clamped) ? i : best), cursor);
     };
+    const signal = options.signal;
+    const onAbort = () => {
+      cleanup();
+      reject(_aborted(/** @type {AbortSignal} */ (signal)));
+    };
     const cleanup = () => {
       input.off("keypress", onKey);
+      signal?.removeEventListener("abort", onAbort);
       input.setRawMode(false);
       input.pause();
       output.write(SHOW_CURSOR);
@@ -1044,6 +1114,8 @@ const _interactiveList = (rawQuestion, items, options, multiple) =>
       }
       draw();
     };
+    if (signal?.aborted) return reject(_aborted(signal));
+    signal?.addEventListener("abort", onAbort, { once: true });
     _releaseReader(input);
     require("node:readline").emitKeypressEvents(input);
     input.setRawMode(true);
@@ -1082,7 +1154,7 @@ async function select(question, choices, options = {}) {
   const output = options.output ?? process.stdout;
   output.write(_numbered(question, items));
   for (;;) {
-    const answer = (await _ask(`Choose 1-${items.length}${options.default !== undefined ? ` (${options.default + 1})` : ""}: `, input, output)).trim();
+    const answer = (await _ask(`Choose 1-${items.length}${options.default !== undefined ? ` (${options.default + 1})` : ""}: `, input, output, options.signal)).trim();
     const index = answer === "" && options.default !== undefined ? options.default : Number(answer) - 1;
     if (Number.isInteger(index) && items[index] && !items[index].disabled) return items[index].value;
     output.write("✖ Invalid choice\n");
@@ -1112,7 +1184,7 @@ async function multiselect(question, choices, options = {}) {
   const output = options.output ?? process.stdout;
   output.write(_numbered(question, items));
   for (;;) {
-    const answer = (await _ask("Choose (comma-separated numbers): ", input, output)).trim();
+    const answer = (await _ask("Choose (comma-separated numbers): ", input, output, options.signal)).trim();
     const indexes = answer === "" ? [] : answer.split(/[\s,]+/).filter(Boolean).map((n) => Number(n) - 1);
     if (indexes.every((i) => Number.isInteger(i) && items[i] && !items[i].disabled) && indexes.length >= (options.min ?? 0)) {
       return [...new Set(indexes)].sort((a, b) => a - b).map((i) => items[i].value);
@@ -1120,6 +1192,13 @@ async function multiselect(question, choices, options = {}) {
     output.write(`✖ Invalid selection${options.min ? ` (at least ${options.min})` : ""}\n`);
   }
 }
+
+/**
+ * A mistake on the command line: a `TypeError` with the code `ERR_CLI_ARGS`.
+ * @param {string} message Ready to show to the user.
+ * @returns {TypeError & { code: "ERR_CLI_ARGS" }}
+ */
+const _argsError = (message) => Object.assign(new TypeError(message), { code: /** @type {const} */ ("ERR_CLI_ARGS") });
 
 const _TRUE = ["1", "true", "yes", "on", "y"];
 const _FALSE = ["0", "false", "no", "off", "n", ""];
@@ -1161,7 +1240,7 @@ const _suggest = (word, known, prefix = "") => {
  * @param {S} schema
  * @param {ArgsOptions} [options]
  * @returns {ParsedArgs<S>}
- * @throws {TypeError} For unknown flags or commands, bad numbers, missing required flags or values not in `choices`. The message is ready to show.
+ * @throws {TypeError} For unknown flags or commands, bad numbers, missing required flags or values not in `choices`. The message is ready to show, and `error.code` is `"ERR_CLI_ARGS"`.
  */
 function args(schema, options = {}) {
   const argv = options.argv ?? process.argv.slice(2);
@@ -1231,9 +1310,9 @@ function args(schema, options = {}) {
   } catch (error) {
     const message = /** @type {Error} */ (error).message;
     const unknown = /Unknown option '(-{1,2})([^']+)'/.exec(message);
-    if (unknown) throw new TypeError(`Unknown option ${unknown[1]}${unknown[2]}${_suggest(unknown[2].replace(/^no-/, ""), Object.keys(schema), "--")}`);
+    if (unknown) throw _argsError(`Unknown option ${unknown[1]}${unknown[2]}${_suggest(unknown[2].replace(/^no-/, ""), Object.keys(schema), "--")}`);
     const missing = /Option '(?:-\w, )?--([^ ']+) <value>' argument missing/.exec(message);
-    throw new TypeError(missing ? `Option --${missing[1]} needs a value` : message.split("\n")[0]);
+    throw _argsError(missing ? `Option --${missing[1]} needs a value` : message.split("\n")[0]);
   }
 
   /** @type {Record<string, any>} */
@@ -1247,7 +1326,7 @@ function args(schema, options = {}) {
       raw = spec.multiple ? fromEnv.split(",").map((part) => part.trim()).filter(Boolean) : fromEnv;
     }
     if (raw === undefined) {
-      if (spec.required) throw new TypeError(`Missing required option --${key}${spec.env ? ` (or ${spec.env} in the environment)` : ""}`);
+      if (spec.required) throw _argsError(`Missing required option --${key}${spec.env ? ` (or ${spec.env} in the environment)` : ""}`);
       flags[key] = spec.default !== undefined ? spec.default : spec.type === "boolean" ? false : spec.multiple ? [] : undefined;
       continue;
     }
@@ -1256,14 +1335,14 @@ function args(schema, options = {}) {
       let result = value;
       if (spec.type === "number") {
         result = Number(value);
-        if (String(value).trim() === "" || !Number.isFinite(result)) throw new TypeError(`${source} expects a number, got "${value}"`);
+        if (String(value).trim() === "" || !Number.isFinite(result)) throw _argsError(`${source} expects a number, got "${value}"`);
       } else if (spec.type === "boolean" && typeof value === "string") {
         const text = value.trim().toLowerCase();
-        if (!_TRUE.includes(text) && !_FALSE.includes(text)) throw new TypeError(`${source} expects true or false, got "${value}"`);
+        if (!_TRUE.includes(text) && !_FALSE.includes(text)) throw _argsError(`${source} expects true or false, got "${value}"`);
         result = _TRUE.includes(text);
       }
       if (spec.choices && !(/** @type {readonly unknown[]} */ (spec.choices)).includes(result)) {
-        throw new TypeError(`${source} must be one of: ${spec.choices.join(", ")} (got "${value}")`);
+        throw _argsError(`${source} must be one of: ${spec.choices.join(", ")} (got "${value}")`);
       }
       return result;
     };
@@ -1276,7 +1355,7 @@ function args(schema, options = {}) {
   if (commands.length && positionals.length) {
     command = positionals[0];
     if (!commands.includes(command)) {
-      throw new TypeError(`Unknown command "${command}"${_suggest(command, commands) || `. Available: ${commands.join(", ")}`}`);
+      throw _argsError(`Unknown command "${command}"${_suggest(command, commands) || `. Available: ${commands.join(", ")}`}`);
     }
     positionals.shift();
   }

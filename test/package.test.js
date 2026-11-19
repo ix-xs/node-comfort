@@ -6,16 +6,27 @@ const path = require("node:path");
 const { pathToFileURL } = require("node:url");
 const { execFileSync } = require("node:child_process");
 const nc = require("..");
+const { peek, aliasesOf } = require("../src/internal/deprecate.js");
+
+// The helpers that 2.2 had at the top level. They stay there in 3.0, deprecated.
+const FLAT_2_2 = {
+  logger: ["log", "trace", "debug", "info", "success", "warn", "error", "fatal", "group", "groupEnd", "timeStart", "timeEnd", "table", "box", "divider", "setLevel", "getLevel", "isLevelEnabled", "configure", "setTimestamp", "setDelimiter", "createLogger"],
+  fs: ["getEnv", "createPath", "getFolder", "getFile", "getFoldersIn", "getFilesIn", "glob", "find", "findUp", "readFile", "readLines", "readJSON", "writeFile", "writeJSON", "appendFile", "createFile", "createFolder", "ensureFolder", "ensureFile", "touch", "deleteFolder", "deleteFile", "remove", "deleteFoldersIn", "deleteFilesIn", "emptyFolder", "copy", "move", "copyFoldersIn", "copyFolder", "copyFilesIn", "copyFile", "moveFoldersIn", "moveFolder", "moveFilesIn", "moveFile", "exists", "isFile", "isFolder", "stat", "fileSize", "folderSize", "hashFile", "tempFolder", "sanitizeFilename", "watch"],
+  checker: ["isArray", "isNumber", "isFinite", "isInteger", "isSafeInteger", "isFloat", "isPositive", "isNegative", "isBoolean", "isString", "isSymbol", "isBigInt", "isUndefined", "isNull", "isNil", "isDefined", "isPrimitive", "isFunction", "isAsyncFunction", "isGeneratorFunction", "isGenerator", "isClass", "isObject", "isPlainObject", "isPromise", "isRegExp", "isDate", "isValidDate", "isMap", "isSet", "isWeakMap", "isWeakSet", "isIterable", "isAsyncIterable", "isBuffer", "isTypedArray", "isError", "isEmpty", "isBlank", "isArrayOf", "isOneOf", "isEmail", "isURL", "isUUID", "isJSON", "isNumeric", "isIP", "isIPv4", "isIPv6", "isPort", "isHex", "isHexColor", "isBase64", "isSemver", "isISODate", "isSlug", "isAlpha", "isAlphanumeric", "isCreditCard", "isJWT", "isHostname", "isMACAddress", "isIBAN", "isE164", "isObjectId", "isULID", "isDataURL", "isMimeType", "isTimeZone", "isLocale", "isCron", "isASCII", "assert", "assertType"],
+  utils: ["wait", "when", "dontCrash", "JSONString", "JSONParse"],
+};
 
 describe("package entry point", () => {
   it("exposes every CommonJS export as a named ES module export", async () => {
     const esm = await import(pathToFileURL(path.join(__dirname, "..", "index.js")).href);
     const named = Object.keys(esm).filter((key) => key !== "default" && key !== "module.exports");
-    assert.deepEqual(named.sort(), Object.keys(nc).sort());
+    // the namespaces and the deprecated names of 2.2, which still import
+    assert.deepEqual(named.sort(), Object.getOwnPropertyNames(nc).sort());
     assert.equal(esm.default, nc);
     assert.equal(esm.nc, nc);
   });
 
+  // tests the deprecated alias on purpose
   it("self references and namespaces", () => {
     assert.equal(nc.nc, nc);
     assert.equal(nc.nodeComfort, nc);
@@ -25,6 +36,7 @@ describe("package entry point", () => {
     assert.equal(typeof nc.SQLite, "function");
   });
 
+  // tests the deprecated alias on purpose
   it("flat helpers are the same functions as the grouped ones", () => {
     assert.equal(nc.log, nc.logger.log);
     assert.equal(nc.readJSON, nc.fs.readJSON);
@@ -55,7 +67,7 @@ describe("package entry point", () => {
     probe("func.pipe", () => pipe((x) => x)(1));
     const { sampleSize } = nc.arr;
     probe("arr.sampleSize", () => sampleSize([1, 2], 1));
-    const { setLevel, getLevel } = nc;
+    const { setLevel, getLevel } = nc.logger;
     probe("setLevel", () => setLevel(getLevel()));
     assert.deepEqual(failures, []);
   });
@@ -73,27 +85,39 @@ describe("package entry point", () => {
     assert.deepEqual(JSON.parse(out), { before: 0, after: 1 });
   });
 
-  it("flat helpers list every function of logger, fs, checker and utils", () => {
-    for (const [namespace, file] of [["logger", "Logger"], ["fs", "FS"], ["checker", "Checker"], ["utils", "Utils"]]) {
-      const own = Object.keys(require(`../src/${file}.js`));
-      assert.deepEqual(own, Object.keys(nc[namespace]));
-      for (const name of own) assert.equal(nc[name], nc[namespace][name], `nc.${name}`);
+  it("the root keeps every flat helper of 2.2, as a deprecated alias", () => {
+    const renamed = { createLogger: nc.logger.create, assertType: nc.assert.type };
+    for (const [namespace, names] of Object.entries(FLAT_2_2)) {
+      const group = peek(nc, namespace);
+      for (const name of names) {
+        if (name === "assert") {
+          // now the assert namespace, callable as before
+          assert.equal(Object.getOwnPropertyDescriptor(nc, name)?.enumerable, true);
+          continue;
+        }
+        assert.equal(Object.getOwnPropertyDescriptor(nc, name)?.enumerable, false, `nc.${name} is hidden`);
+        assert.equal(peek(nc, name), renamed[name] ?? peek(group, name), `nc.${name}`);
+      }
     }
+    const expected = Object.values(FLAT_2_2).flat().filter((name) => name !== "assert").concat(["checker", "utils", "SQLite", "Cache", "Emitter", "nc", "nodeComfort"]);
+    assert.deepEqual(aliasesOf(nc).map((a) => a.name).sort(), expected.sort());
   });
 
   it("every namespace has an official subpath, in CommonJS and ES modules", async () => {
     const pkg = require("../package.json");
     const subpaths = Object.keys(pkg.exports).filter((key) => key !== "." && key !== "./package.json");
-    const namespaces = Object.keys(nc).filter((key) => typeof nc[key] === "object" && key !== "nc" && key !== "nodeComfort").concat(["SQLite", "Cache", "Emitter"]);
-    assert.deepEqual(subpaths.map((s) => s.slice(2)).sort(), namespaces.map((n) => n.toLowerCase()).sort());
+    // checker and utils are kept for 2.2 code; cache, emitter and sqlite still give the class, as in 2.2
+    assert.deepEqual(subpaths.map((s) => s.slice(2)).sort(), [...Object.keys(nc), "checker", "utils"].sort());
+    const classes = { cache: "Cache", emitter: "Emitter", sqlite: "SQLite" };
     for (const subpath of subpaths) {
-      const name = namespaces.find((n) => n.toLowerCase() === subpath.slice(2));
+      const name = subpath.slice(2);
+      const expected = Object.hasOwn(classes, name) ? nc[name][classes[name]] : peek(nc, name);
       const target = path.join(__dirname, "..", pkg.exports[subpath].default);
-      assert.equal(require(target), nc[name], subpath);
+      assert.equal(require(target), expected, subpath);
       const esm = await import(pathToFileURL(target).href);
-      assert.equal(esm.default, nc[name], `${subpath} (ESM default)`);
-      if (typeof nc[name] === "object" && name !== "color") {
-        for (const key of Object.keys(nc[name])) assert.equal(esm[key], nc[name][key], `${subpath} named export "${key}"`);
+      assert.equal(esm.default, expected, `${subpath} (ESM default)`);
+      if (typeof expected === "object" && name !== "color") {
+        for (const key of Object.getOwnPropertyNames(expected)) assert.equal(esm[key], peek(expected, key), `${subpath} named export "${key}"`);
       }
     }
   });

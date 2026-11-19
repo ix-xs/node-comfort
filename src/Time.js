@@ -4,11 +4,11 @@
  * Dates and durations: formatting, relative time, calendar math, time zones
  * and scheduling, in any language `Intl` knows. The default language is
  * English so results are the same on every machine; change it with
- * `setLocale()` or per call with `{ locale }`. Time zones work the same way
- * with `setTimezone()` or `{ timeZone }`.
+ * `nc.config.set({ locale })` or per call with `{ locale }`. Time zones work
+ * the same way with `nc.config.set({ timeZone })` or `{ timeZone }`.
  *
  * @example
- * time.setLocale("fr").setTimezone("Europe/Paris");
+ * nc.config.set({ locale: "fr", timeZone: "Europe/Paris" });
  * time.relative(Date.now() - 3600e3);        // "il y a 1 heure"
  * time.format(new Date(), "dddd D MMMM YYYY"); // "lundi 15 janvier 2024"
  * time.cron("0 9 * * 1-5", sendReport);        // weekdays at 9:00
@@ -104,6 +104,7 @@ const { types } = require("node:util");
  * @property {boolean} [immediate] Also run once right away.
  * @property {boolean} [unref] Let the process exit even if the schedule is active.
  * @property {(error: unknown) => void} [onError] Called when the task fails. Without it, errors surface as unhandled errors.
+ * @property {AbortSignal} [signal] Stops the schedule when it fires, like `stop()`.
  */
 
 /**
@@ -115,6 +116,7 @@ const { types } = require("node:util");
  * @property {boolean} [overlap] Start a run even if the previous one hasn't finished. By default it's skipped.
  * @property {boolean} [immediate] `cron()` only: also run once right away.
  * @property {(error: unknown) => void} [onError] Called when the task fails.
+ * @property {AbortSignal} [signal] `cron()` only: stops the schedule when it fires, like `stop()`.
  */
 
 /**
@@ -125,7 +127,7 @@ const { types } = require("node:util");
 
 /**
  * @typedef {object} _ScheduledTaskMethods
- * @property {() => void} stop Stops the schedule. A run in progress finishes.
+ * @property {() => ScheduledTask} stop Stops the schedule. A run in progress finishes. Returns the task.
  * @property {() => Date | undefined} next When the next run is planned.
  * @property {() => boolean} isRunning Whether a run is in progress.
  * @property {() => number} runs How many runs have started.
@@ -135,17 +137,18 @@ const { types } = require("node:util");
  * Returned by `stopwatch()`.
  * @typedef {object} Stopwatch
  * @property {() => number} elapsed Milliseconds since the start.
- * @property {(format?: boolean) => number | string} stop The elapsed time; `stop(true)` formats it, like `"1.5s"`.
+ * @property {{ (format?: false): number, (format: true): string, (format: boolean): number | string }} stop The elapsed time in ms; `stop(true)` formats it, like `"1.5s"`.
  * @property {(label?: string) => number} lap Records a lap and returns the ms since the previous one.
  * @property {() => Array<{ label: string, ms: number, total: number }>} laps Every lap so far.
  * @property {() => void} reset Starts over.
  */
 
 const shared = require("./internal/shared.js");
+const { deprecate } = require("./internal/deprecate.js");
 
 const { MS, intl, unitOf: _unit, setLongTimeout: _longTimeout } = shared;
 
-const _config = shared.timeConfig;
+const _config = shared.config;
 
 /**
  * @param {DateInput | undefined} value
@@ -465,6 +468,7 @@ const _run = async (task, onError) => {
  * time.setLocale("fr");
  * time.relative(Date.now() - 60e3); // "il y a 1 minute"
  *
+ * @deprecated Use `nc.config.set({ locale })`, which also sets the language of `nc.num`. It will be removed in 4.0.
  * @param {string} locale Like `"fr"`, `"en-GB"`, `"pt-BR"` or `"ja"`.
  * @returns {typeof import("./Time")} The module, so calls chain.
  */
@@ -480,6 +484,7 @@ function setLocale(locale) {
  * @example
  * time.setTimezone("Europe/Paris");
  *
+ * @deprecated Use `nc.config.set({ timeZone })`. It will be removed in 4.0.
  * @param {string | undefined} timeZone Like `"America/New_York"`.
  * @returns {typeof import("./Time")} The module, so calls chain.
  * @throws {RangeError} If the zone doesn't exist.
@@ -496,6 +501,7 @@ function setTimezone(timeZone) {
  * @example
  * time.getConfig(); // { locale: "en", timeZone: undefined }
  *
+ * @deprecated Use `nc.config.get()`. It will be removed in 4.0.
  * @returns {{ locale: string, timeZone: string | undefined }}
  */
 function getConfig() {
@@ -506,13 +512,35 @@ function getConfig() {
  * Every time zone Node knows, sorted.
  *
  * @example
- * time.timezones().includes("Europe/Paris"); // true
+ * time.timeZones().includes("Europe/Paris"); // true
  *
  * @returns {string[]}
  */
-function timezones() {
+function timeZones() {
   return Intl.supportedValuesOf("timeZone");
 }
+
+/**
+ * @deprecated Use `nc.time.timeZones()`. It will be removed in 4.0.
+ * @type {typeof timeZones}
+ */
+const timezones = timeZones;
+
+/**
+ * Stops a schedule when the signal fires.
+ * @param {AbortSignal | undefined} signal
+ * @param {() => void} stop
+ * @returns {(() => void) | undefined} Removes the listener, or `undefined` if the signal had already fired (the schedule is stopped).
+ */
+const _stopOnAbort = (signal, stop) => {
+  if (!signal) return () => {};
+  if (signal.aborted) {
+    stop();
+    return undefined;
+  }
+  signal.addEventListener("abort", stop, { once: true });
+  return () => signal.removeEventListener("abort", stop);
+};
 
 /**
  * A zone's UTC offset at a given date, in minutes. Daylight saving included.
@@ -1381,7 +1409,7 @@ function stopwatch() {
     ms < 1000 ? `${Math.round(ms * 100) / 100}ms` : ms < MS.m ? `${Math.round(ms / 10) / 100}s` : formatDuration(ms, { units: 2, milliseconds: false });
   return {
     elapsed: () => since(start),
-    stop: (fmt = false) => (fmt ? pretty(since(start)) : since(start)),
+    stop: /** @type {Stopwatch["stop"]} */ ((fmt = false) => (fmt ? pretty(since(start)) : since(start))),
     lap: (label) => {
       const now = process.hrtime.bigint();
       const ms = Number(now - lastLap) / 1e6;
@@ -1403,7 +1431,7 @@ function stopwatch() {
  *
  * @example
  * const { result, duration } = await time.measure(() => db.query(sql));
- * nc.info(`Query took ${duration.toFixed(1)}ms`);
+ * nc.logger.info(`Query took ${duration.toFixed(1)}ms`);
  *
  * @template T
  * @param {() => T} fn
@@ -1421,7 +1449,7 @@ async function measure(fn) {
  * errors are caught.
  *
  * @example
- * const job = time.every("5m", syncInventory, { immediate: true, onError: nc.error });
+ * const job = time.every("5m", syncInventory, { immediate: true, onError: nc.logger.error });
  * job.next(); // when it runs next
  * job.stop();
  *
@@ -1455,17 +1483,26 @@ function every(interval, task, options = {}) {
   };
   cancel = _longTimeout(tick, nextAt - Date.now(), options.unref ?? false);
 
+  /** @type {(() => void) | undefined} */
+  let unlisten;
   const stop = () => {
     stopped = true;
     cancel();
+    unlisten?.();
   };
-  return {
-    stop,
+  /** @type {ScheduledTask} */
+  const self = {
+    stop: () => {
+      stop();
+      return self;
+    },
     next: () => (stopped ? undefined : new Date(nextAt)),
     isRunning: () => running,
     runs: () => runs,
     [Symbol.dispose]: stop,
   };
+  unlisten = _stopOnAbort(options.signal, stop);
+  return self;
 }
 
 const _parseCron = shared.parseCron;
@@ -1549,7 +1586,7 @@ function nextRun(expression, options = {}) {
  *
  * @example
  * const job = time.cron("0 9 * * 1-5", sendDailyReport, { timeZone: "Europe/Paris" });
- * time.cron("*\/15 * * * *", refreshCache, { onError: nc.error });
+ * time.cron("*\/15 * * * *", refreshCache, { onError: nc.logger.error });
  * job.stop();
  *
  * @param {string} expression
@@ -1585,7 +1622,8 @@ function cron(expression, task, options = {}) {
     }, target.getTime() - Date.now(), options.unref ?? false);
   };
   plan(new Date());
-  if (options.immediate) {
+  // Already aborted: stopped below, before anything runs.
+  if (options.immediate && !options.signal?.aborted) {
     running = true;
     runs++;
     void _run(task, options.onError).finally(() => {
@@ -1593,24 +1631,34 @@ function cron(expression, task, options = {}) {
     });
   }
 
+  /** @type {(() => void) | undefined} */
+  let unlisten;
   const stop = () => {
     stopped = true;
     nextDate = undefined;
     cancel();
+    unlisten?.();
   };
-  return {
-    stop,
+  /** @type {ScheduledTask} */
+  const self = {
+    stop: () => {
+      stop();
+      return self;
+    },
     next: () => (stopped ? undefined : nextDate),
     isRunning: () => running,
     runs: () => runs,
     [Symbol.dispose]: stop,
   };
+  unlisten = _stopOnAbort(options.signal, stop);
+  return self;
 }
 
 module.exports = {
   setLocale,
   setTimezone,
   getConfig,
+  timeZones,
   timezones,
   offset,
   parseDuration,
@@ -1650,3 +1698,10 @@ module.exports = {
   nextRun,
   cron,
 };
+
+deprecate(module.exports, "nc.time", {
+  setLocale: { use: "nc.config.set({ locale })" },
+  setTimezone: { use: "nc.config.set({ timeZone })" },
+  getConfig: { use: "nc.config.get()" },
+  timezones: { use: "nc.time.timeZones()" },
+});

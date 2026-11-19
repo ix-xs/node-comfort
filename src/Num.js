@@ -3,8 +3,8 @@
 /**
  * Numbers: clamping, rounding that gets decimals right, statistics, and
  * formatting for humans (sizes, money, ordinals, compact numbers) in any
- * language. Formatting is English by default: change it with `setLocale()`
- * or per call with `{ locale }`.
+ * language. Formatting is English by default: change it with
+ * `nc.config.set({ locale })` or per call with `{ locale }`.
  *
  * @example
  * num.round(1.005, 2);                           // 1.01
@@ -13,10 +13,8 @@
  * num.percentile(latencies, 95);
  */
 
-const { intl, preciseSum } = require("./internal/shared.js");
-
-/** The default language, changed with `setLocale()`. */
-const _config = { locale: "en" };
+const { intl, preciseSum, config: _config } = require("./internal/shared.js");
+const { deprecate } = require("./internal/deprecate.js");
 
 /**
  * Options for `formatBytes()`.
@@ -37,7 +35,7 @@ const _config = { locale: "en" };
 /**
  * Options for `format()`.
  * @typedef {object} FormatNumberOptions
- * @property {string} [locale] Language, like `"fr"` or `"en-US"`. Defaults to the one set with `setLocale()`, or `"en"`.
+ * @property {string} [locale] Language, like `"fr"` or `"en-US"`. Defaults to the one set with `nc.config.set()`, or `"en"`.
  * @property {number} [decimals] Exact number of decimals.
  * @property {number} [minDecimals] Minimum decimals.
  * @property {number} [maxDecimals] Maximum decimals. Defaults to `3`.
@@ -52,7 +50,7 @@ const _config = { locale: "en" };
 /**
  * Options for `currency()`.
  * @typedef {object} CurrencyOptions
- * @property {string} [locale] Language. Defaults to the one set with `setLocale()`, or `"en"`.
+ * @property {string} [locale] Language. Defaults to the one set with `nc.config.set()`, or `"en"`.
  * @property {number} [decimals] Defaults to the currency's usual decimals (2 for EUR, 0 for JPY).
  * @property {"symbol"|"narrowSymbol"|"code"|"name"} [display] How the currency is written. For US dollars in Canada: `US$`, `$`, `USD` or `US dollars`. Defaults to `"symbol"`.
  * @property {boolean} [accounting] Show negative amounts in parentheses, like `($5.00)`.
@@ -61,7 +59,7 @@ const _config = { locale: "en" };
 /**
  * Options for `ordinal()`.
  * @typedef {object} OrdinalOptions
- * @property {string} [locale] Built in: `en`, `fr`, `es`, `it`, `pt`, `de`, `nl`. Defaults to the one set with `setLocale()`, or `"en"`.
+ * @property {string} [locale] Built in: `en`, `fr`, `es`, `it`, `pt`, `de`, `nl`. Defaults to the one set with `nc.config.set()`, or `"en"`.
  * @property {Partial<Record<Intl.LDMLPluralRule, string>>} [suffixes] Your own suffixes, for other languages.
  */
 
@@ -599,10 +597,34 @@ function isPrime(value) {
  * num.factorial(5);        // 120
  * num.factorial(25, true); // 15511210043330985984000000n
  *
+ * @overload
+ * @param {number} n
+ * @param {false} [asBigInt]
+ * @returns {number}
+ * @throws {RangeError} If `n` is negative or not an integer.
+ */
+/**
+ * `n!` as an exact bigint.
+ *
+ * @overload
+ * @param {number} n
+ * @param {true} asBigInt
+ * @returns {bigint}
+ * @throws {RangeError} If `n` is negative or not an integer.
+ */
+/**
+ * `n!`, as a bigint when the flag is `true`.
+ *
+ * @overload
+ * @param {number} n
+ * @param {boolean} asBigInt
+ * @returns {number | bigint}
+ * @throws {RangeError} If `n` is negative or not an integer.
+ */
+/**
  * @param {number} n
  * @param {boolean} [asBigInt=false]
  * @returns {number | bigint}
- * @throws {RangeError} If `n` is negative or not an integer.
  */
 function factorial(n, asBigInt = false) {
   if (!Number.isInteger(n) || n < 0) throw new RangeError("factorial() expects a non-negative integer");
@@ -906,6 +928,7 @@ function ordinal(value, options = {}) {
  * num.setLocale("fr");
  * num.currency(1234.5, "EUR"); // "1 234,50 €"
  *
+ * @deprecated Use `nc.config.set({ locale })`, which also sets the language of `nc.time`. It will be removed in 4.0.
  * @param {string} locale Like `"fr"`, `"en-GB"` or `"pt-BR"`.
  * @returns {typeof import("./Num")} The module, so calls chain.
  */
@@ -920,6 +943,7 @@ function setLocale(locale) {
  * @example
  * num.getLocale(); // "en"
  *
+ * @deprecated Use `nc.config.get().locale`. It will be removed in 4.0.
  * @returns {string}
  */
 function getLocale() {
@@ -970,3 +994,8 @@ module.exports = {
   pad,
   ordinal,
 };
+
+deprecate(module.exports, "nc.num", {
+  setLocale: { use: "nc.config.set({ locale })" },
+  getLocale: { use: "nc.config.get().locale" },
+});

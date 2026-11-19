@@ -2,21 +2,21 @@
 
 const { describe, it, afterEach } = require("node:test");
 const assert = require("node:assert/strict");
-const { time } = require("..");
+const { time, config } = require("..");
 
 const nbsp = (s) => s.replace(/[  ]/g, " ");
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
 afterEach(() => {
-  time.setLocale("en").setTimezone(undefined);
+  config.set({ locale: "en", timeZone: undefined });
 });
 
 describe("time: configuration", () => {
-  it("setLocale / setTimezone are chainable and validated", () => {
-    assert.equal(time.setLocale("fr").setTimezone("Europe/Paris"), time);
-    assert.deepEqual(time.getConfig(), { locale: "fr", timeZone: "Europe/Paris" });
-    assert.throws(() => time.setTimezone("Mars/Olympus"), RangeError);
-    assert.ok(time.timezones().includes("Europe/Paris"));
+  it("config.set() sets the locale and the time zone, validated", () => {
+    assert.deepEqual(config.set({ locale: "fr", timeZone: "Europe/Paris" }), { locale: "fr", timeZone: "Europe/Paris" });
+    assert.deepEqual(config.get(), { locale: "fr", timeZone: "Europe/Paris" });
+    assert.throws(() => config.set({ timeZone: "Mars/Olympus" }), RangeError);
+    assert.ok(time.timeZones().includes("Europe/Paris"));
     assert.equal(time.offset("Europe/Paris", "2024-07-01T12:00:00Z"), 120);
     assert.equal(time.offset("Europe/Paris", "2024-01-01T12:00:00Z"), 60);
     assert.equal(time.offset("America/New_York", "2024-01-01T12:00:00Z"), -300);
@@ -66,7 +66,7 @@ describe("time: display", () => {
     assert.equal(time.relative(now - 86_400_000, now, { numeric: "auto" }), "yesterday");
     assert.equal(time.relative(now - 3_600_000, now, { locale: "fr" }), "il y a 1 heure");
     assert.equal(time.relative(now, now), "now");
-    time.setLocale("de");
+    config.set({ locale: "de" });
     assert.equal(time.relative(now - 5 * 60_000, now), "vor 5 Minuten");
   });
 
@@ -92,7 +92,7 @@ describe("time: display", () => {
     assert.equal(time.format(utc, "HH:mm ZZ", { timeZone: "America/New_York" }), "18:30 -0500");
     assert.equal(time.format(utc, "X x"), `${utc.getTime() / 1000} ${utc.getTime()}`);
     assert.equal(time.format("not a date"), "Invalid Date");
-    time.setTimezone("UTC");
+    config.set({ timeZone: "UTC" });
     assert.equal(time.format(utc, "HH:mm"), "23:30");
     assert.equal(time.toISODate(utc), "2024-01-15");
   });

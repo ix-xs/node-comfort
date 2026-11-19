@@ -56,8 +56,8 @@ describe("errors", () => {
 describe("utils", () => {
   it("JSONString survives throwing getters and keeps errors readable", () => {
     const hostile = { get boom() { throw new Error("nope"); } };
-    assert.equal(typeof nc.JSONString(hostile, 0), "string");
-    const parsed = JSON.parse(nc.JSONString({ error: new TypeError("bad", { cause: "why" }) }, 0));
+    assert.equal(typeof nc.json.stringify(hostile, 0), "string");
+    const parsed = JSON.parse(nc.json.stringify({ error: new TypeError("bad", { cause: "why" }) }, 0));
     assert.equal(parsed.error.name, "TypeError");
     assert.equal(parsed.error.message, "bad");
     assert.equal(parsed.error.cause, "why");
@@ -65,69 +65,69 @@ describe("utils", () => {
   });
 
   it("JSONParse ignores a byte order mark and takes a reviver", () => {
-    assert.deepEqual(nc.JSONParse('﻿{"a":1}'), { a: 1 });
-    assert.deepEqual(nc.JSONParse('{"at":0}', {}, (key, value) => (key === "at" ? new Date(value) : value)), { at: new Date(0) });
+    assert.deepEqual(nc.json.parse('﻿{"a":1}'), { a: 1 });
+    assert.deepEqual(nc.json.parse('{"at":0}', {}, (key, value) => (key === "at" ? new Date(value) : value)), { at: new Date(0) });
   });
 
   it("wait rejects invalid and infinite durations", async () => {
-    await assert.rejects(nc.wait("banana"), TypeError);
-    await assert.rejects(nc.wait(Infinity), TypeError);
-    await assert.rejects(nc.wait(NaN), TypeError);
+    await assert.rejects(nc.async.sleep("banana"), TypeError);
+    await assert.rejects(nc.async.sleep(Infinity), TypeError);
+    await assert.rejects(nc.async.sleep(NaN), TypeError);
   });
 });
 
 describe("checker", () => {
   it("isEmail limits the local part and accepts punycode domains", () => {
-    assert.equal(nc.isEmail(`${"x".repeat(64)}@example.com`), true);
-    assert.equal(nc.isEmail(`${"x".repeat(65)}@example.com`), false);
-    assert.equal(nc.isEmail("user@xn--p1ai.xn--p1ai"), true);
+    assert.equal(nc.is.email(`${"x".repeat(64)}@example.com`), true);
+    assert.equal(nc.is.email(`${"x".repeat(65)}@example.com`), false);
+    assert.equal(nc.is.email("user@xn--p1ai.xn--p1ai"), true);
   });
 
   it("isURL with requireTld accepts punycode top-level domains", () => {
-    assert.equal(nc.isURL("https://xn--e1afmkfd.xn--p1ai", { requireTld: true }), true);
-    assert.equal(nc.isURL("http://localhost:3000", { requireTld: true }), false);
+    assert.equal(nc.is.url("https://xn--e1afmkfd.xn--p1ai", { requireTld: true }), true);
+    assert.equal(nc.is.url("http://localhost:3000", { requireTld: true }), false);
   });
 
   it("isISODate rejects impossible offsets", () => {
-    assert.equal(nc.isISODate("2024-01-01T10:00:00+05:30"), true);
-    assert.equal(nc.isISODate("2024-01-01T10:00:00+99:00"), false);
-    assert.equal(nc.isISODate("2024-01-01T10:00:00+05:75"), false);
-    assert.equal(nc.isISODate("2100-02-29"), false, "2100 is not a leap year");
-    assert.equal(nc.isISODate("2000-02-29"), true);
+    assert.equal(nc.is.isoDate("2024-01-01T10:00:00+05:30"), true);
+    assert.equal(nc.is.isoDate("2024-01-01T10:00:00+99:00"), false);
+    assert.equal(nc.is.isoDate("2024-01-01T10:00:00+05:75"), false);
+    assert.equal(nc.is.isoDate("2100-02-29"), false, "2100 is not a leap year");
+    assert.equal(nc.is.isoDate("2000-02-29"), true);
   });
 
   it("isEmpty is false for dates, regular expressions and errors", () => {
-    assert.equal(nc.isEmpty(new Date()), false);
-    assert.equal(nc.isEmpty(/x/), false);
-    assert.equal(nc.isEmpty(new Error("x")), false);
-    assert.equal(nc.isEmpty({}), true);
+    assert.equal(nc.is.empty(new Date()), false);
+    assert.equal(nc.is.empty(/x/), false);
+    assert.equal(nc.is.empty(new Error("x")), false);
+    assert.equal(nc.is.empty({}), true);
   });
 
   it("new format guards", () => {
-    assert.equal(nc.isHostname("api.example.com"), true);
-    assert.equal(nc.isHostname("-bad-.com"), false);
-    assert.equal(nc.isHostname("192.168.0.1"), false);
-    assert.equal(nc.isHostname("localhost", { requireTld: true }), false);
-    assert.equal(nc.isMACAddress("00:1B:44:11:3A:B7"), true);
-    assert.equal(nc.isMACAddress("00:1B:44:11:3A"), false);
-    assert.equal(nc.isIBAN("GB82 WEST 1234 5698 7654 32"), true);
-    assert.equal(nc.isIBAN("GB82 WEST 1234 5698 7654 33"), false);
-    assert.equal(nc.isE164("+33612345678"), true);
-    assert.equal(nc.isE164("0612345678"), false);
-    assert.equal(nc.isObjectId("507f1f77bcf86cd799439011"), true);
-    assert.equal(nc.isULID(nc.id.ulid()), true);
-    assert.equal(nc.isDataURL("data:image/png;base64,iVBORw0KGgo="), true);
-    assert.equal(nc.isMimeType("text/html; charset=utf-8"), true);
-    assert.equal(nc.isMimeType("json"), false);
-    assert.equal(nc.isTimeZone("Europe/Paris"), true);
-    assert.equal(nc.isTimeZone("Mars/Olympus"), false);
-    assert.equal(nc.isLocale("pt-BR"), true);
-    assert.equal(nc.isLocale("en_US"), false);
-    assert.equal(nc.isCron("0 9 * * 1-5"), true);
-    assert.equal(nc.isCron("61 * * * *"), false);
-    assert.equal(nc.isCron("0 0 ,5 * *"), false, "an empty list item is not a value");
-    assert.equal(nc.isASCII("hello"), true);
-    assert.equal(nc.isASCII("héllo"), false);
+    assert.equal(nc.is.hostname("api.example.com"), true);
+    assert.equal(nc.is.hostname("-bad-.com"), false);
+    assert.equal(nc.is.hostname("192.168.0.1"), false);
+    assert.equal(nc.is.hostname("localhost", { requireTld: true }), false);
+    assert.equal(nc.is.macAddress("00:1B:44:11:3A:B7"), true);
+    assert.equal(nc.is.macAddress("00:1B:44:11:3A"), false);
+    assert.equal(nc.is.iban("GB82 WEST 1234 5698 7654 32"), true);
+    assert.equal(nc.is.iban("GB82 WEST 1234 5698 7654 33"), false);
+    assert.equal(nc.is.e164("+33612345678"), true);
+    assert.equal(nc.is.e164("0612345678"), false);
+    assert.equal(nc.is.objectId("507f1f77bcf86cd799439011"), true);
+    assert.equal(nc.is.ulid(nc.id.ulid()), true);
+    assert.equal(nc.is.dataUrl("data:image/png;base64,iVBORw0KGgo="), true);
+    assert.equal(nc.is.mimeType("text/html; charset=utf-8"), true);
+    assert.equal(nc.is.mimeType("json"), false);
+    assert.equal(nc.is.timeZone("Europe/Paris"), true);
+    assert.equal(nc.is.timeZone("Mars/Olympus"), false);
+    assert.equal(nc.is.locale("pt-BR"), true);
+    assert.equal(nc.is.locale("en_US"), false);
+    assert.equal(nc.is.cron("0 9 * * 1-5"), true);
+    assert.equal(nc.is.cron("61 * * * *"), false);
+    assert.equal(nc.is.cron("0 0 ,5 * *"), false, "an empty list item is not a value");
+    assert.equal(nc.is.ascii("hello"), true);
+    assert.equal(nc.is.ascii("héllo"), false);
   });
 });
 
@@ -434,7 +434,7 @@ describe("func", () => {
   it("retry gives up at once when the work was aborted", async () => {
     let tries = 0;
     await assert.rejects(
-      func.retry(() => {
+      nc.async.retry(() => {
         tries++;
         throw new errors.AbortError("stop");
       }, { retries: 5, delay: 1 }),
@@ -442,22 +442,22 @@ describe("func", () => {
     );
     assert.equal(tries, 1);
     let later = 0;
-    assert.equal(await func.retry(() => (++later < 3 ? Promise.reject(new Error("x")) : "ok"), { retries: 3, delay: "1ms" }), "ok");
+    assert.equal(await nc.async.retry(() => (++later < 3 ? Promise.reject(new Error("x")) : "ok"), { retries: 3, delay: "1ms" }), "ok");
   });
 
   it("timeout tells the task to stop", async () => {
     /** @type {AbortSignal | undefined} */
     let seen;
     await assert.rejects(
-      func.timeout((signal) => {
+      nc.async.timeout((signal) => {
         seen = signal;
         return sleep(200);
       }, "10ms"),
       { name: "TimeoutError", timeout: 10 },
     );
     assert.equal(seen?.aborted, true);
-    assert.equal(await func.timeout(Promise.resolve(1), Infinity), 1);
-    await assert.rejects(func.timeout(Promise.reject(new Error("own")), 50), { message: "own" });
+    assert.equal(await nc.async.timeout(Promise.resolve(1), Infinity), 1);
+    await assert.rejects(nc.async.timeout(Promise.reject(new Error("own")), 50), { message: "own" });
   });
 
   it("pipeAsync, batch and dedupe", async () => {
@@ -576,7 +576,7 @@ describe("async", () => {
 
 describe("cache", () => {
   it("a value loaded for a key that was deleted meanwhile is not stored", async () => {
-    const cache = new nc.Cache();
+    const cache = nc.cache.create();
     /** @type {(value: string) => void} */
     let finish = () => {};
     const loading = cache.getOrSet("k", () => new Promise((resolve) => (finish = resolve)));
@@ -588,7 +588,7 @@ describe("cache", () => {
   });
 
   it("concurrent loads share one call, and a failure isn't cached", async () => {
-    const cache = new nc.Cache();
+    const cache = nc.cache.create();
     let loads = 0;
     const [a, b] = await Promise.all([cache.getOrSet("k", async () => ++loads), cache.getOrSet("k", async () => ++loads)]);
     assert.deepEqual([a, b, loads], [1, 1, 1]);
@@ -604,7 +604,7 @@ describe("cache", () => {
 
   it("staleWhileRevalidate answers with the old value and refreshes behind", async () => {
     let n = 0;
-    const cache = new nc.Cache({ ttl: 60, staleWhileRevalidate: "5s" });
+    const cache = nc.cache.create({ ttl: 60, staleWhileRevalidate: "5s" });
     assert.equal(await cache.getOrSet("k", () => ++n), 1);
     await sleep(90);
     assert.equal(cache.get("k"), undefined, "get() never returns a stale value");
@@ -617,14 +617,14 @@ describe("cache", () => {
   it("the least recently used key goes first, expired keys don't pile up", async () => {
     /** @type {string[]} */
     const removed = [];
-    const cache = new nc.Cache({ max: 2, onRemove: (key, _value, reason) => removed.push(`${key}:${reason}`) });
+    const cache = nc.cache.create({ max: 2, onRemove: (key, _value, reason) => removed.push(`${key}:${reason}`) });
     cache.set("a", 1).set("b", 2);
     cache.get("a");
     cache.set("c", 3);
     assert.deepEqual(cache.keys(), ["a", "c"]);
     assert.deepEqual(removed, ["b:evict"]);
 
-    const short = new nc.Cache({ ttl: 1 });
+    const short = nc.cache.create({ ttl: 1 });
     for (let i = 0; i < 1100; i++) short.set(i, i);
     await sleep(5);
     for (let i = 2000; i < 3300; i++) short.set(i, i);
@@ -632,7 +632,7 @@ describe("cache", () => {
   });
 
   it("wrap tells arguments apart, and stats can be reset", async () => {
-    const cache = new nc.Cache();
+    const cache = nc.cache.create();
     let calls = 0;
     const load = cache.wrap(async (a, b) => (calls++, `${a}${b}`));
     await load(undefined, 1);
@@ -648,7 +648,7 @@ describe("cache", () => {
 
 describe("emitter", () => {
   it("off() finds a listener added with once()", () => {
-    const emitter = new nc.Emitter();
+    const emitter = nc.emitter.create();
     let calls = 0;
     const listener = () => calls++;
     emitter.once("x", listener);
@@ -660,7 +660,7 @@ describe("emitter", () => {
   });
 
   it("one signal removes many listeners", () => {
-    const emitter = new nc.Emitter();
+    const emitter = nc.emitter.create();
     const controller = new AbortController();
     emitter.on("a", () => {}, { signal: controller.signal });
     emitter.once("b", () => {}, { signal: controller.signal });
@@ -671,7 +671,7 @@ describe("emitter", () => {
   });
 
   it("listeners added or removed during an emit don't disturb it", () => {
-    const emitter = new nc.Emitter();
+    const emitter = nc.emitter.create();
     /** @type {string[]} */
     const order = [];
     const self = () => {
@@ -687,7 +687,7 @@ describe("emitter", () => {
   });
 
   it("waitFor takes text durations and refuses nonsense", async () => {
-    const emitter = new nc.Emitter();
+    const emitter = nc.emitter.create();
     await assert.rejects(emitter.waitFor("never", { timeout: "10ms" }), { name: "TimeoutError", timeout: 10 });
     await assert.rejects(emitter.waitFor("never", { timeout: "soon" }), TypeError);
     assert.equal(emitter.listenerCount("never"), 0);
@@ -713,13 +713,13 @@ describe("time", () => {
     assert.equal(iso(time.endOf("2024-03-31T12:00:00Z", "day", paris)), "2024-03-31T21:59:59.999Z");
   });
 
-  it("the zone set with setTimezone() applies to date maths too", () => {
-    time.setTimezone("Asia/Tokyo");
+  it("the zone set with config.set() applies to date maths too", () => {
+    nc.config.set({ timeZone: "Asia/Tokyo" });
     try {
       assert.equal(iso(time.startOf("2024-03-14T10:05:07Z", "day")), "2024-03-13T15:00:00.000Z");
       assert.equal(iso(time.add("2024-01-31T23:30:00Z", 1, "month")), "2024-02-29T23:30:00.000Z");
     } finally {
-      time.setTimezone(undefined);
+      nc.config.set({ timeZone: undefined });
     }
   });
 
@@ -765,8 +765,8 @@ describe("time", () => {
   it("cron: L is the last day of the month", () => {
     assert.equal(iso(time.nextRun("0 0 L * *", { from: "2024-02-10T00:00:00Z", timeZone: "UTC" })), "2024-02-29T00:00:00.000Z");
     assert.equal(iso(time.nextRun("0 12 15,L * *", { from: "2024-02-16T00:00:00Z", timeZone: "UTC" })), "2024-02-29T12:00:00.000Z");
-    assert.equal(nc.isCron("0 0 L * *"), true);
-    assert.equal(nc.isCron("0 0 1,,2 * *"), false);
+    assert.equal(nc.is.cron("0 0 L * *"), true);
+    assert.equal(nc.is.cron("0 0 1,,2 * *"), false);
   });
 
   it("calendar days, not 24 hour blocks, decide what yesterday is", () => {
@@ -790,8 +790,8 @@ describe("id", () => {
     assert.ok(increases(v7));
     assert.ok(increases(ulids));
     assert.equal(new Set(v7).size, v7.length);
-    assert.ok(v7.every((value) => nc.isUUID(value, { version: 7 })));
-    assert.ok(ulids.every((value) => nc.isULID(value)));
+    assert.ok(v7.every((value) => nc.is.uuid(value, { version: 7 })));
+    assert.ok(ulids.every((value) => nc.is.ulid(value)));
   });
 
   it("ulid refuses a time it can't encode", () => {
@@ -809,7 +809,7 @@ describe("id", () => {
 
   it("objectId and prefixed", () => {
     const ids = Array.from({ length: 1000 }, () => id.objectId());
-    assert.ok(ids.every((value) => nc.isObjectId(value)));
+    assert.ok(ids.every((value) => nc.is.objectId(value)));
     assert.equal(new Set(ids).size, ids.length);
     assert.equal(id.timestamp(id.objectId(new Date("2024-01-01T00:00:05.900Z")))?.toISOString(), "2024-01-01T00:00:05.000Z");
     assert.match(id.prefixed("user"), /^user_[0-9A-Za-z]{24}$/);
@@ -1550,7 +1550,7 @@ describe("sqlite", () => {
     for (const db of opened.splice(0)) db.close();
   });
   const open = (/** @type {import("..").SQLiteOptions} */ options = {}) => {
-    const db = new nc.SQLite(":memory:", options);
+    const db = nc.sqlite.open(":memory:", options);
     opened.push(db);
     db.createTable({
       name: "users",
@@ -1687,7 +1687,7 @@ describe("logger", () => {
 
   it("redact masks secrets wherever they are", () => {
     const out = collect();
-    const log = nc.createLogger({ timestamp: false, colors: false, stdout: out.stream, redact: ["password", "Authorization"] });
+    const log = nc.logger.create({ timestamp: false, colors: false, stdout: out.stream, redact: ["password", "Authorization"] });
     log.info({ user: "ada", password: "hunter2", nested: { authorization: "Bearer x", list: [{ PASSWORD: 1 }] } });
     assert.ok(!out.lines[0].includes("hunter2") && !out.lines[0].includes("Bearer"));
     assert.equal((out.lines[0].match(/\[redacted\]/g) ?? []).length, 3);
@@ -1702,7 +1702,7 @@ describe("logger", () => {
     assert.match(out.lines[1], /Session \{ user: 'ada', password: '\[redacted\]'/);
 
     const json = collect();
-    nc.createLogger({ format: "json", stdout: json.stream, redact: ["token"] }).info("paid", { token: "secret", deep: { token: "x" }, amount: 3 });
+    nc.logger.create({ format: "json", stdout: json.stream, redact: ["token"] }).info("paid", { token: "secret", deep: { token: "x" }, amount: 3 });
     const record = JSON.parse(json.lines[0]);
     assert.deepEqual([record.token, record.deep.token, record.amount], ["[redacted]", "[redacted]", 3]);
   });
@@ -1711,14 +1711,14 @@ describe("logger", () => {
     /** @type {import("..").LogEntry[]} */
     const entries = [];
     const out = collect();
-    const log = nc.createLogger({ level: "info", colors: true, stdout: out.stream, stderr: out.stream, scope: "jobs", onLog: (entry) => entries.push(entry) });
+    const log = nc.logger.create({ level: "info", colors: true, stdout: out.stream, stderr: out.stream, scope: "jobs", onLog: (entry) => entries.push(entry) });
     log.info("<% green done %>", 3).debug("too quiet").error("failed");
     assert.deepEqual(entries.map((entry) => [entry.level, entry.kind, entry.scope, entry.message, entry.args.length]), [
       ["info", "info", "jobs", "[jobs] ℹ INFO done  3", 2],
       ["error", "error", "jobs", "[jobs] ✖ ERROR failed", 1],
     ]);
     assert.ok(entries[0].time instanceof Date);
-    const broken = nc.createLogger({ timestamp: false, colors: false, stdout: out.stream, onLog: () => {
+    const broken = nc.logger.create({ timestamp: false, colors: false, stdout: out.stream, onLog: () => {
       throw new Error("hook");
     } });
     broken.info("still written");
@@ -1730,7 +1730,7 @@ describe("logger", () => {
     delete process.env.LOG_LEVEL;
     const out = collect();
     /** @param {string | undefined} scope */
-    const make = (scope) => nc.createLogger({ timestamp: false, colors: false, stdout: out.stream, scope });
+    const make = (scope) => nc.logger.create({ timestamp: false, colors: false, stdout: out.stream, scope });
     try {
       process.env.DEBUG = "db,http:*,-http:static";
       for (const scope of [undefined, "db", "db:pool", "http:router", "http:static", "cache"]) make(scope).debug("x");
@@ -1749,18 +1749,18 @@ describe("logger", () => {
     }
   });
 
-  it("the timestamp follows time.setTimezone() and custom patterns", () => {
+  it("the timestamp follows config.set({ timeZone }) and custom patterns", () => {
     const out = collect();
-    time.setTimezone("Asia/Tokyo");
+    nc.config.set({ timeZone: "Asia/Tokyo" });
     try {
-      nc.createLogger({ colors: false, stdout: out.stream }).info("x");
+      nc.logger.create({ colors: false, stdout: out.stream }).info("x");
       assert.equal(out.lines[0].slice(1, 3), time.format(new Date(), "HH", { timeZone: "Asia/Tokyo" }));
     } finally {
-      time.setTimezone(undefined);
+      nc.config.set({ timeZone: undefined });
     }
-    nc.createLogger({ colors: false, stdout: out.stream, timestamp: "YYYY" }).info("a\nb");
+    nc.logger.create({ colors: false, stdout: out.stream, timestamp: "YYYY" }).info("a\nb");
     assert.equal(out.lines[1], `[${new Date().getFullYear()}] ℹ INFO a\n       b`);
-    nc.createLogger({ colors: false, stdout: out.stream }).info("plain");
+    nc.logger.create({ colors: false, stdout: out.stream }).info("plain");
     assert.match(out.lines[2], /^\[\d\d:\d\d:\d\d\] ℹ INFO plain$/);
   });
 
@@ -1770,7 +1770,7 @@ describe("logger", () => {
     const dir = fs.mkdtempSync(path.join(require("node:os").tmpdir(), "nc-log-"));
     try {
       const file = path.join(dir, "logs", "app.log");
-      const log = nc.createLogger({ timestamp: false, colors: true, stdout: { write() {} }, file: { path: file, maxSize: 60, maxFiles: 2 } });
+      const log = nc.logger.create({ timestamp: false, colors: true, stdout: { write() {} }, file: { path: file, maxSize: 60, maxFiles: 2 } });
       for (let i = 0; i < 10; i++) log.info(`line number ${i}`);
       assert.deepEqual(fs.readdirSync(path.dirname(file)).sort(), ["app.log", "app.log.1", "app.log.2"]);
       assert.equal(fs.readFileSync(file, "utf8"), "ℹ INFO line number 8\nℹ INFO line number 9\n");
@@ -1800,33 +1800,34 @@ describe("fs", () => {
   it("an atomic write keeps the permissions of the file it replaces", { skip: process.platform === "win32" }, () => {
     const file = at("secret.txt");
     fs.writeFileSync(file, "one", { mode: 0o600 });
-    assert.equal(nc.writeFile(file, "two"), true);
+    assert.equal(nc.fs.write(file, "two"), true);
     assert.equal(fs.statSync(file).mode & 0o777, 0o600);
-    assert.equal(nc.writeFile(at("fresh.txt"), "x", { mode: 0o640 }), true);
+    assert.equal(nc.fs.write(at("fresh.txt"), "x", { mode: 0o640 }), true);
     assert.equal(fs.statSync(at("fresh.txt")).mode & 0o777, 0o640);
   });
 
   it("writeFile leaves no temporary file behind, with or without fsync", () => {
-    assert.equal(nc.writeFile(at("w", "a.txt"), "a", { fsync: true }), true);
-    assert.equal(nc.writeFile(at("w", "a.txt"), "b"), true);
-    assert.equal(nc.writeFile(at("w", "b.json"), { n: 1 }, { atomic: false, fsync: true }), true);
+    assert.equal(nc.fs.write(at("w", "a.txt"), "a", { fsync: true }), true);
+    assert.equal(nc.fs.write(at("w", "a.txt"), "b"), true);
+    assert.equal(nc.fs.write(at("w", "b.json"), { n: 1 }, { atomic: false, fsync: true }), true);
     assert.deepEqual(fs.readdirSync(at("w")).sort(), ["a.txt", "b.json"]);
-    assert.equal(nc.readFile(at("w", "a.txt")), "b");
+    assert.equal(nc.fs.read(at("w", "a.txt")), "b");
   });
 
   it("readFile and fileSize answer undefined for a folder or nothing", () => {
-    assert.equal(nc.readFile(dir), undefined);
-    assert.equal(nc.readFile(at("nope.txt")), undefined);
-    assert.equal(nc.readFile(/** @type {any} */ (undefined)), undefined);
+    assert.equal(nc.fs.read(dir), undefined);
+    assert.equal(nc.fs.read(at("nope.txt")), undefined);
+    assert.equal(nc.fs.read(/** @type {any} */ (undefined)), undefined);
+    // tests the deprecated alias on purpose: size() of a folder is its total size
     assert.equal(nc.fileSize(dir), undefined);
     assert.equal(nc.fileSize(at("w", "a.txt")), 1);
-    assert.equal(nc.appendFile(at("deep", "er", "log.txt"), "a"), true);
-    assert.equal(nc.appendFile(at("deep", "er", "log.txt"), "b"), true);
-    assert.equal(nc.readFile(at("deep", "er", "log.txt")), "ab");
+    assert.equal(nc.fs.append(at("deep", "er", "log.txt"), "a"), true);
+    assert.equal(nc.fs.append(at("deep", "er", "log.txt"), "b"), true);
+    assert.equal(nc.fs.read(at("deep", "er", "log.txt")), "ab");
   });
 
   it("files come in the same order as before: a folder's content, then what follows it", () => {
-    for (const file of ["t/a/1.txt", "t/a/b/2.txt", "t/c.txt", "t/z/3.txt"]) nc.writeFile(at(...file.split("/")), "");
+    for (const file of ["t/a/1.txt", "t/a/b/2.txt", "t/c.txt", "t/z/3.txt"]) nc.fs.write(at(...file.split("/")), "");
     // what a plain recursive walk gives, in whatever order the system lists a folder
     /** @type {(folder: string, folders: boolean) => string[]} */
     const walk = (folder, folders) =>
@@ -1835,10 +1836,10 @@ describe("fs", () => {
         if (!entry.isDirectory()) return folders ? [] : [full];
         return folders ? [full, ...walk(full, true)] : walk(full, false);
       });
-    assert.deepEqual(nc.getFilesIn(at("t")), walk(at("t"), false));
-    assert.deepEqual(nc.getFoldersIn(at("t")), walk(at("t"), true));
-    assert.equal(nc.getFilesIn(at("t"))?.length, 4);
-    assert.deepEqual(nc.getFilesIn(at("t"), false)?.map((file) => path.basename(file)), ["c.txt"]);
+    assert.deepEqual(nc.fs.list(at("t")), walk(at("t"), false));
+    assert.deepEqual(nc.fs.list(at("t"), { type: "folders" }), walk(at("t"), true));
+    assert.equal(nc.fs.list(at("t"))?.length, 4);
+    assert.deepEqual(nc.fs.list(at("t"), { recursive: false })?.map((file) => path.basename(file)), ["c.txt"]);
   });
 
   it("glob only reads as deep as the pattern can match", () => {
@@ -1850,13 +1851,13 @@ describe("fs", () => {
       return read(target, options);
     });
     try {
-      assert.deepEqual(nc.glob("*.txt", { cwd: at("t") }), ["c.txt"]);
+      assert.deepEqual(nc.fs.glob("*.txt", { cwd: at("t") }), ["c.txt"]);
       assert.deepEqual(visited, [""]);
       visited.length = 0;
-      assert.deepEqual(nc.glob("a/*.txt", { cwd: at("t") }), ["a/1.txt"]);
+      assert.deepEqual(nc.fs.glob("a/*.txt", { cwd: at("t") }), ["a/1.txt"]);
       assert.deepEqual(visited, ["a"]);
       visited.length = 0;
-      assert.deepEqual(nc.glob("**/*.txt", { cwd: at("t") }), ["a/1.txt", "a/b/2.txt", "c.txt", "z/3.txt"]);
+      assert.deepEqual(nc.fs.glob("**/*.txt", { cwd: at("t") }), ["a/1.txt", "a/b/2.txt", "c.txt", "z/3.txt"]);
       assert.equal(visited.length, 4);
     } finally {
       fs.readdirSync = read;
@@ -1864,24 +1865,25 @@ describe("fs", () => {
   });
 
   it("move replaces a file or a folder, and keeps the destination when asked", () => {
-    nc.writeFile(at("m", "new.txt"), "new");
-    nc.writeFile(at("m", "old.txt"), "old");
-    assert.equal(nc.move(at("m", "new.txt"), at("m", "old.txt")), true);
-    assert.equal(nc.readFile(at("m", "old.txt")), "new");
+    nc.fs.write(at("m", "new.txt"), "new");
+    nc.fs.write(at("m", "old.txt"), "old");
+    assert.equal(nc.fs.move(at("m", "new.txt"), at("m", "old.txt")), true);
+    assert.equal(nc.fs.read(at("m", "old.txt")), "new");
     assert.equal(fs.existsSync(at("m", "new.txt")), false);
 
-    nc.writeFile(at("m", "src", "a.txt"), "a");
-    nc.writeFile(at("m", "dst", "stale.txt"), "stale");
-    assert.equal(nc.move(at("m", "src"), at("m", "dst")), true);
+    nc.fs.write(at("m", "src", "a.txt"), "a");
+    nc.fs.write(at("m", "dst", "stale.txt"), "stale");
+    assert.equal(nc.fs.move(at("m", "src"), at("m", "dst")), true);
     assert.deepEqual(fs.readdirSync(at("m", "dst")), ["a.txt"]);
 
-    nc.writeFile(at("m", "keep.txt"), "keep");
-    nc.writeFile(at("m", "other.txt"), "other");
-    assert.equal(nc.move(at("m", "other.txt"), at("m", "keep.txt"), { overwrite: false }), false);
-    assert.equal(nc.readFile(at("m", "keep.txt")), "keep");
-    assert.equal(nc.move(at("m", "missing.txt"), at("m", "x.txt")), false);
+    nc.fs.write(at("m", "keep.txt"), "keep");
+    nc.fs.write(at("m", "other.txt"), "other");
+    assert.equal(nc.fs.move(at("m", "other.txt"), at("m", "keep.txt"), { overwrite: false }), false);
+    assert.equal(nc.fs.read(at("m", "keep.txt")), "keep");
+    assert.equal(nc.fs.move(at("m", "missing.txt"), at("m", "x.txt")), false);
   });
 
+  // tests the deprecated alias on purpose: move() has no count of what moved
   it("moveFilesIn moves many files", () => {
     fs.mkdirSync(at("many", "in"), { recursive: true });
     for (let i = 0; i < 300; i++) fs.writeFileSync(at("many", "in", `f${i}.txt`), "");
@@ -1891,40 +1893,40 @@ describe("fs", () => {
   });
 
   it("findUp looks in the parents", () => {
-    nc.writeFile(at("up", "package.json"), "{}");
-    nc.createFolder(at("up", "a", "b", "c"));
-    nc.createFolder(at("up", ".git"));
-    assert.equal(nc.findUp("package.json", { cwd: at("up", "a", "b", "c") }), at("up", "package.json"));
-    assert.equal(nc.findUp(".git", { cwd: at("up", "a", "b"), type: "folder" }), at("up", ".git"));
-    assert.equal(nc.findUp(".git", { cwd: at("up", "a", "b"), type: "file", stopAt: dir }), undefined);
-    assert.equal(nc.findUp(["yarn.lock", "package.json"], { cwd: at("up", "a") }), at("up", "package.json"));
-    assert.equal(nc.findUp("package.json", { cwd: at("up", "a", "b"), stopAt: at("up", "a") }), undefined);
-    assert.equal(nc.findUp("definitely-not-there-nc.txt", { cwd: at("up") }), undefined);
-    assert.equal(nc.findUp("package.json"), path.join(process.cwd(), "package.json"));
+    nc.fs.write(at("up", "package.json"), "{}");
+    nc.fs.ensureFolder(at("up", "a", "b", "c"));
+    nc.fs.ensureFolder(at("up", ".git"));
+    assert.equal(nc.fs.findUp("package.json", { cwd: at("up", "a", "b", "c") }), at("up", "package.json"));
+    assert.equal(nc.fs.findUp(".git", { cwd: at("up", "a", "b"), type: "folder" }), at("up", ".git"));
+    assert.equal(nc.fs.findUp(".git", { cwd: at("up", "a", "b"), type: "file", stopAt: dir }), undefined);
+    assert.equal(nc.fs.findUp(["yarn.lock", "package.json"], { cwd: at("up", "a") }), at("up", "package.json"));
+    assert.equal(nc.fs.findUp("package.json", { cwd: at("up", "a", "b"), stopAt: at("up", "a") }), undefined);
+    assert.equal(nc.fs.findUp("definitely-not-there-nc.txt", { cwd: at("up") }), undefined);
+    assert.equal(nc.fs.findUp("package.json"), path.join(process.cwd(), "package.json"));
   });
 
   it("a path starting with ./ is read from the file that makes the call", () => {
-    assert.equal(nc.createPath("./x.txt"), path.join(__dirname, "x.txt"));
-    assert.equal(nc.createPath("x.txt"), path.join(process.cwd(), "x.txt"));
+    assert.equal(nc.fs.resolve("./x.txt"), path.join(__dirname, "x.txt"));
+    assert.equal(nc.fs.resolve("x.txt"), path.join(process.cwd(), "x.txt"));
   });
 
   it("sanitizeFilename cuts by bytes without breaking a character", () => {
-    const long = nc.sanitizeFilename(`${"é".repeat(200)}.txt`);
+    const long = nc.fs.sanitizeFilename(`${"é".repeat(200)}.txt`);
     assert.ok(Buffer.byteLength(long) <= 255);
     assert.equal([...long].every((char) => char === "é"), true);
-    assert.equal(nc.sanitizeFilename("a".repeat(300)).length, 255);
+    assert.equal(nc.fs.sanitizeFilename("a".repeat(300)).length, 255);
   });
 
   it("watch reports that it stopped working", async () => {
-    nc.createFolder(at("watched"));
-    const watcher = nc.watch({ path: at("watched") });
+    nc.fs.ensureFolder(at("watched"));
+    const watcher = nc.fs.watch({ path: at("watched") });
     assert.ok(watcher);
     /** @type {string[]} */
     const seen = [];
     watcher.on("all", (event) => seen.push(event)).on("error", (error) => seen.push(`error:${error instanceof Error}`));
     // Some systems only start reporting a moment after the watch begins: write until it is seen.
     for (let i = 0; i < 50 && !seen.length; i++) {
-      nc.writeFile(at("watched", "a.txt"), `x${i}`);
+      nc.fs.write(at("watched", "a.txt"), `x${i}`);
       await sleep(100);
     }
     watcher.stop();
@@ -1933,7 +1935,8 @@ describe("fs", () => {
 });
 
 describe("found while rereading the guides", () => {
-  const { sys, Cache } = nc;
+  const { sys } = nc;
+  const { Cache } = nc.cache;
 
   it("a shutdown handler that never ends cannot make the process exit quietly", async () => {
     const sysPath = JSON.stringify(require.resolve("../src/Sys.js"));
@@ -1985,6 +1988,7 @@ describe("found while rereading the guides", () => {
     assert.throws(() => time.isSame(0, 1, /** @type {any} */ ("bogus")), TypeError);
   });
 
+  // tests the deprecated alias on purpose: obj.isEmpty() keeps its own answers
   it("obj.isEmpty looks inside maps and sets, and a date is never empty", () => {
     assert.equal(obj.isEmpty(new Map()), true);
     assert.equal(obj.isEmpty(new Map([[1, 2]])), false);
@@ -2068,7 +2072,7 @@ describe("found while rereading the guides, second round", () => {
   it("an async onLog that fails does not take the process down", async () => {
     const script = `
       const nc = require(${JSON.stringify(require.resolve(".."))});
-      const log = nc.createLogger({ stdout: { write() {} }, onLog: async () => { throw new Error("collector down"); } });
+      const log = nc.logger.create({ stdout: { write() {} }, onLog: async () => { throw new Error("collector down"); } });
       log.info("hello");
       setTimeout(() => console.log("still here"), 50);
     `;
@@ -2080,7 +2084,7 @@ describe("found while rereading the guides, second round", () => {
   it("deleting a watched folder is reported once, not as an endless stream of events", async () => {
     const watched = path.join(dir, "watched");
     fs.mkdirSync(watched);
-    const watcher = nc.watch({ path: watched });
+    const watcher = nc.fs.watch({ path: watched });
     assert.ok(watcher);
     let events = 0;
     /** @type {any[]} */
@@ -2101,13 +2105,13 @@ describe("found while rereading the guides, second round", () => {
 
   it("writeJSON takes fsync and mode like writeFile", () => {
     const file = path.join(dir, "data", "state.json");
-    assert.equal(nc.writeJSON(file, { a: 1 }, { fsync: true, mode: 0o600 }), true);
-    assert.deepEqual(nc.readJSON(file), { a: 1 });
+    assert.equal(nc.fs.writeJSON(file, { a: 1 }, { fsync: true, mode: 0o600 }), true);
+    assert.deepEqual(nc.fs.readJSON(file), { a: 1 });
     if (process.platform !== "win32") assert.equal(fs.statSync(file).mode & 0o777, 0o600);
   });
 
   it("a date written by SQLite itself is read as UTC", () => {
-    const db = new nc.SQLite(":memory:", { dates: true });
+    const db = nc.sqlite.open(":memory:", { dates: true });
     try {
       db.createTable({ name: "events", columns: { id: { type: "INTEGER", primaryKey: true }, at: { type: "DATETIME", defaultValue: "CURRENT_TIMESTAMP" }, day: { type: "DATE" } } });
       db.insert("events", { id: 1 });
@@ -2191,7 +2195,7 @@ describe("the fetch of Node.js", () => {
 
 describe("2.2: Node 26 features, available everywhere they can be", () => {
   it("objects that hold a resource stop when they are disposed", async () => {
-    const events = new nc.Emitter();
+    const events = nc.emitter.create();
     let calls = 0;
     const off = events.on("x", () => calls++);
     events.emit("x");
@@ -2218,7 +2222,7 @@ describe("2.2: Node 26 features, available everywhere they can be", () => {
     bar[Symbol.dispose]();
     assert.ok(sink.written.length > 0);
 
-    const when = nc.when(() => false).start();
+    const when = nc.async.when(() => false).start();
     when[Symbol.dispose]();
     const removeHandler = nc.sys.onShutdown(() => {});
     removeHandler[Symbol.dispose]();

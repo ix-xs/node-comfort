@@ -79,7 +79,7 @@ describe("logger", () => {
   it("prints badges, markup, groups and routes streams", () => {
     const out = sink();
     const err = sink();
-    const log = nc.createLogger({ timestamp: false, colors: false, stdout: out.stream, stderr: err.stream });
+    const log = nc.logger.create({ timestamp: false, colors: false, stdout: out.stream, stderr: err.stream });
     log.log("<% red bold Error:%> disk full").info("hello").success("ok").warn("careful").error("bad");
     log.group("Startup").log("inside").group("Nested").log("deep").groupEnd().groupEnd().log("outside");
     assert.deepEqual(out.lines, ["Error: disk full", "ℹ INFO hello", "✔ OK ok", "▼ Startup", "  inside", "  ▼ Nested", "    deep", "outside"]);
@@ -88,13 +88,13 @@ describe("logger", () => {
 
   it("renders colors when forced", () => {
     const out = sink();
-    nc.createLogger({ timestamp: false, colors: true, stdout: out.stream }).log("<% red x %>");
+    nc.logger.create({ timestamp: false, colors: true, stdout: out.stream }).log("<% red x %>");
     assert.ok(out.lines[0].includes(`${ESC}[31mx`));
   });
 
   it("filters by level", () => {
     const out = sink();
-    const log = nc.createLogger({ timestamp: false, colors: false, stdout: out.stream, stderr: out.stream, level: "warn" });
+    const log = nc.logger.create({ timestamp: false, colors: false, stdout: out.stream, stderr: out.stream, level: "warn" });
     log.debug("d").info("i").warn("w");
     assert.deepEqual(out.lines, ["⚠ WARN w"]);
     log.setLevel("trace").trace("t");
@@ -107,7 +107,7 @@ describe("logger", () => {
 
   it("formats objects, errors with causes, and multi-line messages", () => {
     const out = sink();
-    const log = nc.createLogger({ timestamp: false, colors: false, stdout: out.stream, stderr: out.stream });
+    const log = nc.logger.create({ timestamp: false, colors: false, stdout: out.stream, stderr: out.stream });
     const circular = { a: 1 };
     circular.self = circular;
     log.log({ a: 1 }).log(circular).log(new Map([["k", 1]])).log(10n);
@@ -122,7 +122,7 @@ describe("logger", () => {
 
   it("timestamps, scopes, children and custom delimiters", () => {
     const out = sink();
-    const log = nc.createLogger({ colors: false, stdout: out.stream, scope: "api", timestamp: "YYYY" });
+    const log = nc.logger.create({ colors: false, stdout: out.stream, scope: "api", timestamp: "YYYY" });
     log.info("x");
     assert.match(out.lines[0], /^\[\d{4}\] \[api\] ℹ INFO x$/);
     log.child("db").log("y");
@@ -133,7 +133,7 @@ describe("logger", () => {
 
   it("JSON format for log collectors", () => {
     const out = sink();
-    const log = nc.createLogger({ format: "json", stdout: out.stream, stderr: out.stream, fields: { service: "billing" } });
+    const log = nc.logger.create({ format: "json", stdout: out.stream, stderr: out.stream, fields: { service: "billing" } });
     log.info("user created", { userId: 42 });
     log.error("charge failed", new Error("declined"));
     const first = JSON.parse(out.lines[0]);
@@ -147,7 +147,7 @@ describe("logger", () => {
 
   it("child loggers add their fields to the parent's", () => {
     const out = sink();
-    const log = nc.createLogger({ format: "json", stdout: out.stream, fields: { service: "billing" } });
+    const log = nc.logger.create({ format: "json", stdout: out.stream, fields: { service: "billing" } });
     log.child("request", { fields: { requestId: "a1" } }).info("hi");
     log.info("parent");
     const child = JSON.parse(out.lines[0]);
@@ -161,7 +161,7 @@ describe("logger", () => {
     const dir = fs.mkdtempSync(path.join(os.tmpdir(), "nc-log-"));
     try {
       const file = path.join(dir, "logs", "app.log");
-      const log = nc.createLogger({ timestamp: false, colors: true, stdout: { write() {} }, file: { path: file, maxSize: 60, maxFiles: 2 } });
+      const log = nc.logger.create({ timestamp: false, colors: true, stdout: { write() {} }, file: { path: file, maxSize: 60, maxFiles: 2 } });
       for (let i = 0; i < 10; i++) log.info(`line number ${i}`);
       const content = fs.readFileSync(file, "utf8");
       assert.ok(!content.includes(ESC), "no ANSI codes in files");
@@ -175,7 +175,7 @@ describe("logger", () => {
 
   it("timers, tables, boxes and dividers", () => {
     const out = sink();
-    const log = nc.createLogger({ timestamp: false, colors: false, stdout: out.stream, stderr: out.stream });
+    const log = nc.logger.create({ timestamp: false, colors: false, stdout: out.stream, stderr: out.stream });
     log.timeStart("t").timeEnd("t");
     assert.match(out.lines[0], /^t: [\d.]+ms$/);
     log.timeEnd("missing");
@@ -187,11 +187,12 @@ describe("logger", () => {
   });
 
   it("the default logger API is chainable and backward compatible", () => {
+    // tests the deprecated alias on purpose
     assert.equal(typeof nc.setTimestamp, "function");
     assert.equal(typeof nc.setDelimiter, "function");
-    assert.ok(["trace", "debug", "info", "warn", "error", "fatal", "silent"].includes(nc.getLevel()));
-    assert.equal(nc.setLevel("silent").info("muted"), nc.logger);
-    nc.setLevel("info");
+    assert.ok(["trace", "debug", "info", "warn", "error", "fatal", "silent"].includes(nc.logger.getLevel()));
+    assert.equal(nc.logger.setLevel("silent").info("muted"), nc.logger);
+    nc.logger.setLevel("info");
   });
 });
 

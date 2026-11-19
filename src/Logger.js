@@ -23,17 +23,18 @@
  * the loggers with these scopes. Warnings and errors go to stderr.
  *
  * @example
- * nc.info("Server listening on port 3000");
- * nc.warn("Cache is almost full");
- * nc.error(new Error("Payment failed", { cause: err }));
- * nc.log("<% cyan bold Tip:%> press <% bgWhite black  q  %> to quit");
+ * nc.logger.info("Server listening on port 3000");
+ * nc.logger.warn("Cache is almost full");
+ * nc.logger.error(new Error("Payment failed", { cause: err }));
+ * nc.logger.log("<% cyan bold Tip:%> press <% bgWhite black  q  %> to quit");
  */
 
 const fs = require("node:fs");
 const path = require("node:path");
 const util = require("node:util");
 const color = require("./Color.js");
-const { timeConfig } = require("./internal/shared.js");
+const { config: _config } = require("./internal/shared.js");
+const { deprecate } = require("./internal/deprecate.js");
 
 /**
  * Log levels, from the most verbose to the most severe. `silent` hides everything.
@@ -67,7 +68,7 @@ const { timeConfig } = require("./internal/shared.js");
  */
 
 /**
- * Options for `createLogger()` and `configure()`.
+ * Options for `create()` and `configure()`.
  * @typedef {object} LoggerOptions
  * @property {LogLevel} [level] Hide messages below this level. Defaults to `LOG_LEVEL`, else `"info"`.
  * @property {string} [scope] Shown before each message, like `[db]`. Child loggers extend it (`db:pool`).
@@ -84,7 +85,7 @@ const { timeConfig } = require("./internal/shared.js");
  */
 
 /**
- * A logger from `createLogger()`. Every method returns the logger, so calls chain.
+ * A logger from `create()`. Every method returns the logger, so calls chain.
  *
  * @typedef {object} Logger
  * @property {(...args: unknown[]) => Logger} log A plain message, no badge. Its first argument supports markup.
@@ -542,8 +543,8 @@ const _create = (options) => {
     const second = Math.floor(now.getTime() / 1000);
     if (second === face.stampAt) return;
     face.stampAt = second;
-    // A pattern, or a time zone set with time.setTimezone(), needs the real formatter.
-    const text = typeof settings.timestamp === "string" || timeConfig.timeZone !== undefined
+    // A pattern, or a time zone set with config.set(), needs the real formatter.
+    const text = typeof settings.timestamp === "string" || _config.timeZone !== undefined
       ? require("./Time.js").format(now, typeof settings.timestamp === "string" ? settings.timestamp : "HH:mm:ss")
       : `${_two(now.getHours())}:${_two(now.getMinutes())}:${_two(now.getSeconds())}`;
     face.stamp = `${face.palette.gray(`[${text}]`)} `;
@@ -715,19 +716,25 @@ const _default = _create({});
  * Creates a logger with its own settings.
  *
  * @example
- * const log = nc.createLogger({ scope: "api", timestamp: "HH:mm:ss.SSS" });
+ * const log = nc.logger.create({ scope: "api", timestamp: "HH:mm:ss.SSS" });
  * log.info("GET /users 200"); // [14:30:05.120] [api] ℹ INFO GET /users 200
  * log.child("db").debug("query took 12ms");
  *
- * const prod = nc.createLogger({ format: "json", fields: { service: "billing" } });
+ * const prod = nc.logger.create({ format: "json", fields: { service: "billing" } });
  * prod.error("charge failed", { orderId: 42 }, error);
  *
  * @param {LoggerOptions} [options]
  * @returns {Logger}
  */
-function createLogger(options = {}) {
+function create(options = {}) {
   return _create(options);
 }
+
+/**
+ * @deprecated Use `nc.logger.create()`. It will be removed in 4.0.
+ * @type {typeof create}
+ */
+const createLogger = create;
 
 /**
  * Prints a message without a badge. The first argument, when it's a string,
@@ -735,8 +742,8 @@ function createLogger(options = {}) {
  * joined with spaces.
  *
  * @example
- * nc.log("<% green ✔ Saved%> in <% bold 12ms%>");
- * nc.log("user:", { id: 1, roles: ["admin"] });
+ * nc.logger.log("<% green ✔ Saved%> in <% bold 12ms%>");
+ * nc.logger.log("user:", { id: 1, roles: ["admin"] });
  *
  * @param {...unknown} args
  * @returns {typeof import("./Logger")}
@@ -762,7 +769,7 @@ function trace(...args) {
  * `DEBUG` is set).
  *
  * @example
- * nc.debug("cache miss", { key });
+ * nc.logger.debug("cache miss", { key });
  *
  * @param {...unknown} args
  * @returns {typeof import("./Logger")}
@@ -776,7 +783,7 @@ function debug(...args) {
  * An informational message.
  *
  * @example
- * nc.info("Server listening on http://localhost:3000");
+ * nc.logger.info("Server listening on http://localhost:3000");
  *
  * @param {...unknown} args
  * @returns {typeof import("./Logger")}
@@ -790,7 +797,7 @@ function info(...args) {
  * A success message.
  *
  * @example
- * nc.success("Database connected");
+ * nc.logger.success("Database connected");
  *
  * @param {...unknown} args
  * @returns {typeof import("./Logger")}
@@ -816,7 +823,7 @@ function warn(...args) {
  * their chain of causes.
  *
  * @example
- * nc.error(new Error("Cannot save order", { cause: dbError }));
+ * nc.logger.error(new Error("Cannot save order", { cause: dbError }));
  *
  * @param {...unknown} args
  * @returns {typeof import("./Logger")}
@@ -842,9 +849,9 @@ function fatal(...args) {
  * Prints a label and indents what follows, until `groupEnd()`. Groups nest.
  *
  * @example
- * nc.group("Startup").info("Loading config");
- * nc.group("Database").success("Connected").groupEnd();
- * nc.groupEnd();
+ * nc.logger.group("Startup").info("Loading config");
+ * nc.logger.group("Database").success("Connected").groupEnd();
+ * nc.logger.groupEnd();
  *
  * @param {string} [label]
  * @returns {typeof import("./Logger")}
@@ -868,9 +875,9 @@ function groupEnd() {
  * Starts a named timer. `timeEnd()` prints the elapsed time.
  *
  * @example
- * nc.timeStart("import");
+ * nc.logger.timeStart("import");
  * await importProducts();
- * nc.timeEnd("import"); // "import: 1s 240ms"
+ * nc.logger.timeEnd("import"); // "import: 1s 240ms"
  *
  * @param {string} [label="default"]
  * @returns {typeof import("./Logger")}
@@ -895,7 +902,7 @@ function timeEnd(label) {
  * Prints rows as a table.
  *
  * @example
- * nc.table([{ name: "Ada", role: "admin" }, { name: "Bob", role: "user" }]);
+ * nc.logger.table([{ name: "Ada", role: "admin" }, { name: "Bob", role: "user" }]);
  *
  * @param {Array<Record<string, unknown>> | unknown[][]} rows
  * @param {import("./Cli").TableOptions} [options]
@@ -910,7 +917,7 @@ function table(rows, options) {
  * Prints text in a box. Nice for startup banners.
  *
  * @example
- * nc.box("Server ready\nhttp://localhost:3000", { title: "my-app", borderColor: "green" });
+ * nc.logger.box("Server ready\nhttp://localhost:3000", { title: "my-app", borderColor: "green" });
  *
  * @param {string} text
  * @param {import("./Cli").BoxOptions} [options]
@@ -936,8 +943,8 @@ function divider(title) {
  * Sets the minimum level.
  *
  * @example
- * nc.setLevel("warn");   // warnings and errors only
- * nc.setLevel("silent"); // nothing
+ * nc.logger.setLevel("warn");   // warnings and errors only
+ * nc.logger.setLevel("silent"); // nothing
  *
  * @param {LogLevel} level
  * @returns {typeof import("./Logger")}
@@ -962,7 +969,7 @@ function getLevel() {
  * output.
  *
  * @example
- * if (nc.isLevelEnabled("debug")) nc.debug(buildHugeReport());
+ * if (nc.logger.isLevelEnabled("debug")) nc.logger.debug(buildHugeReport());
  *
  * @param {LogLevel} level
  * @returns {boolean}
@@ -975,8 +982,8 @@ function isLevelEnabled(level) {
  * Changes several settings at once.
  *
  * @example
- * nc.configure({ level: "debug", file: "logs/app.log" });
- * nc.configure({ format: "json", fields: { service: "api" } });
+ * nc.logger.configure({ level: "debug", file: "logs/app.log" });
+ * nc.logger.configure({ format: "json", fields: { service: "api" } });
  *
  * @param {LoggerOptions} options
  * @returns {typeof import("./Logger")}
@@ -993,6 +1000,7 @@ function configure(options) {
  * nc.setTimestamp(false);
  * nc.setTimestamp("YYYY-MM-DD HH:mm:ss.SSS");
  *
+ * @deprecated Use `nc.logger.configure({ timestamp })`. It will be removed in 4.0.
  * @param {boolean | string} value
  * @returns {typeof import("./Logger")}
  */
@@ -1007,8 +1015,9 @@ function setTimestamp(value) {
  *
  * @example
  * nc.setDelimiter({ open: "{{", close: "}}" });
- * nc.log("{{red Hello}} world");
+ * nc.logger.log("{{red Hello}} world");
  *
+ * @deprecated Use `nc.logger.configure({ delimiter })`. It will be removed in 4.0.
  * @param {{ open?: string, close?: string }} [options]
  * @returns {typeof import("./Logger")}
  */
@@ -1039,5 +1048,12 @@ module.exports = {
   configure,
   setTimestamp,
   setDelimiter,
+  create,
   createLogger,
 };
+
+deprecate(module.exports, "nc.logger", {
+  setTimestamp: { use: "nc.logger.configure({ timestamp })" },
+  setDelimiter: { use: "nc.logger.configure({ delimiter })" },
+  createLogger: { use: "nc.logger.create()" },
+});

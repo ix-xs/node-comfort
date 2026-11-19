@@ -121,7 +121,7 @@ describe("func: caching", () => {
 describe("func: resilience", () => {
   it("retry succeeds after failures and reports retries", async () => {
     const seen = [];
-    const result = await func.retry(
+    const result = await nc.async.retry(
       async (attempt) => {
         if (attempt < 3) throw new Error(`fail ${attempt}`);
         return "ok";
@@ -133,34 +133,34 @@ describe("func: resilience", () => {
   });
 
   it("retry throws the last error, honours shouldRetry and signal", async () => {
-    await assert.rejects(func.retry(async () => { throw new Error("nope"); }, { attempts: 2 }), /nope/);
+    await assert.rejects(nc.async.retry(async () => { throw new Error("nope"); }, { attempts: 2 }), /nope/);
     let calls = 0;
     await assert.rejects(
-      func.retry(async () => { calls++; throw new Error("fatal"); }, { attempts: 5, shouldRetry: () => false }),
+      nc.async.retry(async () => { calls++; throw new Error("fatal"); }, { attempts: 5, shouldRetry: () => false }),
       /fatal/,
     );
     assert.equal(calls, 1);
     const controller = new AbortController();
     setTimeout(() => controller.abort(), 20);
     await assert.rejects(
-      func.retry(async () => { throw new Error("x"); }, { attempts: 100, delay: 1000, signal: controller.signal }),
+      nc.async.retry(async () => { throw new Error("x"); }, { attempts: 100, delay: 1000, signal: controller.signal }),
       (error) => error instanceof nc.errors.AbortError,
     );
   });
 
   it("timeout rejects with TimeoutError and supports functions", async () => {
-    await assert.rejects(func.timeout(sleep(100), 10), (error) => error instanceof nc.errors.TimeoutError && error.timeout === 10);
-    await assert.rejects(func.timeout(sleep(100), 10, "too slow"), /too slow/);
-    assert.equal(await func.timeout(Promise.resolve("fast"), 50), "fast");
-    assert.equal(await func.timeout(() => "sync value", 50), "sync value");
+    await assert.rejects(nc.async.timeout(sleep(100), 10), (error) => error instanceof nc.errors.TimeoutError && error.timeout === 10);
+    await assert.rejects(nc.async.timeout(sleep(100), 10, "too slow"), /too slow/);
+    assert.equal(await nc.async.timeout(Promise.resolve("fast"), 50), "fast");
+    assert.equal(await nc.async.timeout(() => "sync value", 50), "sync value");
   });
 
   it("delay, to, attempt, promisify", async () => {
     assert.equal(await func.delay((a, b) => a + b, 5, 2, 3), 5);
-    assert.deepEqual(await func.to(Promise.resolve(1)), [null, 1]);
-    const [error] = await func.to(Promise.reject(new Error("x")));
+    assert.deepEqual(await nc.async.to(Promise.resolve(1)), [null, 1]);
+    const [error] = await nc.async.to(Promise.reject(new Error("x")));
     assert.equal(error.message, "x");
-    const [syncError] = await func.to(() => { throw new Error("sync"); });
+    const [syncError] = await nc.async.to(() => { throw new Error("sync"); });
     assert.equal(syncError.message, "sync");
     const safeParse = func.attempt(JSON.parse);
     assert.deepEqual(await safeParse('{"a":1}'), [null, { a: 1 }]);

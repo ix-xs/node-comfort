@@ -47,6 +47,7 @@ const withRename = (fake, fn) => {
 };
 
 describe("security: copying or moving onto itself loses nothing", () => {
+  // tests the deprecated alias on purpose
   it("copyFile and moveFile onto the same file", () => {
     const dir = work();
     assert.equal(nc.copyFile({ path: path.join(dir, "a.txt"), dest: path.join(dir, "a.txt"), force: true }), false);
@@ -56,6 +57,7 @@ describe("security: copying or moving onto itself loses nothing", () => {
     intact(dir);
   });
 
+  // tests the deprecated alias on purpose
   it("moveFile only changes the letter case on Windows", { skip: !windows && "Windows only" }, () => {
     const dir = work();
     assert.equal(nc.moveFile({ path: path.join(dir, "a.txt"), dest: path.join(dir, "A.TXT"), force: true }), true);
@@ -66,6 +68,7 @@ describe("security: copying or moving onto itself loses nothing", () => {
     intact(dir);
   });
 
+  // tests the deprecated alias on purpose
   it("moveFilesIn keeps a file whose copy failed, and counts only what moved", () => {
     const dir = work();
     const dest = at(`dest${count++}`);
@@ -80,6 +83,7 @@ describe("security: copying or moving onto itself loses nothing", () => {
     assert.ok(fs.statSync(path.join(dest, "a.txt")).isDirectory());
   });
 
+  // tests the deprecated alias on purpose
   it("copyFilesIn and moveFilesIn into the same folder", () => {
     const dir = work();
     assert.equal(nc.copyFilesIn({ path: dir, dest: dir, force: true }), 0);
@@ -88,6 +92,7 @@ describe("security: copying or moving onto itself loses nothing", () => {
     intact(dir);
   });
 
+  // tests the deprecated alias on purpose
   it("copyFolder, copyFoldersIn, moveFolder and moveFoldersIn into themselves", () => {
     const dir = work();
     assert.equal(nc.copyFolder({ path: dir, dest: dir, force: true, recursive: true, withFiles: true }), false);
@@ -100,9 +105,9 @@ describe("security: copying or moving onto itself loses nothing", () => {
 
   it("move and copy of a folder into itself", () => {
     const dir = work();
-    assert.equal(nc.move(dir, path.join(dir, "inner")), false);
-    assert.equal(nc.move(dir, path.join(dir, "inner", "deeper")), false);
-    assert.equal(nc.copy(dir, path.join(dir, "inner", "copy")), false);
+    assert.equal(nc.fs.move(dir, path.join(dir, "inner")), false);
+    assert.equal(nc.fs.move(dir, path.join(dir, "inner", "deeper")), false);
+    assert.equal(nc.fs.copy(dir, path.join(dir, "inner", "copy")), false);
     intact(dir);
   });
 
@@ -115,7 +120,7 @@ describe("security: copying or moving onto itself loses nothing", () => {
     const moved = withRename((from, to, original) => {
       if (from === src && to === dest) throw Object.assign(new Error("in the way"), { code: "ENOTEMPTY" });
       return original(from, to);
-    }, () => nc.move(src, dest));
+    }, () => nc.fs.move(src, dest));
     assert.equal(moved, false);
     assert.equal(fs.readFileSync(path.join(dest, "keep.txt"), "utf8"), "keep");
     assert.deepEqual(fs.readdirSync(at()).filter((name) => name.endsWith(".bak")), []);
@@ -129,7 +134,7 @@ describe("security: copying or moving onto itself loses nothing", () => {
     fs.writeFileSync(path.join(dest, "keep.txt"), "keep");
     const moved = withRename(() => {
       throw Object.assign(new Error("disk error"), { code: "EIO" });
-    }, () => nc.move(path.join(dir, "inner"), dest));
+    }, () => nc.fs.move(path.join(dir, "inner"), dest));
     assert.equal(moved, false);
     assert.equal(fs.readFileSync(path.join(dest, "keep.txt"), "utf8"), "keep");
     intact(dir);
@@ -138,24 +143,25 @@ describe("security: copying or moving onto itself loses nothing", () => {
   it("everyday copies and moves still work", () => {
     const dir = work();
     const copyDir = at(`copy${count++}`);
-    assert.equal(nc.copy(dir, copyDir), true);
+    assert.equal(nc.fs.copy(dir, copyDir), true);
     intact(copyDir);
-    assert.equal(nc.copyFile({ path: path.join(dir, "a.txt"), dest: path.join(dir, "b.txt"), force: true }), true);
-    assert.equal(nc.moveFile({ path: path.join(dir, "b.txt"), dest: path.join(dir, "inner") + path.sep }), true);
+    assert.equal(nc.fs.copy(path.join(dir, "a.txt"), path.join(dir, "b.txt")), true);
+    assert.equal(nc.fs.move(path.join(dir, "b.txt"), path.join(dir, "inner") + path.sep), true);
     assert.equal(fs.readFileSync(path.join(dir, "inner", "b.txt"), "utf8"), "a");
+    // tests the deprecated alias on purpose: move() refuses a folder into its own tree
     assert.equal(nc.moveFilesIn({ path: path.join(dir, "inner"), dest: path.join(dir, "inner", "archive"), recursive: false }), 2);
     assert.deepEqual(fs.readdirSync(path.join(dir, "inner", "archive")).sort(), ["b.txt", "data.txt"]);
     // a folder in the way is replaced
     const target = at(`target${count++}`);
     fs.mkdirSync(target);
     fs.writeFileSync(path.join(target, "stale.txt"), "stale");
-    assert.equal(nc.move(copyDir, target), true);
+    assert.equal(nc.fs.move(copyDir, target), true);
     intact(target);
     assert.equal(fs.existsSync(path.join(target, "stale.txt")), false);
     assert.equal(fs.existsSync(copyDir), false);
     if (windows) {
       // only the letter case changes
-      assert.equal(nc.move(path.join(target, "a.txt"), path.join(target, "A.txt")), true);
+      assert.equal(nc.fs.move(path.join(target, "a.txt"), path.join(target, "A.txt")), true);
       assert.ok(fs.readdirSync(target).includes("A.txt"));
     }
   });
@@ -177,23 +183,23 @@ describe("security: links inside a folder are never followed", () => {
 
   it("copy() copies a junction as a link, not the folder it points to", () => {
     const dest = at("tree-copy");
-    assert.equal(nc.copy(tree, dest), true);
+    assert.equal(nc.fs.copy(tree, dest), true);
     assert.equal(fs.readFileSync(path.join(dest, "own.txt"), "utf8"), "own");
     assert.equal(fs.lstatSync(path.join(dest, "link")).isSymbolicLink(), true);
     assert.equal(fs.realpathSync(path.join(dest, "link")), fs.realpathSync(outside));
     // copying again over the copy keeps it a link
-    assert.equal(nc.copy(tree, dest), true);
+    assert.equal(nc.fs.copy(tree, dest), true);
     assert.equal(fs.lstatSync(path.join(dest, "link")).isSymbolicLink(), true);
     assert.deepEqual(fs.readdirSync(outside), ["secret.txt"]);
   });
 
-  it("emptyFolder() refuses a junction", () => {
-    assert.equal(nc.emptyFolder(path.join(tree, "link")), false);
+  it("remove({ contents: true }) refuses a junction", () => {
+    assert.equal(nc.fs.remove(path.join(tree, "link"), { contents: true }), false);
     assert.deepEqual(fs.readdirSync(outside), ["secret.txt"]);
     const plain = at("to-empty");
     fs.mkdirSync(path.join(plain, "sub"), { recursive: true });
     fs.writeFileSync(path.join(plain, "x.txt"), "x");
-    assert.equal(nc.emptyFolder(plain), true);
+    assert.equal(nc.fs.remove(plain, { contents: true }), true);
     assert.deepEqual(fs.readdirSync(plain), []);
   });
 });
@@ -203,11 +209,11 @@ describe("security: a link never takes the place of what it points to", () => {
     const dir = work();
     const link = at(`link${count++}`);
     fs.symlinkSync(dir, link, "junction");
-    assert.equal(nc.move(link, dir), false);
+    assert.equal(nc.fs.move(link, dir), false);
     assert.equal(fs.lstatSync(dir).isSymbolicLink(), false);
     intact(dir);
     const renamed = at(`renamed${count++}`);
-    assert.equal(nc.move(link, renamed), true);
+    assert.equal(nc.fs.move(link, renamed), true);
     assert.equal(fs.lstatSync(renamed).isSymbolicLink(), true);
     assert.equal(fs.existsSync(link), false);
     intact(dir);
@@ -224,7 +230,8 @@ describe("security: a link never takes the place of what it points to", () => {
       return;
     }
     const file = path.join(dir, "a.txt");
-    assert.equal(nc.move(link, file), false);
+    assert.equal(nc.fs.move(link, file), false);
+    // tests the deprecated alias on purpose
     assert.equal(nc.moveFile({ path: link, dest: file }), false);
     assert.equal(nc.moveFile({ path: link, dest: file, force: true }), false);
     assert.equal(nc.copyFile({ path: link, dest: file, force: true }), false);
@@ -241,29 +248,29 @@ describe("security: findUp stops at stopAt", () => {
   });
 
   it("with a trailing separator", () => {
-    assert.equal(nc.findUp("marker.txt", { cwd: at("up", "a", "b"), stopAt: `${at("up", "a")}${path.sep}` }), undefined);
+    assert.equal(nc.fs.findUp("marker.txt", { cwd: at("up", "a", "b"), stopAt: `${at("up", "a")}${path.sep}` }), undefined);
   });
 
   it("with another letter case on Windows", { skip: !windows && "Windows only" }, () => {
-    assert.equal(nc.findUp("marker.txt", { cwd: at("up", "a", "b"), stopAt: at("up", "a").toUpperCase() }), undefined);
+    assert.equal(nc.fs.findUp("marker.txt", { cwd: at("up", "a", "b"), stopAt: at("up", "a").toUpperCase() }), undefined);
   });
 
   it("when the search is outside of it", () => {
-    assert.equal(nc.findUp("marker.txt", { cwd: at("up", "a", "b"), stopAt: at("elsewhere") }), undefined);
+    assert.equal(nc.fs.findUp("marker.txt", { cwd: at("up", "a", "b"), stopAt: at("elsewhere") }), undefined);
   });
 
   it("when stopAt and the search reach the same folder through a junction or a link", () => {
     const link = at("up-link");
     fs.symlinkSync(at("up"), link, "junction");
-    assert.equal(nc.findUp("marker.txt", { cwd: at("up", "a", "b"), stopAt: link }), at("up", "marker.txt"));
-    assert.equal(nc.findUp("marker.txt", { cwd: path.join(link, "a", "b"), stopAt: at("up") }), path.join(link, "marker.txt"));
-    assert.equal(nc.findUp("marker.txt", { cwd: at("up", "a", "b"), stopAt: path.join(link, "a") }), undefined, "still stops there");
-    assert.equal(nc.findUp("marker.txt", { cwd: path.join(link, "a", "b"), stopAt: at("up", "a") }), undefined);
+    assert.equal(nc.fs.findUp("marker.txt", { cwd: at("up", "a", "b"), stopAt: link }), at("up", "marker.txt"));
+    assert.equal(nc.fs.findUp("marker.txt", { cwd: path.join(link, "a", "b"), stopAt: at("up") }), path.join(link, "marker.txt"));
+    assert.equal(nc.fs.findUp("marker.txt", { cwd: at("up", "a", "b"), stopAt: path.join(link, "a") }), undefined, "still stops there");
+    assert.equal(nc.fs.findUp("marker.txt", { cwd: path.join(link, "a", "b"), stopAt: at("up", "a") }), undefined);
   });
 
   it("still finds what is below stopAt", () => {
-    assert.equal(nc.findUp("marker.txt", { cwd: at("up", "a", "b"), stopAt: at("up") }), at("up", "marker.txt"));
-    assert.equal(nc.findUp("marker.txt", { cwd: at("up", "a", "b") }), at("up", "marker.txt"));
+    assert.equal(nc.fs.findUp("marker.txt", { cwd: at("up", "a", "b"), stopAt: at("up") }), at("up", "marker.txt"));
+    assert.equal(nc.fs.findUp("marker.txt", { cwd: at("up", "a", "b") }), at("up", "marker.txt"));
   });
 });
 
@@ -282,7 +289,7 @@ describe("security: atomic writes can't be redirected", () => {
       const guessed = `${target}.${process.pid}.${(1_000_000).toString(36)}${(0.5).toString(36).slice(2, 8)}.tmp`;
       fs.linkSync(victim, guessed);
       try {
-        assert.equal(nc.writeFile(target, "new"), true);
+        assert.equal(nc.fs.write(target, "new"), true);
       } finally {
         fs.rmSync(guessed, { force: true });
       }
@@ -304,7 +311,7 @@ describe("security: atomic writes can't be redirected", () => {
       const planted = `${target}.${Buffer.alloc(8, 7).toString("hex")}.tmp`;
       fs.linkSync(victim, planted);
       try {
-        assert.equal(nc.writeFile(target, "new"), false);
+        assert.equal(nc.fs.write(target, "new"), false);
         assert.equal(fs.existsSync(planted), true, "what was there is not ours to delete");
       } finally {
         fs.rmSync(planted, { force: true });
@@ -318,14 +325,14 @@ describe("security: atomic writes can't be redirected", () => {
 
   it("keeps modes and leaves no temporary file", { skip: windows && "no POSIX modes on Windows" }, () => {
     const secret = at("atomic", "secret.txt");
-    assert.equal(nc.writeFile(secret, "s", { mode: 0o600 }), true);
+    assert.equal(nc.fs.write(secret, "s", { mode: 0o600 }), true);
     assert.equal(fs.statSync(secret).mode & 0o777, 0o600);
-    assert.equal(nc.writeFile(secret, "t"), true);
+    assert.equal(nc.fs.write(secret, "t"), true);
     assert.equal(fs.statSync(secret).mode & 0o777, 0o600);
     // a new file gets the usual permissions, like any file the process creates
     const fresh = at("atomic", "fresh.txt");
     const usual = at("atomic", "usual.txt");
-    assert.equal(nc.writeFile(fresh, "f"), true);
+    assert.equal(nc.fs.write(fresh, "f"), true);
     fs.writeFileSync(usual, "u");
     assert.equal(fs.statSync(fresh).mode & 0o777, fs.statSync(usual).mode & 0o777);
     assert.deepEqual(fs.readdirSync(at("atomic")).filter((name) => name.endsWith(".tmp")), []);
@@ -333,11 +340,11 @@ describe("security: atomic writes can't be redirected", () => {
 
   it("everyday writes still work", () => {
     const file = at("atomic", "data", "list.json");
-    assert.equal(nc.writeJSON(file, { a: 1 }), true);
-    assert.equal(nc.writeJSON(file, { a: 2 }, { fsync: true }), true);
-    assert.deepEqual(nc.readJSON(file), { a: 2 });
-    assert.equal(nc.writeFile(file, Buffer.from("raw")), true);
-    assert.equal(nc.readFile(file), "raw");
+    assert.equal(nc.fs.writeJSON(file, { a: 1 }), true);
+    assert.equal(nc.fs.writeJSON(file, { a: 2 }, { fsync: true }), true);
+    assert.deepEqual(nc.fs.readJSON(file), { a: 2 });
+    assert.equal(nc.fs.write(file, Buffer.from("raw")), true);
+    assert.equal(nc.fs.read(file), "raw");
     assert.deepEqual(fs.readdirSync(path.dirname(file)), ["list.json"]);
   });
 });
@@ -345,20 +352,20 @@ describe("security: atomic writes can't be redirected", () => {
 describe("security: sanitizeFilename", () => {
   it("prefixes every reserved Windows name", () => {
     for (const name of ["COM¹", "COM².txt", "LPT³", "lpt¹.log", "CONIN$", "conout$.txt", "CON .txt", "NUL .txt", "aux  .tar.gz", "CON", "nul.txt"]) {
-      assert.equal(nc.sanitizeFilename(name), `_${name}`, name);
+      assert.equal(nc.fs.sanitizeFilename(name), `_${name}`, name);
     }
   });
 
   it("removes text direction and zero-width characters", () => {
-    assert.equal(nc.sanitizeFilename("invoice‮fdp.exe"), "invoicefdp.exe");
-    assert.equal(nc.sanitizeFilename("a​b‌c‍d‎e‏f⁦g⁩h﻿"), "abcdefgh");
-    assert.equal(nc.sanitizeFilename("C​ON.txt"), "_CON.txt");
+    assert.equal(nc.fs.sanitizeFilename("invoice‮fdp.exe"), "invoicefdp.exe");
+    assert.equal(nc.fs.sanitizeFilename("a​b‌c‍d‎e‏f⁦g⁩h﻿"), "abcdefgh");
+    assert.equal(nc.fs.sanitizeFilename("C​ON.txt"), "_CON.txt");
   });
 
   it("leaves ordinary names alone", () => {
     for (const name of ["console.log", "COM10.txt", "nullable.js", "LPT.txt", "CONIN.txt", "rapport été.pdf", "مرحبا.txt", "😀.png"]) {
-      assert.equal(nc.sanitizeFilename(name), name, name);
+      assert.equal(nc.fs.sanitizeFilename(name), name, name);
     }
-    assert.equal(nc.sanitizeFilename('Report: Q1/Q2 "final"?.pdf'), "Report_ Q1_Q2 _final__.pdf");
+    assert.equal(nc.fs.sanitizeFilename('Report: Q1/Q2 "final"?.pdf'), "Report_ Q1_Q2 _final__.pdf");
   });
 });

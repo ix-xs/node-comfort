@@ -6,12 +6,13 @@
  * only once, even when many callers ask for it at the same moment.
  *
  * @example
- * const users = new nc.Cache({ max: 1000, ttl: "5m" });
+ * const users = nc.cache.create({ max: 1000, ttl: "5m" });
  * const user = await users.getOrSet(id, () => db.users.find(id));
  * users.stats; // { hits: 12, misses: 3, hitRate: 0.8, ... }
  */
 
 const { toMs, argsKey } = require("./internal/shared.js");
+const { AbortError } = require("./errors.js");
 
 /**
  * Why an entry left the cache.
@@ -35,6 +36,14 @@ const { toMs, argsKey } = require("./internal/shared.js");
  * @typedef {object} CacheSetOptions
  * @property {number | string} [ttl] Time to live of this entry. `0` means forever.
  * @property {number | string} [staleWhileRevalidate] How long this entry can be served by `getOrSet()` after it expires, while a new value loads.
+ */
+
+/**
+ * Options for `getOrSet()`: those of `set()`, plus a signal. The signal
+ * stops waiting for the value: the promise rejects with an `AbortError`.
+ * The load itself goes on and still fills the cache, since other callers
+ * may be waiting for it.
+ * @typedef {CacheSetOptions & { signal?: AbortSignal }} CacheGetOrSetOptions
  */
 
 /**
@@ -90,7 +99,7 @@ class Cache {
 
   /**
    * @example
-   * const cache = new nc.Cache({ max: 500, ttl: "1h", updateAgeOnGet: true });
+   * const cache = new nc.cache.Cache({ max: 500, ttl: "1h", updateAgeOnGet: true });
    *
    * @param {CacheOptions<K, V>} [options]
    */
@@ -100,6 +109,22 @@ class Cache {
     this.#stale = _duration(options.staleWhileRevalidate, "staleWhileRevalidate");
     this.#updateAgeOnGet = options.updateAgeOnGet ?? false;
     this.#onRemove = options.onRemove;
+  }
+
+  /**
+   * Creates a cache. Same as `new Cache(options)`, and as `nc.cache.create()`.
+   *
+   * @example
+   * const Cache = require("@ix-xs/node-comfort/cache");
+   * const sessions = Cache.create({ max: 10_000, ttl: "30m" });
+   *
+   * @template [K=any]
+   * @template [V=any]
+   * @param {CacheOptions<K, V>} [options]
+   * @returns {Cache<K, V>}
+   */
+  static create(options) {
+    return new Cache(options);
   }
 
   /**
@@ -230,10 +255,29 @@ class Cache {
    *
    * @param {K} key
    * @param {() => V | PromiseLike<V>} loader
-   * @param {CacheSetOptions} [options]
+   * @param {CacheGetOrSetOptions} [options]
    * @returns {Promise<V>}
+   * @throws {AbortError} If the signal fires before the value is there.
    */
   getOrSet(key, loader, options = {}) {
+    const signal = options.signal;
+    if (!signal) return this.#getOrSet(key, loader, options);
+    if (signal.aborted) return Promise.reject(new AbortError(undefined, { cause: signal.reason }));
+    const value = this.#getOrSet(key, loader, options);
+    return new Promise((resolve, reject) => {
+      const onAbort = () => reject(new AbortError(undefined, { cause: signal.reason }));
+      signal.addEventListener("abort", onAbort, { once: true });
+      value.then(resolve, reject).finally(() => signal.removeEventListener("abort", onAbort));
+    });
+  }
+
+  /**
+   * @param {K} key
+   * @param {() => V | PromiseLike<V>} loader
+   * @param {CacheSetOptions} options
+   * @returns {Promise<V>}
+   */
+  #getOrSet(key, loader, options) {
     const entry = this.#map.get(key);
     if (entry) {
       const now = entry.expires ? Date.now() : 0;
@@ -308,11 +352,12 @@ class Cache {
   /**
    * Removes every entry. Stats are kept.
    *
-   * @returns {void}
+   * @returns {this} The cache, so calls chain.
    */
   clear() {
     this.#loading.clear();
     for (const [key, entry] of [...this.#map]) this.#remove(key, entry, "clear");
+    return this;
   }
 
   /**

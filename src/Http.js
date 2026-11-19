@@ -15,6 +15,7 @@
 const { types } = require("node:util");
 const { HttpError, TimeoutError, AbortError } = require("./errors.js");
 const { toMs, setLongTimeout, sleep } = require("./internal/shared.js");
+const { deprecate } = require("./internal/deprecate.js");
 
 /**
  * A request body.
@@ -43,7 +44,7 @@ const { toMs, setLongTimeout, sleep } = require("./internal/shared.js");
  * @property {number | string} [delay] Wait before the first retry, in ms or like `"1s"`. Defaults to `300`.
  * @property {number} [backoff] Multiplies the wait after each attempt. Defaults to `2`.
  * @property {number | string} [maxDelay] Longest wait, `Retry-After` included. Defaults to 30 seconds.
- * @property {boolean} [jitter] Shorten each wait by a random amount, up to half of it, so many clients don't all come back at the same instant.
+ * @property {boolean | number} [jitter] Shorten each wait by a random amount, so many clients don't all come back at the same instant. `true` takes up to half of it off, a number from `0` to `1` up to that share.
  * @property {number[]} [statuses] Statuses worth retrying. Defaults to 408, 413, 429, 500, 502, 503 and 504.
  * @property {HttpMethod[]} [methods] Methods retried when you give no number of attempts. POST and PATCH aren't, by default, so nothing gets created twice.
  */
@@ -87,7 +88,7 @@ const { toMs, setLongTimeout, sleep } = require("./internal/shared.js");
  * @property {AbortSignal} [signal] Cancels the request.
  * @property {HttpHooks} [hooks]
  * @property {(progress: { loaded: number, total: number | undefined, percent: number | undefined }) => void} [onDownloadProgress] Called while the body downloads.
- * @property {number | string} [maxResponseSize] Largest body read into memory, in bytes or like `"50MB"`, counted once decompressed. Past it, the request is cancelled and an `HttpError` with the code `ERR_RESPONSE_TOO_LARGE` is thrown, so a huge or zip bomb answer can't fill the memory. Defaults to `"100MB"`, `Infinity` turns it off. A stream (`responseType: "stream"`) and the file of `download()` aren't held in memory, so they aren't limited.
+ * @property {number | string | false} [maxResponseSize] Largest body read into memory, in bytes or like `"50MB"`, counted once decompressed. Past it, the request is cancelled and an `HttpError` with the code `ERR_RESPONSE_TOO_LARGE` is thrown, so a huge or zip bomb answer can't fill the memory. Defaults to `"100MB"`, `Infinity` or `false` turns it off. A stream (`responseType: "stream"`) and the file of `download()` aren't held in memory, so they aren't limited.
  * @property {"follow" | "error" | "manual"} [redirect] `"follow"` (the default) follows up to 20 redirects, `"manual"` returns the 3xx response as it is, `"error"` throws an `HttpError` with the code `ERR_REDIRECT`. When a redirect goes to another origin, `authorization`, `cookie`, `proxy-authorization` and the `sensitiveHeaders` are left behind.
  * @property {string[]} [sensitiveHeaders] Headers dropped when a redirect goes to another origin, on top of `authorization`, `cookie` and `proxy-authorization`. Names are case-insensitive. Defaults to `["x-api-key", "x-auth-token", "api-key"]`; a list you give replaces it, so add these to it if you use them.
  */
@@ -298,11 +299,12 @@ const _resolve = (input, options) => {
 };
 
 /**
- * @param {number | string | undefined} value
+ * @param {number | string | false | undefined} value
  * @returns {number}
  */
 const _maxSize = (value) => {
   if (value === undefined) return DEFAULT_MAX_RESPONSE_SIZE;
+  if (value === false) return Infinity;
   const bytes = typeof value === "number" ? value : require("./Num.js").parseBytes(value);
   if (!(bytes >= 0)) throw new TypeError(`Invalid maxResponseSize: ${String(value)}`);
   return bytes;
@@ -620,7 +622,10 @@ const _send = async (input, options, own) => {
     if (!retryable || attempt >= attempts) throw failure;
     const longest = toMs(retry.maxDelay ?? 30_000, "retry.maxDelay");
     let wait = Math.min(serverDelay ?? toMs(retry.delay ?? 300, "retry.delay") * (retry.backoff ?? 2) ** (attempt - 1), longest);
-    if (retry.jitter && serverDelay === undefined) wait *= 0.5 + Math.random() / 2;
+    if (retry.jitter && serverDelay === undefined) {
+      const share = retry.jitter === true ? 0.5 : Math.min(1, Math.max(0, Number(retry.jitter) || 0));
+      wait *= 1 - share * Math.random();
+    }
     if (hooks?.beforeRetry) for (const hook of hooks.beforeRetry) await hook(failure, attempt, wait);
     try {
       await sleep(wait, signal);
@@ -712,7 +717,7 @@ function get(url, options = {}) {
  * const { headers } = await http.head("https://example.com/big.zip");
  * headers["content-length"];
  *
- * @template [T=undefined]
+ * @template [T=any]
  * @param {string | URL} url
  * @param {HttpOptions} [options]
  * @returns {Promise<HttpResponse<T>>}
@@ -887,5 +892,11 @@ module.exports = {
   delete: del,
   download,
   create,
+  // Deprecated: use nc.errors.HttpError. Exported as the class itself, so
+  // nc.http.HttpError still works as a type, which a @deprecated alias can't do.
   HttpError,
 };
+
+deprecate(module.exports, "nc.http", {
+  HttpError: { use: "nc.errors.HttpError" },
+});

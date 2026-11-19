@@ -112,7 +112,7 @@ const { segmenter, graphemes } = require("./internal/shared.js");
  * @typedef {object} ColorHelpers
  * @property {ColorLevel} level The current color level. Set it to force one: `0` turns colors off, `undefined` goes back to what the terminal supports.
  * @property {boolean} enabled Whether colors are being output.
- * @property {(level?: ColorLevel) => ColorModule} create A separate instance with its own level, for another stream or for tests.
+ * @property {(level?: ColorLevel | { level?: ColorLevel }) => ColorModule} create A separate instance with its own level, for another stream or for tests: `create(0)` or `create({ level: 0 })`.
  * @property {(stream?: NodeJS.WriteStream | { isTTY?: boolean }) => ColorLevel} detect The color level a stream supports, taking `NO_COLOR` and `FORCE_COLOR` into account.
  * @property {(text: string) => string} strip Removes colors, every other terminal escape code and every control character but tabs and new lines (so `\r` and `\b` go too).
  * @property {(text: string) => number} width How many columns the text takes, ignoring colors and counting emoji and CJK as 2.
@@ -557,7 +557,10 @@ const _createModule = (forcedLevel) => {
       },
     },
     enabled: { enumerable: true, get: () => currentLevel() > 0 },
-    create: { enumerable: true, value: (/** @type {ColorLevel | undefined} */ lvl) => _createModule(lvl) },
+    create: {
+      enumerable: true,
+      value: (/** @type {ColorLevel | { level?: ColorLevel } | undefined} */ lvl) => _createModule(lvl !== null && typeof lvl === "object" ? lvl.level : lvl),
+    },
     detect: { enumerable: true, value: _detect },
     strip: { enumerable: true, value: strip },
     width: { enumerable: true, value: width },

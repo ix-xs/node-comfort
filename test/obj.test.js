@@ -2,7 +2,7 @@
 
 const { describe, it } = require("node:test");
 const assert = require("node:assert/strict");
-const { obj } = require("..");
+const { obj, is } = require("..");
 
 describe("obj: security", () => {
   it("never pollutes Object.prototype", () => {
@@ -147,8 +147,8 @@ describe("obj: inspection", () => {
     assert.equal(obj.size(new Set([1])), 1);
     assert.equal(obj.size("abc"), 3);
     assert.equal(obj.size(null), 0);
-    assert.equal(obj.isEmpty({}), true);
-    assert.equal(obj.isEmpty({ a: 1 }), false);
+    assert.equal(is.empty({}), true);
+    assert.equal(is.empty({ a: 1 }), false);
     const frozen = obj.deepFreeze({ db: { host: "x" } });
     assert.throws(() => {
       "use strict";

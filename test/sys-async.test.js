@@ -75,7 +75,7 @@ describe("async: collections", () => {
     const result = await async.map([30, 10, 20, 5], async (ms, i) => {
       active++;
       peak = Math.max(peak, active);
-      await nc.wait(ms);
+      await nc.async.sleep(ms);
       active--;
       return i * 2;
     }, { concurrency: 2 });
@@ -92,7 +92,7 @@ describe("async: collections", () => {
     );
     const controller = new AbortController();
     setTimeout(() => controller.abort(), 20);
-    await assert.rejects(async.map([1, 2, 3, 4], () => nc.wait(50), { concurrency: 1, signal: controller.signal }), (e) => e.name === "AbortError");
+    await assert.rejects(async.map([1, 2, 3, 4], () => nc.async.sleep(50), { concurrency: 1, signal: controller.signal }), (e) => e.name === "AbortError");
   });
 
   it("forEach, filter, series, async iterables", async () => {
@@ -114,7 +114,7 @@ describe("async: concurrency primitives", () => {
     const task = async () => {
       active++;
       peak = Math.max(peak, active);
-      await nc.wait(10);
+      await nc.async.sleep(10);
       active--;
     };
     const all = Promise.all([1, 2, 3, 4, 5].map(() => limit(task)));
@@ -133,13 +133,13 @@ describe("async: concurrency primitives", () => {
     q.add(() => order.push("low"));
     q.add(() => order.push("high"), { priority: 10 });
     q.add(() => order.push("mid"), { priority: 5 });
-    assert.equal(q.size, 3);
+    assert.equal(q.pendingCount, 3);
     assert.equal(q.isPaused, true);
     q.start();
     await q.onIdle();
     assert.deepEqual(order, ["high", "mid", "low"]);
     const slow = async.queue({ timeout: 20 });
-    await assert.rejects(slow.add(() => nc.wait(200)), (e) => e instanceof nc.errors.TimeoutError);
+    await assert.rejects(slow.add(() => nc.async.sleep(200)), (e) => e instanceof nc.errors.TimeoutError);
     assert.deepEqual(await async.queue({ concurrency: 2 }).addAll([() => 1, async () => 2]), [1, 2]);
   });
 
@@ -148,14 +148,14 @@ describe("async: concurrency primitives", () => {
     const log = [];
     await Promise.all([1, 2, 3].map((n) => lock.run(async () => {
       log.push(`start ${n}`);
-      await nc.wait(5);
+      await nc.async.sleep(5);
       log.push(`end ${n}`);
     })));
     assert.deepEqual(log, ["start 1", "end 1", "start 2", "end 2", "start 3", "end 3"]);
     const release = await lock.lock();
     assert.equal(lock.isLocked, true);
     release();
-    await nc.wait(0);
+    await nc.async.sleep(0);
     assert.equal(lock.isLocked, false);
   });
 });
@@ -182,6 +182,7 @@ describe("async: promises", () => {
   });
 
   it("re-exports retry, timeout and sleep", async () => {
+    // tests the deprecated alias on purpose
     assert.equal(async.retry, nc.func.retry);
     assert.equal(async.timeout, nc.func.timeout);
     const start = Date.now();

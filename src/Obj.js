@@ -14,6 +14,7 @@
 
 const { types } = require("node:util");
 const shared = require("./internal/shared.js");
+const { deprecate } = require("./internal/deprecate.js");
 
 /**
  * Values that end a path: dates, regexes, maps, sets, functions and arrays.
@@ -1184,6 +1185,7 @@ function size(value) {
  * obj.isEmpty({});                  // true
  * obj.isEmpty(new Map([["a", 1]])); // false
  *
+ * @deprecated Use `nc.is.empty()`, which returns `false` for numbers, booleans and other non-objects, where this one returns `true`. It will be removed in 4.0.
  * @param {unknown} object
  * @returns {boolean}
  */
@@ -1310,3 +1312,7 @@ module.exports = {
   isEmpty,
   deepFreeze,
 };
+
+deprecate(module.exports, "nc.obj", {
+  isEmpty: { use: "nc.is.empty(), which returns false for numbers, booleans and other non-objects, where nc.obj.isEmpty() returned true" },
+});

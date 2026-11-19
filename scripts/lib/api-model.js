@@ -12,7 +12,6 @@ const ts = require("typescript");
 const ROOT = path.resolve(__dirname, "..", "..");
 const TYPES = path.join(ROOT, "types", "index.d.ts");
 const FORMAT = ts.TypeFormatFlags.NoTruncation | ts.TypeFormatFlags.UseAliasDefinedOutsideCurrentScope;
-const FLAT = ["logger", "fs", "checker", "utils"];
 /** How class instances are named in examples and headings. */
 const INSTANCE = /** @type {Record<string, string>} */ ({ SQLite: "db", Cache: "cache", Emitter: "events" });
 
@@ -355,11 +354,10 @@ function buildModel() {
   };
 
   const isClass = (/** @type {unknown} */ v) => typeof v === "function" && /^class\b/.test(Function.prototype.toString.call(v));
-  const flatKeys = Object.keys(nc).filter((k) => typeof nc[k] === "function" && !isClass(nc[k]));
-  const namespaceKeys = Object.keys(nc).filter((k) => !flatKeys.includes(k) && k !== "nc" && k !== "nodeComfort");
+  // Since 3.0 the root only holds namespaces: the deprecated names are hidden and never documented.
+  const namespaceKeys = Object.keys(nc);
   /** @type {Record<string, string[]>} */
   const flat = {};
-  for (const ns of FLAT) flat[ns] = flatKeys.filter((k) => nc[ns] && nc[ns][k] === nc[k]);
 
   /** @type {Namespace[]} */
   const namespaces = [];
@@ -399,12 +397,16 @@ function buildModel() {
     } else {
       const type = checker.getTypeOfSymbolAtLocation(target, source);
       const runtimeKeys = Object.keys(value);
+      // A namespace you can call, like nc.assert(): the call comes first.
+      if (typeof value === "function") members.push(memberOf(key, `nc.${key}`, symbol, "function"));
       for (const name of runtimeKeys) {
         const prop = type.getProperty(name);
         if (!prop) throw new Error(`nc.${key}.${name} exists at runtime but has no type`);
         members.push(memberOf(name, `nc.${key}.${name}`, prop, "function"));
       }
-      extra = checker.getPropertiesOfType(type).map((p) => p.getName()).filter((n) => !runtimeKeys.includes(n));
+      // The deprecated names are hidden at runtime (not enumerable), and stay out of the reference.
+      const hidden = Object.getOwnPropertyNames(value);
+      extra = checker.getPropertiesOfType(type).map((p) => p.getName()).filter((n) => !runtimeKeys.includes(n) && !hidden.includes(n));
     }
     const moduleSymbol = target.flags & (ts.SymbolFlags.ValueModule | ts.SymbolFlags.NamespaceModule) ? target : target.declarations?.[0] ? checker.getSymbolAtLocation(target.declarations[0].getSourceFile()) : undefined;
     const types = moduleSymbol ? typesOf(moduleSymbol) : [];
@@ -414,7 +416,7 @@ function buildModel() {
       module: moduleName,
       title: isClass(value) ? `nc.${key}` : `nc.${key}`,
       kind: isClass(value) ? "class" : "namespace",
-      flat: FLAT.includes(key),
+      flat: false,
       subpath: `${pkg.name}/${key.toLowerCase()}`,
       description: overview.description,
       examples: overview.examples,
