@@ -311,7 +311,7 @@ const _engine = () => {
   try {
     _DatabaseSync = require("node:sqlite").DatabaseSync;
   } catch (error) {
-    throw new SQLiteError(`node:sqlite is not available in Node.js ${process.version}: nc.SQLite requires Node.js 22.23.4, 24.22.1, 26.12.1 or newer`, { cause: error });
+    throw new SQLiteError(`node:sqlite is not available in Node.js ${process.version}: nc.sqlite requires Node.js 22.23.4, 24.22.1, 26.12.1 or newer`, { cause: error });
   } finally {
     process.emitWarning = original;
   }

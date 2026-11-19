@@ -1,15 +1,17 @@
 ---
 title: "Logger"
-description: "`nc.logger` prints readable, colored logs in development and structured JSON in production, with no setup. Its functions are also available at the top level: `nc.info()` is `nc.logger.info()`."
-sidebar:
-  order: 1
+description: "`nc.logger`: levels, colors, markup, groups, timers and tables in a terminal; one JSON object per line, rotating files and redaction in production. No setup."
 ---
 
 ```js
-nc.info("Server listening on port 3000");
-nc.success("Database connected");
-nc.warn("Cache is almost full");
-nc.error(new Error("Payment failed"));
+const { logger } = require("@ix-xs/node-comfort");
+```
+
+```js
+logger.info("Server listening on port 3000");
+logger.success("Database connected");
+logger.warn("Cache is almost full");
+logger.error(new Error("Payment failed"));
 ```
 
 ```text
@@ -22,121 +24,126 @@ nc.error(new Error("Payment failed"));
 
 ## Levels
 
-From the most talkative to the most severe: `trace`, `debug`, `info`, `warn`, `error`, `fatal`. `log` and `success` print at the `info` level. Messages below the current level are dropped.
+| Method | Level | Stream |
+| --- | --- | --- |
+| `trace` | `trace` | stdout |
+| `debug` | `debug` | stdout |
+| `log` | `info`, no badge | stdout |
+| `info`, `success` | `info` | stdout |
+| `warn` | `warn` | stderr |
+| `error` | `error` | stderr |
+| `fatal` | `fatal` | stderr. Does not exit the process |
 
-The default level is `info`. Change it with `LOG_LEVEL=warn`, or in code:
-
-```js
-nc.setLevel("debug");
-nc.setLevel("silent"); // nothing at all
-
-if (nc.isLevelEnabled("debug")) nc.debug(buildExpensiveReport());
-```
-
-`warn`, `error` and `fatal` go to stderr, the rest to stdout. `fatal` doesn't stop the process: call `process.exit(1)` if that's what you want.
-
-## Debug output
-
-Debug messages are hidden until you ask for them, for everything or for the loggers you name:
+Messages below the current level are dropped. The default is `info`, or `LOG_LEVEL`. `silent` hides everything.
 
 ```js
-const db = nc.createLogger({ scope: "db" });
-db.debug("SELECT * FROM users"); // hidden by default
+logger.setLevel("debug");
+logger.getLevel(); // "debug"
+if (logger.isLevelEnabled("debug")) logger.debug(buildExpensiveReport());
 ```
+
+## Debug output by scope
 
 ```bash
-DEBUG=1 node app.js           # every logger, as with LOG_LEVEL=debug
-DEBUG=db node app.js          # the "db" logger only
-DEBUG=db,http:* node app.js   # "db", and the children of "http"
-DEBUG=http*,-http:static node app.js
+DEBUG=1 node app.js                  # every logger, as LOG_LEVEL=debug
+DEBUG=db node app.js                 # the "db" logger only
+DEBUG=db,http:* node app.js          # "db", and the children of "http"
+DEBUG=http*,-http:static node app.js # a leading - excludes
 ```
 
-`DEBUG=1` (or `true`, `yes`, `on`, `*`) sets the default level to `debug`, and so does `NODE_DEBUG` with any value. `LOG_LEVEL` wins when it's set too.
+| `DEBUG` value | Effect |
+| --- | --- |
+| `1`, `true`, `yes`, `on`, `*` | Default level becomes `debug` (as with any `NODE_DEBUG`). `LOG_LEVEL` wins when set |
+| A list of scopes, comma or space separated | The loggers it names print `debug` and `trace`, whatever their level (unless `silent`) |
 
-Any other value of `DEBUG` is a list of scopes, separated by commas or spaces. `*` stands for anything and a leading `-` excludes. The loggers it names print their `debug` and `trace` messages whatever their level, unless that level is `silent`. The others don't change, and neither does a logger without a scope, such as `nc.debug()`.
+A pattern matches the whole scope: `http:*` matches `http:router` but not `http`; `http*` matches both. A logger without a scope is not affected.
 
-A pattern has to match the whole scope: `http:*` matches `http:router` but not `http`, while `http*` matches both.
+## Arguments
 
-## Errors and objects
-
-Pass anything. Objects are pretty-printed, and errors show their stack trace and their chain of causes:
+Objects are pretty-printed. Errors show their stack and their chain of `cause`. The lines after the first are indented, so a value cannot pass for a log line of its own (except `log()` without scope and timestamp, which prints like `console.log`).
 
 ```js
-nc.info("user:", { id: 1, roles: ["admin"] });
-nc.error(new Error("Cannot save order", { cause: dbError }));
+logger.info("user:", { id: 1, roles: ["admin"] });
+logger.error(new Error("Cannot save order", { cause: dbError }));
 ```
 
-A message on several lines keeps its shape: the lines after the first one are indented, with or without a timestamp, so a new line inside a value can't pass for a log line of its own. The exception is `log()` with no scope and no timestamp, which prints like `console.log`, so a box or a table stays aligned.
-
-## Values you don't control
-
-A logged value can hold control characters: a user name, a header, a file name. A terminal acts on some of them (it can clear the screen, change its title, or write to the clipboard), and `\r` can make a line look like another one. So the logger shows them as text, like `\x1b` or `\r`, instead of sending them to the terminal:
-
-```js
-nc.info("Login from", req.headers["user-agent"]); // "Mozilla\x1b]0;hacked\x07" is printed as text
-```
-
-New lines and tabs are kept, and so are the colors and links you add with [`nc.color`](/system/color/). Without colors, and in log files, colors are removed from logged strings.
+Control characters in logged values are written as text (`\x1b`, `\r`): a value cannot clear the terminal, change its title or rewrite a line. New lines, tabs, and the colors and links of [`nc.color`](/system/color/) are kept. Colors are removed when the output is not a terminal, in files, and with `NO_COLOR`.
 
 ## Markup
 
-Style parts of a message with `<% styles text%>`:
-
 ```js
-nc.log("<% green bold ✔ Saved%> in <% dim 12ms%>");
-nc.log("<% #ff8800 Orange%> on <% bg#1e1e2e white a dark background%>");
+logger.log("<% green bold ✔ Saved%> in <% dim 12ms%>");
+logger.log("<% #ff8800 Orange%> on <% bg#1e1e2e white a dark background%>");
 ```
 
-Any color or style from [`nc.color`](/system/color/) works, plus `#hex`, `bg#hex`, `rgb(r, g, b)` and `bgRgb(r, g, b)`. Spaces before `%>` are kept as part of the text. If `<%` clashes with a template engine, change the delimiters with `nc.setDelimiter({ open: "{{", close: "}}" })`.
-
-Markup is read in the first argument only. The other arguments print as they are, so put values that come from outside there, not inside the first string:
+Any style of [`nc.color`](/system/color/) works, plus `#hex`, `bg#hex`, `rgb(r, g, b)` and `bgRgb(r, g, b)`. Only the first argument is read as markup: pass values from outside as the next arguments.
 
 ```js
-nc.info("<% bold New user:%>", user.name); // a name like "<% red x%>" stays text
+logger.info("<% bold New user:%>", user.name); // a name like "<% red x%>" stays text
+logger.configure({ delimiter: { open: "{{", close: "}}" } }); // if <% %> clashes with a template engine
 ```
 
-## Groups, timers and tables
+## Groups, timers, tables
 
 ```js
-nc.group("Deploy");
-nc.info("Building");
-nc.timeStart("upload");
+logger.group("Deploy");
+logger.info("Building");
+logger.timeStart("upload");
 await upload();
-nc.timeEnd("upload"); // "upload: 1s 240ms"
-nc.groupEnd();
+logger.timeEnd("upload"); // "upload: 1s 240ms"
+logger.groupEnd();
 
-nc.table([{ name: "Ada", role: "admin" }, { name: "Bob", role: "user" }]);
-nc.box("Server ready\nhttp://localhost:3000", { title: "my-app", borderColor: "green" });
-nc.divider("Results");
+logger.table([{ name: "Ada", role: "admin" }, { name: "Bob", role: "user" }]);
+logger.box("Server ready\nhttp://localhost:3000", { title: "my-app", borderColor: "green" });
+logger.divider("Results");
 ```
 
-Every function returns the logger, so calls chain: `nc.group("Startup").info("Loading config")`.
+| Method | Does |
+| --- | --- |
+| `group(label?)`, `groupEnd()` | Indents what follows. Groups nest |
+| `timeStart(label?)`, `timeEnd(label?)` | Prints the time elapsed. The label defaults to `"default"` |
+| `table(rows, options?)` | Prints rows as a table. The text alone comes from `nc.cli.table()` |
+| `box(text, options?)` | Prints text in a box, see `nc.cli.box()` |
+| `divider(title?)` | Prints a horizontal line |
 
-## Loggers with their own settings
+Every method returns the logger: `logger.group("Startup").info("Loading config")`.
 
-`createLogger()` gives you an independent logger. `child()` creates one with the same settings and a nested scope:
-
-```js
-const log = nc.createLogger({ scope: "api", timestamp: "HH:mm:ss.SSS" });
-log.info("GET /users 200");        // [14:30:05.120] [api] ℹ INFO GET /users 200
-
-const db = log.child("db");        // scope "api:db"
-db.debug("query took 12ms");       // shown with DEBUG=api:db or DEBUG=api:*
-```
-
-A child can carry its own `fields`. They're added to the parent's, which makes per-request loggers easy:
+## Loggers of your own
 
 ```js
+const log = logger.create({ scope: "api", timestamp: "HH:mm:ss.SSS" });
+log.info("GET /users 200"); // [14:30:05.120] [api] ℹ INFO GET /users 200
+
+const db = log.child("db");  // scope "api:db"
+db.debug("query took 12ms"); // shown with DEBUG=api:db or DEBUG=api:*
+
 const reqLog = log.child("request", { fields: { requestId: req.id } });
-reqLog.info("payment accepted");   // JSON records include requestId
 ```
 
-## JSON logs for production
+`logger.create(options)` returns an independent logger with the same methods, plus `child(scope, options?)`: same settings, nested scope, its `fields` added to the parent's.
 
-Set `LOG_FORMAT=json`, or pass `format: "json"`, and each message becomes one JSON object per line, ready for Datadog, Loki, CloudWatch and friends:
+## Options
+
+`logger.create(options)` and `logger.configure(options)` take:
+
+| Option | Default | |
+| --- | --- | --- |
+| `level` | `LOG_LEVEL`, else `"info"` | Minimum level |
+| `scope` | none | Shown as `[db]`. Children extend it (`db:pool`) |
+| `timestamp` | `true` | `true` is `[HH:mm:ss]`, `false` hides it, a string is a [`time.format`](/data/time/) pattern |
+| `format` | `LOG_FORMAT`, else `"pretty"` | `"json"`: one object per line |
+| `colors` | detected | Force colors on or off |
+| `delimiter` | `{ open: "<%", close: "%>" }` | Markup delimiters |
+| `fields` | none | Added to every JSON record |
+| `redact` | none | Keys whose values are hidden |
+| `onLog` | none | Called for every message that passes the level |
+| `file` | none | A path, or `{ path, maxSize, maxFiles, mode }` |
+| `stdout`, `stderr` | `process.stdout`, `process.stderr` | Anything with `write(text)` |
+
+## JSON logs
 
 ```js
-const log = nc.createLogger({ format: "json", fields: { service: "billing", version: "2.3.0" } });
+const log = logger.create({ format: "json", fields: { service: "billing", version: "2.3.0" } });
 log.error("charge failed", { orderId: 42 }, error);
 ```
 
@@ -144,15 +151,13 @@ log.error("charge failed", { orderId: 42 }, error);
 {"time":"2026-09-11T14:30:05.120Z","level":"error","service":"billing","version":"2.3.0","orderId":42,"err":{"name":"Error","message":"card declined","stack":"Error: card declined\n    at ..."},"msg":"charge failed"}
 ```
 
-Plain objects in the arguments are merged into the record, errors go under `err`, and everything else becomes the message. A logged object can't replace `time`, `level`, `scope` or `msg`.
+Plain objects are merged into the record, errors go under `err`, the rest becomes `msg`. A logged object cannot replace `time`, `level`, `scope` or `msg`. `LOG_FORMAT=json` switches the default logger without code.
 
-## Hiding secrets
-
-List the keys that must never reach a log, and their values are replaced wherever they appear in a logged object:
+## Redaction
 
 ```js
-nc.configure({ redact: ["password", "authorization"] });
-nc.info("login", { user: "ada", password: "hunter2", headers: { Authorization: "Bearer abc" } });
+logger.configure({ redact: ["password", "authorization"] });
+logger.info("login", { user: "ada", password: "hunter2", headers: { Authorization: "Bearer abc" } });
 ```
 
 ```text
@@ -165,46 +170,54 @@ nc.info("login", { user: "ada", password: "hunter2", headers: { Authorization: "
            }
 ```
 
-Keys are found at any depth and case doesn't matter. It works the same in JSON records and in log files. Only keys are looked at: a secret written inside a string is printed as it is.
+Keys match at any depth, ignoring case, in the terminal, JSON records and files. Only keys are checked: a secret inside a string is printed.
 
-## Sending logs elsewhere
-
-`onLog` is called for every message that passes the level, once it has been written. Use it to forward logs to another service:
+## Forwarding logs
 
 ```js
-const log = nc.createLogger({
-  redact: ["token"],
+const log = logger.create({
   onLog(entry) {
     if (entry.level === "error" || entry.level === "fatal") alerts.send(entry.scope, entry.message);
   },
 });
-
-log.error("Payment failed", { orderId: 42, token: "abc" });
-// entry.message: '✖ ERROR Payment failed {\n  "orderId": 42,\n  "token": "[redacted]"\n}'
 ```
 
-The entry holds `time` (a `Date`), `level`, `kind` (the method that was called, so `success()` gives the kind `"success"` and the level `"info"`), `scope`, `message` and `args`. `message` is the line as printed, without colors or timestamp. `args` are the values you passed, untouched: `redact` doesn't apply to them.
+| Entry field | |
+| --- | --- |
+| `time` | A `Date` |
+| `level` | The level: `success()` gives `"info"` |
+| `kind` | The method called: `success()` gives `"success"` |
+| `scope` | The scope, or `undefined` |
+| `message` | The line as written, without colors or timestamp, redacted |
+| `args` | The arguments as passed, not redacted |
 
-An error thrown by the hook is ignored, so a broken hook can't take the program down. The hook isn't awaited, and a promise it rejects is ignored too.
+`onLog` is not awaited. An error it throws, or a promise it rejects, is ignored.
 
 ## Log files
 
-Write every message to a file as well, with rotation by size:
-
 ```js
-nc.configure({ file: { path: "logs/app.log", maxSize: "10MB", maxFiles: 5 } });
+logger.configure({ file: { path: "logs/app.log", maxSize: "10MB", maxFiles: 5 } });
 ```
 
-Colors are removed in files. When `app.log` passes 10 MB it becomes `app.log.1`, and the oldest file beyond five is deleted.
+| `file` option | Default | |
+| --- | --- | --- |
+| `path` | required | Folders are created. Relative paths start from the working directory: pass `nc.fs.resolve("./logs/app.log")` for a path next to the calling file |
+| `maxSize` | no rotation | Past this size, `app.log` becomes `app.log.1` |
+| `maxFiles` | `5` | Rotated files kept |
+| `mode` | `0o600` | Permissions of a new file. An existing file keeps its own. Ignored on Windows |
 
-Logs often hold things others shouldn't read, so a new log file is readable by its owner only (`0o600`). Change it with `mode`, for example to let a log collector in the same group read it:
+Colors are removed in files.
 
-```js
-nc.configure({ file: { path: "logs/app.log", mode: 0o640 } });
-```
+## Before 3.0
 
-A file that already exists keeps its permissions. `mode` is ignored on Windows.
+| 2.2 | 3.0 |
+| --- | --- |
+| `nc.log()`, `nc.trace()`, `nc.debug()`, `nc.info()`, `nc.success()`, `nc.warn()`, `nc.error()`, `nc.fatal()` | `nc.logger.log()`, `nc.logger.trace()`... the same name under `nc.logger` |
+| `nc.group()`, `nc.groupEnd()`, `nc.timeStart()`, `nc.timeEnd()` | `nc.logger.group()`, `nc.logger.groupEnd()`, `nc.logger.timeStart()`, `nc.logger.timeEnd()` |
+| `nc.table()`, `nc.box()`, `nc.divider()` | `nc.logger.table()`, `nc.logger.box()`, `nc.logger.divider()` |
+| `nc.setLevel()`, `nc.getLevel()`, `nc.isLevelEnabled()`, `nc.configure()` | `nc.logger.setLevel()`, `nc.logger.getLevel()`, `nc.logger.isLevelEnabled()`, `nc.logger.configure()` |
+| `nc.setTimestamp(value)`, `nc.logger.setTimestamp(value)` | `nc.logger.configure({ timestamp: value })` |
+| `nc.setDelimiter(value)`, `nc.logger.setDelimiter(value)` | `nc.logger.configure({ delimiter: value })` |
+| `nc.createLogger()`, `nc.logger.createLogger()` | `nc.logger.create()` |
 
-## Settings at a glance
-
-`configure()` and `createLogger()` accept `level`, `scope`, `timestamp` (`true`, `false` or a [`time.format`](/data/time/) pattern), `format`, `colors`, `file`, `fields`, `redact`, `onLog`, `delimiter`, and `stdout`/`stderr` streams. Colors turn off by themselves when the output isn't a terminal or when `NO_COLOR` is set. Every function is listed in the [reference](/reference/logger/).
+The old names still work in 3.0, warn once, and are removed in 4.0: see [Upgrading to 3.0](/help/upgrade-3-0/).

@@ -1,160 +1,184 @@
 ---
 title: "Client HTTP"
-description: "`nc.http` est un client construit sur le `fetch` de Node. Il lit le JSON pour vous, relance ce qui peut l'être sans risque, interrompt les requêtes trop lentes et lève des erreurs exploitables."
-sidebar:
-  order: 1
+description: "`nc.http` : un client sur le `fetch` de Node.js. Il lit le corps, relance ce qui peut l'être sans risque, limite la durée des requêtes et lève des erreurs avec un `code`."
 ---
 
 ```js
-const { data } = await nc.http.get("https://api.github.com/repos/nodejs/node");
-await nc.http.post("https://api.example.com/users", { name: "Ada" });
+const nc = require("@ix-xs/node-comfort");
+const { http } = nc;
 ```
+
+```js
+const { data } = await http.get("https://api.example.com/users/42");
+await http.post("https://api.example.com/users", { name: "Ada" });
+```
+
+| Membre | Rôle |
+| --- | --- |
+| `request(url, options?)` | N'importe quelle méthode, `GET` par défaut |
+| `get`, `head`, `delete` | `(url, options?)` |
+| `post`, `put`, `patch` | `(url, data?, options?)` : objets, tableaux, nombres et booléens partent en JSON |
+| `download(url, destination, options?)` | Écrit une réponse dans un fichier, en flux |
+| `create(defaults?)` | Un client avec des valeurs par défaut |
 
 ## Réponses
 
-Chaque appel se résout avec une réponse dont le corps est déjà lu :
+Chaque appel se résout une fois le corps lu :
 
 ```js
-const res = await nc.http.get(url);
+const res = await http.get("https://api.example.com/users/42");
 res.status;   // 200
-res.ok;       // true pour les 2xx
-res.headers;  // noms en minuscules
+res.ok;       // true
+res.data;     // { id: 42, name: "Ada" }
 res.cookies;  // ["session=abc; Path=/; HttpOnly", "theme=dark; Path=/"]
-res.data;     // JSON analysé, texte ou Buffer, selon le type de contenu
-res.attempts; // nombre de tentatives qu'il a fallu
-res.duration; // total en ms, nouvelles tentatives comprises
+res.attempts; // 1
 ```
 
-`cookies` liste tous les en-têtes `Set-Cookie`, à raison d'une chaîne par cookie. `headers` ne peut en contenir qu'un seul.
+| Champ | |
+| --- | --- |
+| `status`, `statusText`, `ok` | `ok` vaut `true` pour un 2xx |
+| `headers` | Noms en minuscules, une valeur chacun |
+| `cookies` | Chaque en-tête `Set-Cookie`, une chaîne par cookie |
+| `data` | Le corps, lu selon `responseType` |
+| `url` | L'URL finale, après les redirections |
+| `duration` | En ms, relances comprises |
+| `attempts` | Le nombre de tentatives |
 
-Imposez un format avec `responseType: "json" | "text" | "buffer" | "stream"`. Avec `"stream"`, `data` est un stream lisible que vous consommez vous-même.
+| `responseType` | `data` est |
+| --- | --- |
+| `"auto"` (par défaut) | Du JSON analysé ou du texte, selon le type de contenu ; un `Buffer` sinon |
+| `"json"`, `"text"`, `"buffer"` | Ce format |
+| `"stream"` | Un flux lisible, que vous consommez |
 
-## Vérifier ce que vous recevez
+## Vérifier le corps
+
+`schema` appelle `parse()` sur le corps d'une réponse 2xx, et `data` reçoit son résultat. Tout objet doté d'une méthode `parse()` convient, en général un [schéma](/data/schema/) :
 
 ```js
 const s = nc.schema;
 const User = s.object({ id: s.number(), name: s.string() });
 
-const { data: user } = await nc.http.get(`${api}/users/42`, { schema: User });
+const { data: user } = await http.get("https://api.example.com/users/42", { schema: User });
 // { id: 42, name: "Ada" }
 ```
 
-Le corps d'une réponse 2xx passe par `User.parse()`, et `data` contient ce que cette méthode renvoie. Si l'API envoie autre chose, l'appel lève une `ValidationError` qui nomme le champ en cause : les mauvaises données s'arrêtent là au lieu de circuler dans votre code. Tout objet doté d'une méthode `parse()` convient. Un [schéma](/data/schema/) est le choix habituel.
+Un corps non conforme lève une `ValidationError` qui nomme chaque champ. En TypeScript, `data` prend le type du schéma ; sans schéma il vaut `any`, ou le type que vous indiquez : `http.get<Repo>(url)`.
 
-En TypeScript, `data` prend le type que décrit le schéma, ici `{ id: number; name: string }`. Sans schéma, c'est `any`, ou le type que vous indiquez : `nc.http.get<Repo>(url)`.
-
-## URL et chaînes de requête
+## URL et paramètres de requête
 
 ```js
-await nc.http.get(`${api}/users/:id/files/:name`, { params: { id: 42, name: "report 2026.pdf" } });
-// .../users/42/files/report%202026.pdf
+await http.get("https://api.example.com/users/:id/files/:name", { params: { id: 42, name: "report 2026.pdf" } });
+// https://api.example.com/users/42/files/report%202026.pdf
+
+await http.get("https://api.example.com/posts", { query: { page: 2, tags: ["a", "b"], since: new Date("2026-01-01"), cursor: undefined } });
+// https://api.example.com/posts?page=2&tags=a&tags=b&since=2026-01-01T00%3A00%3A00.000Z
 ```
 
-`params` remplit les parties `:name` du chemin et encode les valeurs. Un nom absent de `params` lève une `TypeError`, et rien n'est envoyé. C'est aussi le cas d'une valeur `.` ou `..`, qui remonterait dans le chemin.
-
-Une chaîne de requête peut être un objet. `null` et `undefined` sont ignorés, les tableaux répètent la clé et les dates sont envoyées au format ISO :
-
-```js
-await nc.http.get(url, { query: { page: 2, tags: ["a", "b"], since: new Date("2026-01-01"), cursor: undefined } });
-// ...?page=2&tags=a&tags=b&since=2026-01-01T00%3A00%3A00.000Z
-```
-
-Si l'URL contient déjà une chaîne de requête, `query` s'y ajoute.
+| Option | |
+| --- | --- |
+| `params` | Remplit les parties `:nom` du chemin, encodées. Un nom absent, `"."` ou `".."` lève une `TypeError` avant tout envoi |
+| `query` | Objet ou `URLSearchParams`, ajouté à la chaîne de requête de l'URL. `null` et `undefined` sont ignorés, un tableau répète la clé, une date part au format ISO |
 
 ## Envoyer des données
 
 ```js
-await nc.http.post(url, { name: "Ada" });        // les objets et les tableaux partent en JSON
-await nc.http.put(url, "raw text");              // les chaînes, Buffers et streams partent tels quels
-await nc.http.post(url, formData);               // FormData pour les envois multipart
-await nc.http.request(url, { method: "POST", form: { a: 1, b: "x y" } }); // formulaire encodé en URL
+await http.post(url, { name: "Ada" });                                        // JSON
+await http.put(url, "raw text");                                              // tel quel
+await http.post(url, formData);                                               // multipart
+await http.request(url, { method: "POST", form: { a: 1, b: "x y" } });        // a=1&b=x+y
+await http.post(url, { name: "Ada" }, { headers: { "idempotency-key": key } });
 ```
 
-`headers` peut être un objet, une instance de `Headers` ou une liste de paires `[name, value]` :
-
-```js
-await nc.http.post(url, { name: "Ada" }, { headers: { "idempotency-key": nc.id.uuid() } });
-```
+| Option | Envoyé comme |
+| --- | --- |
+| `json` | JSON |
+| `form` | `application/x-www-form-urlencoded` |
+| `body` | Tel quel : chaîne, `Buffer`, `FormData`, `Blob`, flux |
+| `headers` | Objet, `Headers` ou paires `[nom, valeur]` |
+| `auth` | `{ bearer }` ou `{ username, password }` : l'en-tête `authorization` |
 
 ## Erreurs
 
-Un statut hors 2xx lève une `HttpError` qui porte le statut, les en-têtes et le corps :
+Un statut hors 2xx lève une `HttpError` qui contient la réponse :
 
 ```js
 try {
-  await nc.http.get(`${api}/users/42`);
+  await http.get("https://api.example.com/users/42");
 } catch (error) {
   if (error instanceof nc.errors.HttpError && error.status === 404) return null;
   throw error;
 }
 ```
 
-Passez `throwHttpErrors: false` pour recevoir la réponse à la place. Une panne réseau donne une `HttpError` avec `status: 0` et le code `ERR_NETWORK`. Une requête trop lente lève une `TimeoutError`, et une requête annulée une `AbortError`. Un corps qui dépasse la limite de taille donne une `HttpError` avec le code `ERR_RESPONSE_TOO_LARGE`, et une redirection impossible à suivre une `HttpError` avec `ERR_REDIRECT` ou `ERR_TOO_MANY_REDIRECTS` (voir plus bas). Ces trois-là ne sont pas relancées.
+| Échec | Levée | `code` | Relancé |
+| --- | --- | --- | --- |
+| Statut hors 2xx | `HttpError` avec `status`, `headers`, `data`, `url`, `method` | `ERR_HTTP` | 408, 413, 429, 5xx |
+| Pas de réponse | `HttpError` avec `status: 0` | `ERR_NETWORK` | Oui |
+| Tentative trop lente | `TimeoutError` | `ETIMEDOUT` | Oui |
+| Annulé | `AbortError` | `ABORT_ERR` | Non |
+| Corps au-delà de `maxResponseSize` | `HttpError` | `ERR_RESPONSE_TOO_LARGE` | Non |
+| Redirection refusée | `HttpError` | `ERR_REDIRECT` | Non |
+| Plus de 20 redirections | `HttpError` | `ERR_TOO_MANY_REDIRECTS` | Non |
 
-Le corps d'une réponse d'erreur est toujours lu, même avec `responseType: "stream"` : `error.data` contient donc ce que le serveur a répondu.
+`throwHttpErrors: false` renvoie la réponse au lieu de lever. Le corps d'une réponse en erreur est toujours lu, même avec `responseType: "stream"` : `error.data` contient ce que le serveur a répondu. [Erreurs](/basics/errors/) liste toutes les classes.
 
-## Serveurs que vous ne contrôlez pas
+## Les serveurs que vous ne maîtrisez pas
 
-`nc.http` utilise le `fetch()` intégré à Node.js : il dépend donc de la version de Node.js que vous faites tourner. Avant 22.23.4, 24.22.1 et 26.12.1, une seule réponse malveillante peut arrêter votre programme ([GHSA-xjj6-f33q-929c](https://github.com/advisories/GHSA-xjj6-f33q-929c)) : la requête échoue avec une `HttpError` que vous pouvez attraper, puis le processus plante quand même. Aucun code dans un paquet ne peut l'empêcher, et Node.js 25 n'a pas de correctif.
+`nc.http` utilise le `fetch` de Node.js. Avant 22.23.4, 24.22.1 et 26.12.1, une seule réponse malveillante peut faire planter le processus ([GHSA-xjj6-f33q-929c](https://github.com/advisories/GHSA-xjj6-f33q-929c)) : la requête échoue avec une `HttpError`, puis le processus s'arrête quand même. Aucun paquet ne peut l'empêcher, et Node.js 25 n'a pas de correctif. Un programme qui appelle des adresses données par des utilisateurs, des webhooks ou tout serveur que vous ne maîtrisez pas doit tourner sur l'une de ces versions ou une version ultérieure.
 
-Si votre programme appelle des adresses fournies par vos utilisateurs, des webhooks ou n'importe quel serveur que vous ne contrôlez pas, utilisez l'une de ces versions ou une version plus récente.
-
-## Taille des réponses
-
-Un corps lu en mémoire est limité à 100 Mo, comptés une fois décompressé. Au-delà, la requête est annulée et une `HttpError` avec le code `ERR_RESPONSE_TOO_LARGE` est levée. Sans limite, une petite réponse gzip pourrait remplir la mémoire une fois décompressée. Fixez votre propre limite avec `maxResponseSize`, en octets ou sous forme de texte :
+## Limites
 
 ```js
-await nc.http.get(url, { maxResponseSize: "5MB" });
-await nc.http.get(url, { maxResponseSize: Infinity }); // pas de limite
+await http.get(url, { timeout: "10s", maxResponseSize: "5MB" });
+await http.get(url, { timeout: false, maxResponseSize: false }); // aucune limite
 ```
 
-Un stream (`responseType: "stream"`) et le fichier de `download()` ne sont pas gardés en mémoire : ils ne sont donc pas limités.
+| Option | Par défaut | |
+| --- | --- | --- |
+| `timeout` | 30 secondes | Par tentative, en ms ou en texte. `false` ou `Infinity` : aucune. Avec `responseType: "stream"`, seulement l'attente des en-têtes |
+| `maxResponseSize` | `"100MB"` | Corps lu en mémoire, compté une fois décompressé. `false` ou `Infinity` : aucune. Les flux et `download()` ne sont pas limités |
+| `signal` | | Un `AbortSignal` ; rejette avec une `AbortError`, y compris pendant l'attente entre deux relances |
+
+## Relances
+
+`GET`, `HEAD`, `OPTIONS`, `PUT` et `DELETE` ont 3 tentatives au total, après une erreur réseau, un dépassement de délai ou un statut 408, 413, 429, 500, 502, 503 ou 504. L'attente double à partir de 300 ms, et `Retry-After` est respecté. `POST` et `PATCH` ne sont pas relancés.
+
+```js
+await http.get(url, { retry: 5 });      // 5 tentatives
+await http.get(url, { retry: false });  // 1 tentative
+await http.get(url, { retry: { attempts: 4, delay: "1s", maxDelay: "10s", jitter: true } });
+await http.post(url, body, { retry: { attempts: 3 } }); // un nombre de tentatives vaut aussi pour POST
+```
+
+| Option de `retry` | Par défaut | |
+| --- | --- | --- |
+| `attempts` | `3` pour les méthodes sûres, `1` pour les autres | Première tentative comprise ; vaut pour toutes les méthodes quand il est donné |
+| `delay` | `300` | Attente avant la première relance, en ms ou en texte |
+| `backoff` | `2` | Multiplie l'attente après chaque tentative |
+| `maxDelay` | 30 secondes | Attente la plus longue, `Retry-After` compris |
+| `jitter` | `false` | `true` retire au hasard jusqu'à la moitié de chaque attente ; un nombre de `0` à `1`, jusqu'à cette part |
+| `statuses` | 408, 413, 429, 500, 502, 503, 504 | Statuts qui valent une relance |
+| `methods` | `GET`, `HEAD`, `OPTIONS`, `PUT`, `DELETE` | Méthodes relancées quand `attempts` n'est pas donné |
+
+Une requête dont le corps est un flux part une seule fois, quoi que dise `retry`.
 
 ## Redirections
 
-Le client suit lui-même les redirections, jusqu'à 20, et décide donc des en-têtes qui les accompagnent. Quand une redirection mène vers une autre origine (un passage de `https` à `http` en est une), `authorization`, `cookie` et `proxy-authorization` restent en route, de même que les en-têtes de `sensitiveHeaders` : par défaut `x-api-key`, `x-auth-token` et `api-key`. Une liste que vous donnez remplace celle par défaut : gardez-y donc ces noms si vous les utilisez.
+Jusqu'à 20 redirections sont suivies. Vers une autre origine (passer de `https` à `http` compte), `authorization`, `cookie`, `proxy-authorization` et les `sensitiveHeaders` sont retirés.
 
-```js
-const api = nc.http.create({
-  baseURL: "https://api.example.com/",
-  headers: { "x-api-key": process.env.API_KEY, "x-tenant-secret": process.env.TENANT_SECRET },
-  sensitiveHeaders: ["x-api-key", "x-tenant-secret"],
-});
-```
+| Option | Par défaut | |
+| --- | --- | --- |
+| `redirect` | `"follow"` | `"manual"` renvoie la réponse 3xx ; `"error"` lève `ERR_REDIRECT` |
+| `sensitiveHeaders` | `["x-api-key", "x-auth-token", "api-key"]` | Une liste donnée remplace celle-ci |
 
-`redirect` indique quoi faire d'une redirection :
-
-| Valeur | Ce qui se passe |
-| --- | --- |
-| `"follow"` (par défaut) | La suit. Plus de 20 à la suite lèvent `ERR_TOO_MANY_REDIRECTS`. |
-| `"manual"` | Renvoie la réponse 3xx telle quelle. Lisez vous-même `res.headers.location`. |
-| `"error"` | Lève une `HttpError` avec le code `ERR_REDIRECT`. |
-
-Une redirection vers autre chose que `http:` ou `https:`, ou une redirection qui obligerait à envoyer une seconde fois un corps en stream, lève aussi `ERR_REDIRECT`.
-
-## Timeouts et nouvelles tentatives
-
-Chaque tentative dispose de 30 secondes par défaut. Changez cette durée avec `timeout: "10s"`, ou désactivez-la avec `timeout: false`. Avec `responseType: "stream"`, la limite ne couvre que l'attente des en-têtes de la réponse. Une fois ceux-ci reçus, la lecture du corps peut prendre le temps qu'il faut.
-
-Les requêtes GET, HEAD, OPTIONS, PUT et DELETE ont droit à 3 tentatives au maximum, en tout. Elles sont relancées après une erreur réseau, un timeout ou l'un des statuts 408, 413, 429, 500, 502, 503 et 504, avec une attente un peu plus longue à chaque fois (300 ms, puis 600 ms). Un en-tête `Retry-After` est respecté. POST et PATCH ne sont pas relancés : rien n'est donc créé en double.
-
-```js
-await nc.http.get(url, { retry: 5 });                          // 5 tentatives
-await nc.http.get(url, { retry: false });                      // aucune
-await nc.http.get(url, { retry: { attempts: 4, delay: "1s", maxDelay: "10s", jitter: true } });
-await nc.http.post(url, body, { retry: { attempts: 3, methods: ["POST"] } }); // si votre API est idempotente
-```
-
-`delay` est l'attente avant la première nouvelle tentative. Elle double après chaque tentative (ce que vous changez avec `backoff`) et ne dépasse jamais `maxDelay`, fixé à 30 secondes par défaut. `jitter: true` raccourcit chaque attente d'une durée aléatoire, jusqu'à la moitié, pour que de nombreux clients ne reviennent pas tous au même instant.
-
-Un nombre de tentatives que vous fixez vous-même, avec `retry: 5` ou avec `attempts`, s'applique à toutes les méthodes, POST et PATCH compris. Une requête dont le corps est un stream n'est envoyée qu'une fois, quelle que soit la valeur de `retry`, car un stream ne se lit pas une seconde fois.
+Une redirection vers un autre schéma que `http:` ou `https:`, ou qui obligerait à renvoyer un corps en flux, lève `ERR_REDIRECT`.
 
 ## Clients
 
-`create()` crée un client avec des valeurs par défaut dont chaque appel hérite :
+`create()` renvoie un client dont les appels héritent des valeurs par défaut. Il a les mêmes méthodes, plus `extend()` et `defaults` :
 
 ```js
-const api = nc.http.create({
+const api = http.create({
   baseURL: "https://api.example.com/v1/",
   headers: { "x-app": "my-app" },
   query: { locale: "en" },
@@ -163,70 +187,60 @@ const api = nc.http.create({
 });
 
 const { data: users } = await api.get("users", { query: { page: 2 } });
-// GET https://api.example.com/v1/users?locale=en&page=2, avec l'en-tête x-app
+// GET https://api.example.com/v1/users?locale=en&page=2
 
-const { data: user } = await api.get("users/:id", { params: { id: 42 } });
 const admin = api.extend({ headers: { "x-admin": "1" } });
 ```
 
-Ce qu'un appel passe s'ajoute aux valeurs par défaut du client. Ses `query` et ses `headers` rejoignent ceux du client, et une clé donnée à nouveau remplace celle par défaut. Pour écarter un en-tête par défaut le temps d'un appel, donnez-lui la valeur `undefined`.
+Les `query` et `headers` d'un appel s'ajoutent à ceux du client ; un en-tête mis à `undefined` retire celui par défaut.
 
-`auth` accepte aussi `{ username, password }` pour l'authentification basique.
-
-`baseURL` est une frontière. Un chemin qui en sortirait lève une `TypeError` avant tout envoi : un chemin construit à partir d'une donnée extérieure ne peut donc pas emporter l'en-tête `auth` du client vers un autre hôte.
+`baseURL` est une frontière : un chemin qui en sort lève une `TypeError` avant tout envoi, si bien qu'un chemin construit à partir d'une saisie ne peut pas emporter l'`auth` du client vers un autre hôte.
 
 ```js
-await api.get(`users/${req.params.name}`);  // très bien pour "ada"
-await api.get("../admin");                  // TypeError
-await api.get("https://evil.example/");     // TypeError
-```
-
-Pour appeler une autre adresse volontairement, passez `allowAbsoluteUrls: true`. Seul ce que l'appel fournit y part : les `auth`, `headers` et `query` du client restent avec l'origine de base.
-
-```js
+await api.get("../admin");              // TypeError
+await api.get("https://evil.example/"); // TypeError
 await api.get("https://cdn.example.com/logo.png", { allowAbsoluteUrls: true, responseType: "buffer" });
 ```
+
+Avec `allowAbsoluteUrls: true`, seul ce que donne l'appel part vers l'autre hôte : `auth`, `headers` et `query` du client restent sur son origine.
 
 ## Hooks
 
 ```js
-const api = nc.http.create({
+const api = http.create({
   hooks: {
     beforeRequest: [(config) => { config.headers["x-request-id"] = nc.id.uuid(); }],
-    afterResponse: [(res) => nc.debug(res.status, res.url)],
-    beforeRetry: [(error, attempt, delay) => nc.warn(`Retry ${attempt} in ${delay}ms`)],
+    afterResponse: [(res) => nc.logger.debug(res.status, res.url)],
+    beforeRetry: [(error, attempt, delay) => nc.logger.warn(`Retry ${attempt} in ${delay}ms`)],
   },
 });
 ```
 
-Les hooks passés à un appel s'exécutent après ceux du client.
+| Hook | Arguments | Peut |
+| --- | --- | --- |
+| `beforeRequest` | `config` : `url`, `method`, `headers`, `body`, `attempt` | Modifier l'URL, les en-têtes ou le corps |
+| `afterResponse` | `response`, `config` | Renvoyer une autre réponse |
+| `beforeRetry` | `error`, `attempt`, `delay` | Journaliser, attendre |
+
+Les hooks d'un appel passent après ceux du client.
 
 ## Téléchargements
 
 ```js
 const bar = nc.cli.progress({ total: 100 });
-const { path, size } = await nc.http.download("https://example.com/video.mp4", "./downloads/video.mp4", {
+const { path, size } = await http.download("https://example.com/video.mp4", nc.fs.resolve("./downloads/video.mp4"), {
   onDownloadProgress: ({ percent }) => bar.update(percent ?? 0),
+  signal: AbortSignal.timeout(10 * 60_000),
 });
 bar.stop();
 ```
 
-Le fichier est écrit en flux, donc la mémoire reste stable quelle que soit sa taille. Les dossiers sont créés. Les données vont dans un fichier temporaire à côté de la destination, qui prend son nom définitif une fois le téléchargement terminé. Si le téléchargement échoue, le fichier temporaire est supprimé, et un fichier déjà présent reste tel qu'il était.
+Le corps est écrit en flux dans un fichier temporaire à côté de la destination, qui prend le nom final une fois complet ; les dossiers sont créés. Un téléchargement raté ne laisse aucun fichier partiel et garde le fichier déjà présent. `timeout` ne couvre que l'attente de la réponse : limitez le transfert avec `signal`. Une destination relative se lit depuis le dossier de travail : passez `nc.fs.resolve()` pour un chemin à côté de votre fichier ([Conventions](/basics/conventions/)). `path` est absolu et `size` en octets. `onDownloadProgress` fonctionne sur tous les appels, avec `loaded`, `total` et `percent`.
 
-`timeout` est le délai dont dispose le serveur pour commencer à répondre, 30 secondes par défaut. Le transfert lui-même n'a pas de limite. Pour en fixer une, passez un `signal` :
+## Avant 3.0
 
-```js
-await nc.http.download(url, "./downloads/video.mp4", { signal: AbortSignal.timeout(10 * 60_000) });
-```
+| 2.2 | 3.0 |
+| --- | --- |
+| `nc.http.HttpError` | `nc.errors.HttpError` |
 
-## Annuler
-
-```js
-const controller = new AbortController();
-setTimeout(() => controller.abort(), 1000);
-await nc.http.get(url, { signal: controller.signal });
-```
-
-L'appel est rejeté avec une `AbortError`, y compris s'il attendait entre deux tentatives.
-
-Toutes les options sont listées dans la [référence](/reference/http/).
+C'est la même classe : `instanceof` répond de même avec l'un ou l'autre nom.

@@ -1,43 +1,50 @@
 ---
 title: "SQLite"
-description: "`nc.SQLite` enveloppe le moteur SQLite livré avec Node.js. Il n'y a aucun module natif à compiler, et vous disposez d'aides CRUD, de filtres riches, de colonnes JSON, de transactions, de migrations et de sauvegardes."
-sidebar:
-  order: 2
+description: "`nc.sqlite` : le moteur SQLite intégré à Node.js, avec des fonctions CRUD, des filtres, des colonnes JSON et booléennes, des transactions, des migrations et des sauvegardes. Rien à compiler."
 ---
 
 ```js
-const db = new nc.SQLite("data/app.sqlite");
-
-db.createTable({
-  name: "users",
-  columns: {
-    id: { type: "INTEGER", primaryKey: true, autoincrement: true },
-    email: { type: "TEXT", notNull: true, unique: true },
-    settings: { type: "JSON", defaultValue: {} },
-    active: { type: "BOOLEAN", defaultValue: true },
-  },
-});
-
-db.insert("users", { email: "ada@example.com", settings: { theme: "dark" } });
-const ada = db.get("users", { email: "ada@example.com" });
-ada.settings.theme; // "dark"
+const nc = require("@ix-xs/node-comfort");
+const { sqlite } = nc;
 ```
 
-Les méthodes sont synchrones, comme le moteur. `await` fonctionne quand même si vous le préférez. Les valeurs sont toujours passées en paramètres et les noms de tables et de colonnes sont vérifiés : aucune injection SQL ne peut passer par là.
+| Membre | |
+| --- | --- |
+| `open(path?, options?)` | Ouvre une base : identique à `new sqlite.SQLite(path, options)` |
+| `SQLite` | La classe, pour typer ou étendre |
+| `op` | Des opérateurs de filtre que seul le code peut créer : `op.gte(18)` |
 
-## Ouvrir une base de données
+Les méthodes sont synchrones, comme le moteur ; `await` fonctionne quand même. Les valeurs sont toujours liées en paramètres et les noms de tables et de colonnes sont vérifiés : ni les unes ni les autres ne peuvent injecter de SQL.
+
+## Ouvrir
 
 ```js
-const db = new nc.SQLite();                      // ./db.sqlite
-const app = new nc.SQLite("data/app.sqlite");    // les dossiers sont créés
-const mem = new nc.SQLite(":memory:");           // jetable, pour les tests
-const ro = new nc.SQLite("app.sqlite", { readOnly: true });
-const quick = new nc.SQLite("app.sqlite", { synchronous: "NORMAL" });
+const db = sqlite.open();                                   // ./db.sqlite
+const app = sqlite.open(nc.fs.resolve("./data/app.sqlite")); // les dossiers sont créés
+const mem = sqlite.open(":memory:");
+const ro = sqlite.open("app.sqlite", { readOnly: true });
 ```
 
-La journalisation write-ahead et les clés étrangères sont activées par défaut. Fermez la connexion avec `db.close()`.
+Un chemin relatif se lit depuis le dossier de travail, pas depuis le fichier appelant : passez `nc.fs.resolve()` pour un chemin à côté de votre code ([Conventions](/basics/conventions/)).
 
-`synchronous` indique avec quelle insistance SQLite pousse chaque commit vers le disque. L'option garde le réglage propre à SQLite, `"FULL"`, tant que vous ne la changez pas. Avec la journalisation write-ahead, `"NORMAL"` accélère les écritures et ne peut pas corrompre le fichier, mais une coupure de courant peut annuler les derniers commits.
+| Option | Par défaut | |
+| --- | --- | --- |
+| `json` | `true` | Analyse les colonnes `JSON` |
+| `booleans` | `true` | Renvoie les colonnes `BOOLEAN` en `true`/`false` |
+| `dates` | `false` | Renvoie les colonnes `DATE`, `DATETIME` et `TIMESTAMP` en `Date` |
+| `wal` | `true` | Journal en écriture anticipée : les lectures n'attendent pas les écritures |
+| `foreignKeys` | `true` | Applique les clés étrangères |
+| `busyTimeout` | 5 secondes | Attente d'un verrou tenu par une autre connexion, en ms ou en texte |
+| `synchronous` | `"FULL"` | `"NORMAL"` écrit plus vite avec `wal` et ne peut pas corrompre le fichier ; une coupure de courant peut annuler les derniers commits |
+| `readOnly` | `false` | |
+| `operators` | `"plain"` | `"tagged"` : voir [Valeurs venues d'une requête](#values-from-a-request) |
+
+| Propriété ou méthode | |
+| --- | --- |
+| `db.path` | Chemin absolu, ou `":memory:"` |
+| `db.isOpen` | Si la connexion est ouverte |
+| `db.close()` | La ferme |
+| `db.native` | Le `DatabaseSync` de `node:sqlite` sous-jacent |
 
 ## Tables
 
@@ -52,132 +59,135 @@ db.createTable({
     tags: { type: "JSON", defaultValue: [] },
     views: { type: "INTEGER", defaultValue: 0, check: "views >= 0" },
     created_at: { type: "DATETIME", defaultValue: "CURRENT_TIMESTAMP" },
-    token: { type: "TEXT", defaultExpression: "lower(hex(randomblob(16)))" },
   },
   constraints: [{ type: "unique", columns: ["user_id", "title"] }],
   indexes: [{ columns: ["status"] }],
 });
 
 db.tables();         // ["posts", "users"]
-db.columns("posts"); // [{ name: "id", type: "INTEGER", primaryKey: true, ... }, ...]
+db.columns("posts"); // [{ name: "id", type: "INTEGER", notNull: false, defaultValue: null, primaryKey: true }, ...]
 ```
 
-`createTable` ne fait rien si la table existe déjà. Pour modifier une table, utilisez les migrations.
+| Clé de colonne | |
+| --- | --- |
+| `type` | `INTEGER`, `TEXT`, `REAL`, `BLOB`, `NUMERIC`, `JSON`, `BOOLEAN`, `DATETIME`, ou tout type SQLite comme `VARCHAR(255)` |
+| `primaryKey`, `autoincrement`, `notNull`, `unique` | Contraintes |
+| `defaultValue` | Une valeur fixe ; `"CURRENT_TIMESTAMP"`, `"CURRENT_DATE"` et `"CURRENT_TIME"` désignent le moment de l'insertion |
+| `defaultExpression` | Du SQL calculé pour chaque ligne, écrit tel quel : jamais à partir d'une saisie |
+| `values` | Valeurs autorisées |
+| `check` | Une expression `CHECK` |
+| `references`, `onDelete`, `onUpdate` | Clé étrangère |
 
-`defaultValue` est une valeur fixe, à une exception près : `"CURRENT_TIMESTAMP"`, `"CURRENT_DATE"` et `"CURRENT_TIME"` désignent le moment de l'insertion. `defaultExpression` est une valeur par défaut que SQLite calcule pour chaque nouvelle ligne. Elle est écrite telle quelle dans la table : ne la construisez donc jamais à partir d'une saisie utilisateur.
+`constraints` accepte `{ type: "unique" | "primaryKey", columns }`, `{ type: "check", expression }` et `{ type: "foreignKey", columns, references: { table, columns } }` ; `indexes` accepte ce qu'accepte `createIndex`.
+
+| Méthode | |
+| --- | --- |
+| `createTable(definition)` | Ne fait rien si la table existe. Une table se modifie par des migrations |
+| `createIndex(table, { columns, unique, name, where })` | Sauf s'il existe ; `where` en fait un index partiel |
+| `deleteTable(table)` | La supprime |
+| `clearTable(table)` | Supprime toutes les lignes, garde la table |
+| `hasTable(table)`, `tables()`, `columns(table)` | Inspectent le schéma |
 
 ## Lire
 
 ```js
-db.get("users", { email });                                        // première correspondance, ou undefined
-db.getAll("users");                                                // toutes les lignes
+db.get("users", { email });   // première correspondance, ou undefined
+db.getAll("users");           // toutes les lignes
 db.getAll("posts", { status: "published" }, { orderBy: "created_at", direction: "DESC", limit: 20, offset: 40 });
 db.count("users", { active: true });
 db.exists("users", { email });
+
+const page = db.paginate("posts", { status: "published" }, { page: 2, perPage: 10, orderBy: "id", direction: "DESC" });
+// { items: [10 lignes], page: 2, perPage: 10, total: 22, pages: 3, hasPrev: true, hasNext: true }
 ```
 
-Le nom peut aussi être celui d'une vue ou d'une table temporaire. Elles se lisent comme n'importe quelle autre table.
+| Option de lecture | |
+| --- | --- |
+| `orderBy`, `direction` | Colonne (un chemin JSON fonctionne) et `"ASC"` ou `"DESC"` |
+| `limit`, `offset` | `getAll` |
+| `page`, `perPage` | `paginate` : les pages commencent à 1, `perPage` vaut 20 par défaut, une page au-delà de la fin donne la dernière |
 
-`paginate` renvoie une page, avec ce dont une pagination a besoin pour s'afficher :
-
-```js
-const page = db.paginate("posts", { status: "published" }, { page: 2, perPage: 10, orderBy: "created_at", direction: "DESC" });
-page.items;   // les 10 lignes de la page 2
-page.total;   // 22, le nombre de lignes correspondantes
-page.pages;   // 3
-page.hasPrev; // true
-page.hasNext; // true
-```
-
-Les pages commencent à 1, et `perPage` vaut 20 sauf indication contraire. Une page au-delà de la fin donne la dernière. Indiquez toujours un `orderBy` : sans lui, SQLite est libre de renvoyer les lignes dans n'importe quel ordre.
+Le nom de table peut être une vue ou une table temporaire. Donnez un `orderBy` à `paginate` : sans lui, SQLite renvoie les lignes dans n'importe quel ordre.
 
 ## Filtres
 
-Un filtre est un objet dont chaque clé est une colonne :
+Chaque clé d'un filtre est une colonne :
 
 ```js
 db.getAll("users", {
-  role: ["admin", "editor"],             // IN
-  age: { gte: 18, lt: 65 },              // opérateurs
-  deleted_at: null,                      // IS NULL
+  role: ["admin", "editor"],  // IN
+  age: { gte: 18, lt: 65 },   // opérateurs
+  deleted_at: null,           // IS NULL
   $or: [{ email: { like: "%@acme.com" } }, { vip: true }],
 });
-```
 
-Opérateurs : `eq`, `ne`, `gt`, `gte`, `lt`, `lte`, `in`, `notIn`, `like`, `notLike`, `glob`, `between` et `isNull`. Les booléens et les dates se passent directement.
-
-Une clé contenant des points va chercher à l'intérieur d'une colonne JSON :
-
-```js
 db.getAll("users", { "settings.theme": "dark", "settings.langs.0": "en" }, { orderBy: "settings.theme" });
 ```
 
-`"settings.theme"` est la clé `theme` de la colonne `settings`, et `"settings.langs.0"` le premier élément de son tableau `langs`. Les opérateurs fonctionnent aussi sur ces clés, et `orderBy` les accepte.
+| Filtre | |
+| --- | --- |
+| `value` | Égal ; booléens et dates sont convertis |
+| `[a, b]` | L'un de |
+| `null` | `IS NULL` |
+| `{ eq, ne, gt, gte, lt, lte, in, notIn, like, notLike, glob, between, isNull }` | Opérateurs, combinés par AND |
+| `$or`, `$and` | Listes de filtres |
+| `"column.key.0"` | Une clé dans une colonne JSON, avec tous les opérateurs et dans `orderBy` |
 
-### Valeurs venant d'une requête
+### Valeurs venues d'une requête
 
-Par défaut, tout objet qui a une clé d'opérateur est un opérateur. C'est un piège quand une valeur vient d'un corps JSON : si `req.body.token` vaut `{ "ne": "" }`, alors `{ token: req.body.token }` trouve toutes les lignes dont le token n'est pas vide, au lieu de la seule ligne qui a ce token.
-
-Vérifiez d'abord ces valeurs (avec `nc.schema`, par exemple), ou ouvrez la base avec `operators: "tagged"`. Seuls les opérateurs créés par `SQLite.op` comptent alors, et tout autre objet ou tableau est une valeur, comparée comme texte JSON :
+Par défaut, tout objet avec une clé d'opérateur est un opérateur : si `req.body.token` vaut `{ "ne": "" }`, `{ token: req.body.token }` trouve toutes les lignes qui ont un jeton. Vérifiez ces valeurs d'abord ([schémas](/data/schema/)), ou ouvrez la base avec `operators: "tagged"` : seuls les opérateurs créés par `op` comptent, et tout autre objet ou tableau est une valeur, comparée comme texte JSON.
 
 ```js
-const { op } = nc.SQLite;
-const db = new nc.SQLite("data/app.sqlite", { operators: "tagged" });
+const { op } = sqlite;
+const db = sqlite.open("data/app.sqlite", { operators: "tagged" });
 
 db.getAll("users", { age: op.between(18, 65), role: op.in(["admin", "editor"]), deleted_at: op.isNull() });
-db.get("users", { email, token: req.body.token }); // { "ne": "" } est comparé comme du texte, un token absent lève une erreur
+db.get("users", { email, token: req.body.token }); // { "ne": "" } est une valeur ; undefined lève une erreur
 ```
 
-`SQLite.op` a une fonction par opérateur (`op.gte(18)`, `op.like("%@acme.com")`, `op.notNull()`...). Ses opérateurs portent une marque que JSON ne peut pas produire, et ils fonctionnent aussi sans `"tagged"`. Plusieurs peuvent être réunis dans un même objet : `{ ...op.gte(18), ...op.lt(65) }`. Avec `"tagged"`, un tableau est lui aussi une valeur : écrivez donc `op.in([...])` pour « l'un de ». Et une lecture lève une erreur pour une valeur `undefined`, comme les écritures le font toujours : dans le mode par défaut, une valeur absente fait simplement disparaître sa condition, vérifiez donc d'abord les valeurs obligatoires.
+`op` fournit `eq`, `ne`, `gt`, `gte`, `lt`, `lte`, `in`, `notIn`, `like`, `notLike`, `glob`, `between`, `isNull` et `notNull`. Ils fonctionnent dans les deux modes et se combinent par décomposition : `{ ...op.gte(18), ...op.lt(65) }`. Avec `"tagged"`, une valeur `undefined` dans une lecture lève une erreur, comme dans les écritures ; dans le mode par défaut, elle retire sa condition.
 
 ## Écrire
 
 ```js
 const { lastInsertRowid } = db.insert("users", { email, settings: { theme: "dark" } });
-db.insertMany("products", rows);                                  // une seule transaction, bien plus rapide
+db.insertMany("products", rows);
 db.update("users", { active: false }, { last_login: { lt: "2025-01-01" } });
 db.increment("posts", { views: 1 }, { id: post.id });
 db.upsert("settings", { user_id: 1, key: "theme", value: "dark" }, ["user_id", "key"]);
 db.delete("sessions", { expires_at: { lt: new Date() } });
 ```
 
-Les objets et les tableaux sont stockés en JSON, les booléens en 1 et 0, et les dates en chaînes ISO. `update`, `increment`, `delete` et `set` refusent un filtre qui atteindrait toutes les lignes : une condition oubliée ne peut donc pas vider une table. Cela couvre un filtre vide, mais aussi `{ id: undefined }` (une variable jamais définie), un `$or` ou un `$and` vide, et `{ id: { notIn: [] } }`. Ils lèvent alors une `SQLiteError`. Pour vider une table volontairement, utilisez `clearTable()` :
+| Méthode | Renvoie | |
+| --- | --- | --- |
+| `insert(table, data, { onConflict })` | `{ ok, changes, lastInsertRowid }` | `onConflict` : `"ignore"` saute la ligne, `"replace"` supprime d'abord l'ancienne |
+| `insertMany(table, rows, { onConflict })` | `{ ok, changes }` | Une seule transaction |
+| `update(table, data, where)` | `{ ok, changes }` | Les valeurs `undefined` sont ignorées |
+| `increment(table, { column: n }, where)` | `{ ok, changes }` | Une seule instruction : des incréments simultanés comptent tous ; un nombre négatif soustrait |
+| `upsert(table, data, conflict)` | `{ ok, changes, lastInsertRowid }` | Insère, ou met à jour sur place en cas de conflit sur les colonnes `conflict`, qui doivent former une clé primaire ou une contrainte d'unicité |
+| `delete(table, where)` | `{ ok, changes }` | |
+
+Les objets et tableaux sont stockés en JSON, les booléens en 1 et 0, les dates en texte ISO. `update`, `increment` et `delete` lèvent une `SQLiteError` pour un filtre qui toucherait toutes les lignes : un filtre vide, `{ id: undefined }`, un `$or` ou un `$and` vide, `{ id: { notIn: [] } }`.
 
 ```js
-db.delete("sessions", { user_id: req.user?.id }); // lève une erreur si req.user est absent
-db.clearTable("sessions");                         // supprime toutes les lignes, garde la table
+db.delete("sessions", { user_id: req.user?.id }); // lève une erreur si req.user manque
+db.clearTable("sessions");                         // toutes les lignes, volontairement
 ```
-
-`increment` ajoute aux colonnes numériques en une seule instruction : deux requêtes qui arrivent en même temps comptent donc toutes les deux. Lire la valeur, y ajouter puis la réécrire en ferait perdre une. Les nombres négatifs soustraient, et une colonne vide compte pour 0.
-
-Une insertion qui entre en conflit avec une ligne existante échoue, sauf si vous dites quoi faire avec `onConflict` :
-
-```js
-db.insert("tags", { label: "news" }, { onConflict: "ignore" });    // changes vaut 0 si elle y était déjà
-db.insertMany("tags", labels.map((label) => ({ label })), { onConflict: "ignore" });
-db.insert("tags", { id: 1, label: "press" }, { onConflict: "replace" });
-```
-
-`"ignore"` saute la ligne. `"replace"` supprime l'ancienne ligne, puis insère la nouvelle. Pour modifier une ligne sur place en conservant ses autres colonnes, utilisez `upsert`.
 
 ## JSON, booléens et dates
 
-Les colonnes déclarées `JSON` reviennent déjà analysées, et les colonnes `BOOLEAN` reviennent en `true`/`false`. Passez `{ dates: true }` à l'ouverture de la base pour obtenir aussi des objets `Date` à partir des colonnes `DATE`, `DATETIME` et `TIMESTAMP`.
-
-Les requêtes brutes sont converties de la même façon, jointures et colonnes renommées comprises :
+Les colonnes `JSON` reviennent analysées, les colonnes `BOOLEAN` en booléens et, avec `{ dates: true }`, les colonnes de date en `Date`. Les requêtes brutes sont converties aussi, jointures et alias compris (avant Node.js 22.16, seulement pour une requête sur une table) :
 
 ```js
 db.queryOne("SELECT p.title, p.tags, u.active AS author_active FROM posts p JOIN users u ON u.id = p.user_id");
-// { title: "Hello", tags: ["news"], author_active: true }
+// { title: "Post 1", tags: ["news"], author_active: true }
 ```
 
-Sur un Node.js antérieur à 22.16, cela ne fonctionne que pour une requête portant sur une seule table.
-
-Une valeur par défaut `CURRENT_TIMESTAMP` écrit un texte UTC comme `"2026-10-12 10:37:04"`, sans fuseau horaire. Avec `dates: true`, il est relu comme le bon instant. Pour stocker le format ISO qu'ont les dates insérées, utilisez plutôt `defaultExpression: "strftime('%Y-%m-%dT%H:%M:%fZ', 'now')"`.
+Une valeur par défaut `CURRENT_TIMESTAMP` écrit un texte UTC sans fuseau (`"2026-10-12 10:37:04"`), relu au bon moment avec `dates: true`. Pour le format ISO des dates insérées : `defaultExpression: "strftime('%Y-%m-%dT%H:%M:%fZ', 'now')"`.
 
 ## Erreurs
 
-Les échecs lèvent une `SQLiteError`. Son `sqliteCode` vous dit ce qui s'est passé :
+Les échecs lèvent une `SQLiteError` (`code` `ERR_SQLITE`) avec `sql` et `sqliteCode` :
 
 ```js
 try {
@@ -197,23 +207,11 @@ db.transaction(() => {
 });
 ```
 
-Si la fonction lève une erreur, toutes les modifications sont annulées et l'erreur est levée de nouveau. Les transactions peuvent s'imbriquer : un échec interne que vous interceptez n'annule pas le travail de la transaction externe. Les fonctions asynchrones fonctionnent aussi ; le commit les attend.
+Une fonction qui lève une erreur annule tout, et l'erreur est relancée. La valeur renvoyée par la fonction est renvoyée. Les transactions s'imbriquent : un échec intérieur que vous attrapez n'annule pas le travail extérieur. Une fonction async fonctionne ; le commit l'attend. `db.inTransaction` indique si une transaction est ouverte.
 
-Quand plusieurs processus partagent la base et qu'une transaction lit avant d'écrire, passez `{ immediate: true }` :
-
-```js
-db.transaction(() => {
-  const account = db.get("accounts", { id });
-  if (account.balance < amount) throw new Error("Not enough money");
-  db.increment("accounts", { balance: -amount }, { id });
-}, { immediate: true });
-```
-
-Le verrou d'écriture est alors pris tout de suite, et non à la première écriture : les processus s'attendent les uns les autres au lieu d'échouer avec `SQLITE_BUSY`.
+Quand plusieurs processus partagent le fichier et qu'une transaction lit avant d'écrire, passez `{ immediate: true }` : le verrou d'écriture est pris tout de suite, et les processus s'attendent au lieu d'échouer avec `SQLITE_BUSY`.
 
 ## Migrations
-
-`migrate` applique chaque migration une seule fois, dans l'ordre, et enregistre la version dans la base :
 
 ```js
 db.migrate([
@@ -221,38 +219,67 @@ db.migrate([
   "ALTER TABLE users ADD COLUMN name TEXT",
   (db) => db.update("users", { name: "unknown" }, { name: null }),
 ]);
+// { from: 0, to: 3 }, puis { from: 3, to: 3 } au démarrage suivant
 ```
 
-N'ajoutez jamais de migrations ailleurs qu'à la fin de la liste. Chacune s'exécute dans sa propre transaction : une migration qui échoue est annulée et laisse les précédentes en place.
+Chaque migration s'exécute une fois, dans l'ordre, dans sa propre transaction ; la version est stockée dans `PRAGMA user_version` et se lit avec `db.version`. Une migration qui échoue est annulée, les précédentes restent. N'ajoutez des migrations qu'à la fin de la liste.
 
 ## SQL brut
 
 ```js
-db.exec("UPDATE users SET active = ? WHERE last_login < ?", [false, cutoff]);
-db.queryOne("SELECT COUNT(*) AS total FROM orders WHERE paid = ?", true);
+db.exec("UPDATE users SET active = ? WHERE last_login < ?", [false, cutoff]); // { changes, lastInsertRowid }
+db.queryOne("SELECT COUNT(*) AS total FROM orders WHERE paid = ?", true);   // { total: 2 }
 db.queryAll("SELECT role, COUNT(*) AS n FROM users GROUP BY role");
 for (const row of db.iterate("SELECT * FROM events")) stream.write(JSON.stringify(row));
 ```
 
-Les paramètres peuvent être un tableau, une valeur seule, ou nommés : `{ $id: 42 }`.
+Les paramètres sont un tableau, une valeur seule, ou nommés : `{ $id: 42 }`.
 
 ## Lignes typées
 
 ```ts
 type User = { id: number; email: string; active: boolean };
-const db = new nc.SQLite<User>("app.sqlite");
-db.getAll("users", { active: true }); // User[], et les filtres suggèrent les colonnes
+const db = nc.sqlite.open<User>("app.sqlite");
+db.getAll("users", { active: true }); // User[], et les filtres proposent les colonnes
 ```
 
-`db.table("users")` renvoie des raccourcis liés à une seule table : `users.get()`, `users.insert()`, `users.paginate()`...
+`db.table("users")` lie les fonctions à une table : `name`, `get`, `getAll`, `paginate`, `insert`, `insertMany`, `update`, `increment`, `upsert`, `delete`, `count`, `exists` et `clear`.
 
 ## Maintenance
 
 ```js
-db.backup(`backups/app-${nc.time.format(new Date(), "YYYY-MM-DD")}.sqlite`); // sans risque pendant l'exécution
+db.backup(`backups/app-${nc.time.format(new Date(), "YYYY-MM-DD")}.sqlite`); // chemin absolu de la copie
 db.vacuum();
-db.fn("slugify", (text) => nc.str.slugify(String(text)));                   // appeler du JavaScript depuis SQL
-db.native;                                                                  // le DatabaseSync sous-jacent
+db.fn("slugify", (text) => nc.str.slugify(String(text)));
+db.queryOne("SELECT slugify(title) AS slug FROM posts WHERE id = 3");        // { slug: "post-3" }
 ```
 
-Toutes les méthodes et options sont listées dans la [référence](/reference/sqlite/).
+| Méthode | |
+| --- | --- |
+| `backup(path)` | Copie la base pendant qu'elle tourne. Le fichier ne doit pas exister ; un chemin relatif se lit depuis le dossier de travail |
+| `vacuum()` | Récupère l'espace inutilisé |
+| `fn(name, implementation, { deterministic, varargs })` | Une fonction JavaScript appelable depuis le SQL |
+
+## Point d'entrée
+
+`@ix-xs/node-comfort/sqlite` exporte la classe elle-même, avec `open` et `op` en membres statiques :
+
+```js
+const SQLite = require("@ix-xs/node-comfort/sqlite");
+const db = SQLite.open(":memory:");
+const { op } = SQLite;
+```
+
+En modules ES, importez-la comme export par défaut (`import SQLite from "@ix-xs/node-comfort/sqlite"`) : `open` et `op` ne sont pas des exports nommés de ce point d'entrée.
+
+## Avant 3.0
+
+| 2.2 | 3.0 |
+| --- | --- |
+| `nc.SQLite` | `nc.sqlite.SQLite` |
+| `new nc.SQLite(path, options)` | `nc.sqlite.open(path, options)` |
+| `nc.SQLite.op` | `nc.sqlite.op` |
+| `db.set(table, data, where)` | `db.upsert(table, data, conflict)`, ou `db.get()` puis `db.update()` ou `db.insert()` |
+| `createTable({ options })` | `createTable({ columns })` |
+
+`db.set` cherchait la ligne par `where` (ou par `data.id`) et n'avait besoin d'aucune colonne unique. `upsert` est une seule instruction atomique et exige une clé primaire ou une contrainte d'unicité sur les colonnes `conflict`. Les anciens noms fonctionnent jusqu'à 4.0, avec un avertissement ([Passer à 3.0](/help/upgrade-3-0/)).

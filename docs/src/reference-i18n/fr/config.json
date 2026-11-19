@@ -1,0 +1,14 @@
+{
+  "Like `\"fr\"`, `\"en-GB\"` or `\"pt-BR\"`.": "Par exemple `\"fr\"`, `\"en-GB\"` ou `\"pt-BR\"`.",
+  "Settings shared by the whole toolkit: the language and the time zone that `num` and `time` use when a call doesn't give its own `{ locale }` or `{ timeZone }`. English and the system zone by default, so output doesn't depend on the machine.": "Les réglages communs à toute la boîte à outils : la langue et le fuseau horaire que `num` et `time` utilisent quand un appel ne précise pas son propre `{ locale }` ou `{ timeZone }`. L'anglais et le fuseau du système par défaut, pour que le résultat ne dépende pas de la machine.",
+  "The settings now in use.": "Les réglages actuellement en vigueur.",
+  "If the language or the zone doesn't exist.": "Si la langue ou le fuseau n'existe pas.",
+  "If the language isn't a string.": "Si la langue n'est pas une chaîne.",
+  "Changes the language and the time zone used by `num` and `time`. Only the keys you give change.": "Change la langue et le fuseau horaire utilisés par `num` et `time`. Seules les clés que vous donnez changent.",
+  "A copy: changing it changes nothing.": "Une copie : la modifier ne change rien.",
+  "What `set()` accepts. Only the keys you give change.": "Ce que `set()` accepte. Seules les clés que vous donnez changent.",
+  "Like `\"America/New_York\"`. `undefined` or `null` goes back to the system zone.": "Comme `\"America/New_York\"`. `undefined` ou `null` revient au fuseau du système.",
+  "The shared settings.": "Les réglages communs.",
+  "Language of `num`, `time`, `str.plural()` and `arr.toSentence()`, like `\"fr\"` or `\"en-US\"`.": "Langue de `num`, `time`, `str.plural()` et `arr.toSentence()`, comme `\"fr\"` ou `\"en-US\"`.",
+  "Time zone of `time` and of the logger timestamps, like `\"Europe/Paris\"`. `undefined` means the system zone.": "Fuseau horaire de `time` et des horodatages du logger, comme `\"Europe/Paris\"`. `undefined` désigne le fuseau du système."
+}

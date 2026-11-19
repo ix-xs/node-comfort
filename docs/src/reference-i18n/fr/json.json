@@ -1,0 +1,15 @@
+{
+  "Returned when `text` isn't valid JSON.": "Renvoyée quand `text` n'est pas du JSON valide.",
+  "If `text` is invalid and there's no fallback.": "Si `text` est invalide et qu'il n'y a pas de valeur de repli.",
+  "The JSON text, or `\"undefined\"` for values JSON can't represent.": "Le texte JSON, ou `\"undefined\"` pour les valeurs que JSON ne peut pas représenter.",
+  "Options for `parse()`.": "Options de `parse()`.",
+  "Passed to `JSON.parse`.": "Passé à `JSON.parse`.",
+  "JSON that doesn't throw when you don't want it to: `parse` takes a fallback and reads JSON with comments, `stringify` handles circular references, bigints, Maps, Sets and errors.": "Du JSON qui ne lève pas d'erreur quand vous ne le voulez pas : `parse` prend une valeur de repli et lit le JSON avec commentaires, `stringify` gère les références circulaires, les bigints, les Map, les Set et les erreurs.",
+  "Options, or a reviver passed to `JSON.parse`.": "Des options, ou un reviver passé à `JSON.parse`.",
+  "`JSON.parse` with an optional fallback. With a second argument, even `undefined`, invalid input returns it instead of throwing. A leading byte order mark, which Windows editors like to add, is ignored.": "`JSON.parse` avec une valeur de repli facultative. Avec un second argument, même `undefined`, une entrée invalide le renvoie au lieu de lever une erreur. Une marque d'ordre des octets en tête, que les éditeurs Windows aiment ajouter, est ignorée.",
+  "Indentation, or options. Use `0` for a single line.": "Indentation, ou options. Utilisez `0` pour tout mettre sur une seule ligne.",
+  "`JSON.stringify` that never throws. Circular references become `\"[Circular]\"`, bigints become strings, Maps become objects, Sets become arrays, and errors keep their name, message and stack. It indents with 4 spaces by default (`nc.fs.writeJSON()` writes files with 2).": "`JSON.stringify` qui ne lève jamais d'erreur. Les références circulaires deviennent `\"[Circular]\"`, les bigints deviennent des chaînes, les Map des objets, les Set des tableaux, et les erreurs gardent leur nom, leur message et leur pile d'appels. Indente avec 4 espaces par défaut (`nc.fs.writeJSON()` écrit les fichiers avec 2).",
+  "Accept comments and trailing commas, like in `tsconfig.json`.": "Accepte les commentaires et les virgules finales, comme dans `tsconfig.json`.",
+  "Options for `stringify()`.": "Options de `stringify()`.",
+  "Indentation. Defaults to `4`; use `0` for a single line.": "Indentation. Par défaut : `4` ; utilisez `0` pour tout mettre sur une seule ligne."
+}

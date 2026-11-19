@@ -38,5 +38,10 @@
   "Entries dropped because the cache was full.": "Entrées évincées parce que le cache était plein.",
   "Entries dropped because they expired.": "Entrées supprimées parce qu'elles avaient expiré.",
   "From 0 to 1.": "De 0 à 1.",
-  "What the cache keeps for a key: the value, when it expires, its time to live and how long it may still be served once expired.": "Ce que le cache garde pour une clé : la valeur, sa date d'expiration, sa durée de vie et combien de temps elle peut encore servir une fois expirée."
+  "What the cache keeps for a key: the value, when it expires, its time to live and how long it may still be served once expired.": "Ce que le cache garde pour une clé : la valeur, sa date d'expiration, sa durée de vie et combien de temps elle peut encore servir une fois expirée.",
+  "Creates a cache. Same as `new nc.cache.Cache(options)`.": "Crée un cache. Identique à `new nc.cache.Cache(options)`.",
+  "An in-memory cache with a size limit and expiry.": "Un cache en mémoire, avec une taille maximale et une expiration.",
+  "If the signal fires before the value is there.": "Si le signal se déclenche avant que la valeur soit là.",
+  "The cache, so calls chain.": "Le cache, ce qui permet d'enchaîner les appels.",
+  "Options for `getOrSet()`: those of `set()`, plus a signal. The signal stops waiting for the value: the promise rejects with an `AbortError`. The load itself goes on and still fills the cache, since other callers may be waiting for it.": "Options de `getOrSet()` : celles de `set()`, plus un signal. Le signal arrête l'attente de la valeur : la promesse est rejetée avec une `AbortError`. Le chargement lui-même continue et remplit quand même le cache, puisque d'autres appelants peuvent l'attendre."
 }

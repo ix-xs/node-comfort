@@ -44,7 +44,6 @@
   "`Object.entries`, with typed keys and values.": "`Object.entries`, avec des clés et des valeurs typées.",
   "`Object.fromEntries` that accepts any iterable (a `Map` too) and skips unsafe keys.": "`Object.fromEntries` qui accepte n'importe quel itérable (une `Map` aussi) et ignore les clés dangereuses.",
   "How many entries: own keys of an object, size of a map or set, length of an array or string.": "Le nombre d'entrées : clés propres d'un objet, taille d'une Map ou d'un Set, longueur d'un tableau ou d'une chaîne.",
-  "Is there nothing in it? No own keys for an object, no entries for a Map or a Set. `null` and `undefined` count as empty; a date, a regular expression and an error never do.": "Est-il vide ? Aucune clé propre pour un objet, aucune entrée pour une Map ou un Set. `null` et `undefined` comptent comme vides ; une date, une expression régulière et une erreur ne le sont jamais.",
   "Freezes an object and everything inside it. Good for configuration and constants.": "Gèle un objet et tout ce qu'il contient. Pratique pour la configuration et les constantes.",
   "The same object.": "Le même objet.",
   "const CONFIG = obj.deepFreeze({ db: { host: \"localhost\" } });\nCONFIG.db.host = \"x\"; // TypeScript error, and ignored at runtime": "const CONFIG = obj.deepFreeze({ db: { host: \"localhost\" } });\nCONFIG.db.host = \"x\"; // erreur TypeScript, et ignorée à l'exécution",

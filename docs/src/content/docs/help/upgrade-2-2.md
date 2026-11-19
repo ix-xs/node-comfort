@@ -1,9 +1,9 @@
 ---
 title: "Upgrading to 2.2"
 description: "Version 2.2 is a security release. Most projects upgrade without changing anything. This page lists what you may need to act on, the most likely first."
-sidebar:
-  order: 6
 ---
+
+The names on this page are those of 2.2: [Upgrading to 3.0](/help/upgrade-3-0/) gives their 3.0 form.
 
 Most of the fixes in 2.2 change nothing for code that works today. The ones below refuse input that used to be accepted, or change a default. Go through the first sections at least: they are the ones most projects run into.
 
@@ -123,9 +123,9 @@ nc.sys.open("\\\\nas\\reports\\today.pdf", { allowUNC: true });
 Not required, but worth a look once you're on 2.2:
 
 - [Argon2id passwords](/system/crypto/#passwords) on Node.js 24.7 or later, with `needsRehash()` to move users one login at a time.
-- [`totpStep()` and `after`](/system/crypto/#two-factor-authentication) to refuse a two-factor code that was already used.
-- [`SQLite.op` and `operators: "tagged"`](/system/sqlite/#values-from-a-request) for filters built from request values.
+- [`totpStep()` and `after`](/system/crypto/#two-factor-codes) to refuse a two-factor code that was already used.
+- [`nc.sqlite.op` and `operators: "tagged"`](/system/sqlite/#values-from-a-request) for filters built from request values.
 - [`maxDepth`](/data/schema/#recursive-data) for schemas that read deeply nested input.
-- [`using`](/recipes/cli-tool/#cleaning-up-with-using) with watchers, schedules, spinners and listeners on Node.js 24 and later.
+- [`using`](/basics/resources/#using) with watchers, schedules, spinners and listeners on Node.js 24 and later.
 
 The [changelog](https://github.com/ix-xs/node-comfort/blob/main/CHANGELOG.md) has the complete list.

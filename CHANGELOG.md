@@ -4,6 +4,102 @@ All notable changes to this project are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and the project uses
 [Semantic Versioning](https://semver.org/).
 
+## [3.0.0] - Unreleased
+
+One way to call everything: `nc.<namespace>.<member>`. The root holds the 25 namespaces and nothing
+else. Every name of 2.x keeps working as a deprecated alias: it calls the 2.2 implementation, warns once,
+is struck through in editors, and is removed in 4.0. The few behaviour changes are listed under
+"Changed". [Upgrading to 3.0](https://ix-xs.github.io/node-comfort/help/upgrade-3-0/) has the table of
+every old name.
+
+### Added
+
+- **Namespaces**: `config` (language and time zone shared by `num`, `time`, `str.plural()`,
+  `arr.toSentence()` and the logger timestamps: `set({ locale, timeZone })`, `get()`), `is` (the checks of
+  `checker` without their `is` prefix: `nc.is.email()`), `assert` (callable, `nc.assert(value, message)`,
+  plus `nc.assert.type(value, guard)`), `json` (`parse`, `stringify`), `cache` (`create()`, `Cache`),
+  `emitter` (`create()`, `Emitter`) and `sqlite` (`open()`, `SQLite`, `op`). Each has its entry point,
+  like `@ix-xs/node-comfort/is`.
+- **fs**: 26 functions instead of 46. `read`, `write`, `append`, `size` (a file, or the total of a
+  folder), `hash`, `list(folder, { type, recursive, filter })`, `copy` and `move` (a file or a folder,
+  with `filter`), `remove(path, { contents, filter })`, `temp`, `resolve`.
+- **logger**: `create()`; `configure({ timestamp, delimiter })` replaces `setTimestamp()` and
+  `setDelimiter()`.
+- **async**: `when` and `to` (from `utils` and `func`); `activeCount` and `pendingCount` on every queue
+  and limiter; `clear()` on limiters; `signal` on `series`, `queue.add` and `when`; `off()` on `when`
+  tasks.
+- **sys**: `dontCrash` (from `utils`).
+- **time**: `timeZones()`; `every()` and `cron()` take a `signal`; `ScheduledTask.stop()` returns the
+  task.
+- **cli**: every prompt and `spin` take a `signal`; `spinner` `interval` accepts `"80ms"`.
+- **cache**: `getOrSet` takes a `signal`; `clear()` returns the cache.
+- **fs**: `Watcher.off()`; `Watcher.stop()` returns the watcher.
+- **env**: `boolean()`; `load()` accepts `overwrite` as a synonym of `override`.
+- **color**: `create({ level })` besides `create(level)`.
+- **arr**: `count`, `partition`, `remove`, `takeWhile` and `dropWhile` take a property name, like
+  `groupBy`; `paginate(array, { page, perPage })` besides the positional form.
+- **http**: `jitter` accepts a number from 0 to 1; `retry` `jitter: true` means 0.5. `false` and
+  `Infinity` both mean "no limit" for `timeout` and `maxResponseSize`.
+- **Types**: `is.port` is a type guard, `arr.toMap` keeps the key type, overloads for
+  `num.factorial(n, asBigInt)` and `stopwatch().stop(format)`, TOTP `algorithm` in lower case,
+  `compose`, `curry`, `pipeAsync` and `promisify` typed.
+
+### Changed
+
+- **Language**: `num` and `time` share one setting. `num.setLocale()` now also changes the language of
+  `time`, and `str.plural()` and `arr.toSentence()` follow `config.set({ locale })` (English until it is
+  set). `config.set()` checks the language and the zone and throws `RangeError` or `TypeError`.
+- **fs**: `copy()` and `move()` of a file onto an existing folder, or to a `dest` ending with `/`, put
+  it inside the folder. 2.2 replaced the whole folder by the file (`move`), created a file named like the
+  folder path, or overwrote silently.
+- **fs**: `remove()`, `copy()` and `move()` refuse an empty path or destination and return `false`. 2.2
+  resolved it to the working directory, which `remove("")` could delete.
+- **Errors**: runtime failures carry a `code`, and stay `instanceof Error` with the same message:
+  `cli` prompts on closed input reject with an `AbortError` coded `ERR_INPUT_CLOSED`;
+  `env.load(file, { required: true })` throws a `NodeComfortError` coded `ERR_ENV_FILE_MISSING`;
+  `sys.open()` of a missing path throws a `NodeComfortError` coded `ERR_NOT_FOUND`; the `TypeError`s of
+  `cli.args()` for a bad command line get `code: "ERR_CLI_ARGS"`.
+- **crypto**: `totpURI()` writes the algorithm in capitals (`SHA256`), as authenticator apps expect.
+
+### Deprecated
+
+Each name below warns once (`DeprecationWarning`, code `NODE_COMFORT_DEP_<NAME>`, silenced by
+`node --no-deprecation`), keeps its 2.2 behaviour, and is removed in 4.0.
+
+- Every helper at the root (146 names): `nc.info()` -> `nc.logger.info()`, `nc.readFile()` ->
+  `nc.fs.read()`, `nc.isEmail()` -> `nc.is.email()`, `nc.wait()` -> `nc.async.sleep()`, `nc.JSONParse()`
+  -> `nc.json.parse()`, `nc.dontCrash()` -> `nc.sys.dontCrash()`...
+- `nc.checker` -> `nc.is` and `nc.assert`; `nc.utils` -> `nc.async`, `nc.sys` and `nc.json`.
+- `nc.SQLite`, `nc.Cache`, `nc.Emitter` -> `nc.sqlite.open()`, `nc.cache.create()`, `nc.emitter.create()`
+  (the classes are `nc.sqlite.SQLite`, `nc.cache.Cache`, `nc.emitter.Emitter`).
+- `nc.nc`, `nc.nodeComfort` -> the package itself.
+- **logger**: `setTimestamp()`, `setDelimiter()` -> `configure()`; `createLogger()` -> `create()`.
+- **fs**: `readFile`, `writeFile`, `appendFile`, `fileSize`, `folderSize`, `hashFile`, `getFilesIn`,
+  `getFoldersIn`, `copyFile`, `copyFolder`, `copyFilesIn`, `copyFoldersIn`, `moveFile`, `moveFolder`,
+  `moveFilesIn`, `moveFoldersIn`, `deleteFile`, `deleteFolder`, `deleteFilesIn`, `deleteFoldersIn`,
+  `emptyFolder`, `createFile`, `createFolder`, `tempFolder`, `createPath`, `getFile`, `getFolder`,
+  `getEnv`.
+- **num**: `setLocale()`, `getLocale()` -> `nc.config`. **time**: `setLocale()`, `setTimezone()`,
+  `getConfig()` -> `nc.config`; `timezones()` -> `timeZones()`.
+- **id**: `hash()`, `hmac()`, `safeEqual()` -> `nc.crypto`. **func**: `retry()`, `timeout()`, `to()` ->
+  `nc.async`. **http**: `HttpError` -> `nc.errors.HttpError`. **env**: `bool()` -> `boolean()`.
+  **obj**: `isEmpty()` -> `nc.is.empty()`, which returns `false` for numbers and booleans.
+- **async**: `queue.pending` -> `activeCount`, `queue.size` -> `pendingCount`, `limiter.clearQueue()` ->
+  `clear()`.
+- **sqlite**: `db.set()` -> `db.upsert()` (it needs a unique conflict column);
+  `TableDefinition.options` -> `columns`.
+
+### Fixed
+
+- **async**: `when({ timeout: Infinity })` fired its timeout after about 1 ms. It now means no limit.
+
+### Documentation
+
+- The site is a plain documentation: it opens on the installation, then the configuration, the
+  concepts (organisation, conventions, errors, resources), a page per namespace, a generated page of all
+  functions, and help (upgrading to 3.0, troubleshooting). The project built page by page, the complete
+  examples and the terminal scenes are gone; their addresses redirect to the pages that replace them.
+
 ## [2.2.1] - 2026-11-08
 
 ### Security

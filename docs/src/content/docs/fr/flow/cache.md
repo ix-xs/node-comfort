@@ -1,101 +1,141 @@
 ---
 title: "Cache"
-description: "`nc.Cache` est un cache en mémoire avec une taille limite et une expiration. Quand il est plein, l'entrée utilisée le moins récemment part la première."
-sidebar:
-  order: 3
+description: "`nc.cache` crée des caches en mémoire avec une taille maximale, une expiration par entrée, le stale-while-revalidate et des statistiques. Quand un cache est plein, l'entrée utilisée le moins récemment part en premier."
 ---
 
 ```js
-const users = new nc.Cache({ max: 1000, ttl: "5m" });
+const { cache } = require("@ix-xs/node-comfort");
+```
+
+## Créer un cache
+
+```js
+const users = cache.create({ max: 1000, ttl: "5m" });
 
 users.set(42, user);
-users.get(42);       // l'utilisateur, ou undefined s'il est absent ou expiré
+users.get(42); // l'utilisateur, ou undefined s'il manque ou a expiré
 ```
+
+`cache.create(options)` équivaut à `new cache.Cache(options)`. La classe sert à typer une variable ou à l'étendre.
+
+| Option | Par défaut | |
+| --- | --- | --- |
+| `max` | sans limite | Nombre d'entrées ; une fois plein, l'entrée utilisée le moins récemment part |
+| `ttl` | `0` (pour toujours) | Durée de vie d'une entrée, en ms ou comme `"10m"` |
+| `staleWhileRevalidate` | `0` | Combien de temps après l'expiration `getOrSet` peut encore servir l'ancienne valeur |
+| `updateAgeOnGet` | `false` | Lire une entrée relance sa durée de vie |
+| `onRemove` | | `(key, value, reason)`, chaque fois qu'une entrée sort |
+
+En TypeScript : `cache.create<string, User>({ max: 500 })`.
 
 ## Charger en cas d'absence
 
-`getOrSet` renvoie la valeur en cache ou, à défaut, la charge, la stocke et la renvoie :
+`getOrSet` renvoie la valeur en cache, ou appelle la fonction de chargement, stocke son résultat et le renvoie :
 
 ```js
 const user = await users.getOrSet(id, () => db.users.find(id));
 ```
 
-Si cent requêtes demandent la même clé absente au même moment, la fonction de chargement s'exécute une seule fois et toutes reçoivent son résultat. Si elle échoue, rien n'est mis en cache et l'erreur parvient à chaque appelant.
+| Cas | Ce qui se passe |
+| --- | --- |
+| Plusieurs appelants demandent la même clé absente | Le chargement s'exécute une fois, tous reçoivent son résultat |
+| Le chargement échoue | Rien n'est stocké, chaque appelant reçoit l'erreur |
+| `delete()`, `clear()` ou `set()` sur la clé pendant le chargement | Les appelants reçoivent la valeur chargée, elle n'est pas stockée |
+| `{ signal }` se déclenche avant que la valeur soit là | Cet appelant rejette avec une `AbortError` |
 
-Si vous supprimez la clé avec `delete()`, videz le cache avec `clear()` ou définissez la clé vous-même avec `set()` pendant un chargement, les appelants reçoivent quand même la valeur chargée, mais elle n'est pas stockée.
+Le troisième argument accepte aussi `ttl` et `staleWhileRevalidate` pour cette entrée.
 
-## Servir une valeur périmée
+## Stale while revalidate
 
-Avec `ttl` seul, le premier appelant après l'expiration attend la fonction de chargement. `staleWhileRevalidate` permet à `getOrSet` de répondre avec l'ancienne valeur pendant qu'une nouvelle se charge :
+Avec `staleWhileRevalidate`, une entrée expirée est encore servie par `getOrSet` pendant cette durée, pendant qu'une valeur fraîche se charge en arrière-plan :
 
 ```js
-const rates = new nc.Cache({ ttl: "1m", staleWhileRevalidate: "10m" });
+const rates = cache.create({ ttl: "1m", staleWhileRevalidate: "10m" });
 
 const rate = await rates.getOrSet("eur-usd", () => api.fetchRate("EUR", "USD"));
 ```
 
-Pendant la première minute, les appelants reçoivent la valeur en cache. Pendant les dix minutes suivantes, ils reçoivent l'ancienne valeur immédiatement et un rechargement démarre en arrière-plan : personne n'attend le rafraîchissement. Passé ce délai, l'entrée a disparu et l'appelant suivant attend la fonction de chargement.
+| Âge de l'entrée | `getOrSet` |
+| --- | --- |
+| Moins de `ttl` | La valeur en cache |
+| Entre `ttl` et `ttl + staleWhileRevalidate` | L'ancienne valeur tout de suite, et un rechargement en arrière-plan |
+| Au-delà | Attend le chargement |
 
-Un seul rechargement s'exécute à la fois. S'il échoue, l'ancienne valeur continue d'être servie et l'appel suivant réessaie.
-
-Seuls `getOrSet` et les fonctions créées avec `wrap` servent des valeurs périmées. Pour `get`, `peek` et `has`, une entrée expirée est absente. L'option peut aussi être donnée à chaque appel, à côté de `ttl` :
-
-```js
-await cache.getOrSet("rates", fetchRates, { ttl: "1m", staleWhileRevalidate: "10m" });
-```
+Un rechargement qui échoue laisse l'ancienne valeur servie ; l'appel suivant réessaie. Seuls `getOrSet` et `wrap` servent des valeurs périmées : pour `get`, `peek` et `has`, une entrée expirée est absente.
 
 ## Envelopper une fonction
 
 ```js
-const getWeather = cache.wrap((city) => api.weather(city), { key: (city) => city.toLowerCase(), ttl: "30m" });
+const weather = cache.create({ max: 100 });
+const getWeather = weather.wrap((city) => api.weather(city), { key: (city) => city.toLowerCase(), ttl: "30m" });
 await getWeather("Paris");
+await getWeather("paris"); // depuis le cache
 ```
 
-Sans `key`, ce sont les arguments eux-mêmes qui forment la clé de cache.
+Sans `key`, les arguments forment la clé : les primitives par valeur, les objets simples par contenu.
 
 ## Expiration
 
 ```js
-const sessions = new nc.Cache({ ttl: "30m", updateAgeOnGet: true }); // la lecture renouvelle l'entrée
-sessions.set("token", data, { ttl: "15m" }); // expiration propre à l'entrée
-sessions.ttl("token");                        // ms restantes
-sessions.prune();                             // retire tout de suite les entrées expirées
+const sessions = cache.create({ ttl: "30m", updateAgeOnGet: true });
+sessions.set("token", data, { ttl: "15m" }); // expiration de cette entrée
+sessions.ttl("token");                        // ms restantes, Infinity si elle n'expire jamais, undefined si absente
+sessions.prune();                             // retire maintenant les entrées expirées, renvoie leur nombre
 ```
 
-Les durées s'écrivent en millisecondes ou en texte, par exemple `"30m"`. Un `ttl` de `0` signifie sans limite de durée, et c'est la valeur par défaut.
+Les entrées expirées sont retirées à la lecture ou par `prune()`. Un cache sans `max` les balaie aussi de temps en temps quand des entrées sont ajoutées.
 
-Les entrées expirées sont retirées quand vous les lisez, ou quand vous appelez `prune()`. Un cache sans `max` les balaie aussi de lui-même de temps en temps, au fil des ajouts, pour que les clés que plus personne ne lit ne s'accumulent pas.
-
-## Surveiller les suppressions
+## Retraits
 
 ```js
-const files = new nc.Cache({
+const files = cache.create({
   max: 100,
-  onRemove: (key, handle, reason) => handle.close(), // "evict", "expire", "delete", "set" ou "clear"
+  onRemove: (key, handle, reason) => handle.close(),
 });
 ```
+
+| `reason` | Quand |
+| --- | --- |
+| `"evict"` | Le cache était plein |
+| `"expire"` | L'entrée a expiré |
+| `"delete"` | `delete(key)` |
+| `"set"` | `set()` a remplacé la valeur |
+| `"clear"` | `clear()` |
+
+## Lire et parcourir
+
+| Membre | |
+| --- | --- |
+| `get(key)` | La valeur, compte comme une utilisation |
+| `peek(key)` | La valeur, sans compter comme une utilisation |
+| `has(key)` | Si une entrée fraîche existe, sans toucher à l'ordre |
+| `set(key, value, { ttl, staleWhileRevalidate })` | Renvoie le cache |
+| `delete(key)` | Si une entrée a été retirée |
+| `clear()` | Vide le cache et le renvoie ; les statistiques restent |
+| `keys()`, `values()`, `entries()`, `for...of` | La moins récemment utilisée d'abord |
+| `size` | Entrées, y compris celles expirées pas encore retirées |
 
 ## Statistiques
 
 ```js
-cache.stats;        // { hits: 120, misses: 30, sets: 30, evictions: 2, expirations: 5, hitRate: 0.8 }
-cache.resetStats(); // compteurs remis à zéro, les entrées restent
+users.stats;        // { hits: 2, misses: 1, sets: 1, evictions: 0, expirations: 0, hitRate: 0.6666666666666666 }
+users.resetStats(); // compteurs à zéro, les entrées restent
 ```
 
-`clear()` vide le cache mais conserve les compteurs.
+## Importer la classe seule
 
-## Itération
+Le sous-chemin exporte la classe, avec une méthode statique `create` :
 
 ```js
-for (const [key, value] of cache) {}
-cache.keys(); cache.values(); cache.entries(); // la moins récemment utilisée en premier
-cache.size;
+const Cache = require("@ix-xs/node-comfort/cache");
+
+const sessions = Cache.create({ max: 10000, ttl: "30m" });
 ```
 
-`peek()` lit sans compter comme une utilisation, et `has()` vérifie sans toucher à l'ordre.
+## Avant la 3.0
 
-## Typage
+| 2.2 | 3.0 |
+| --- | --- |
+| `new nc.Cache(options)` | `nc.cache.create(options)` ou `new nc.cache.Cache(options)` |
 
-```ts
-const cache = new nc.Cache<string, User>({ max: 500 });
-```
+`nc.Cache` fonctionne toujours, avertit une fois et sera retiré en 4.0. En 3.0, `clear()` renvoie le cache au lieu de `undefined`, et `getOrSet` accepte un `signal`.

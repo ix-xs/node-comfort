@@ -181,7 +181,7 @@ describe("the new names", () => {
     assert.throws(() => nc.assert(false, () => "lazy"), { message: "lazy" });
     assert.throws(() => nc.assert(null), { message: "Assertion failed" });
     nc.assert.type(3, nc.is.integer);
-    assert.throws(() => nc.assert.type("3", nc.is.integer), (error) => error instanceof nc.errors.AssertionError && /isInteger/.test(error.message));
+    assert.throws(() => nc.assert.type("3", nc.is.integer), (error) => error instanceof nc.errors.AssertionError && error.message === "Expected value to pass nc.is.integer");
     assert.throws(() => nc.assert.type("3", nc.is.integer, "port must be an integer"), { message: "port must be an integer" });
   });
 

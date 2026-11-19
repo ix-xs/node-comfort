@@ -12,7 +12,10 @@ const ts = require("typescript");
 const ROOT = path.resolve(__dirname, "..", "..");
 const TYPES = path.join(ROOT, "types", "index.d.ts");
 const FORMAT = ts.TypeFormatFlags.NoTruncation | ts.TypeFormatFlags.UseAliasDefinedOutsideCurrentScope;
-/** How class instances are named in examples and headings. */
+/**
+ * How class instances are named in examples and headings. These classes are
+ * big enough for each of their members to get a page of its own.
+ */
 const INSTANCE = /** @type {Record<string, string>} */ ({ SQLite: "db", Cache: "cache", Emitter: "events" });
 
 /**
@@ -21,9 +24,9 @@ const INSTANCE = /** @type {Record<string, string>} */ ({ SQLite: "db", Cache: "
  * @typedef {{ code: string, typeParams: string, returnType: string, description: string, params: Param[], returns?: { type: string, description: string }, throws: Array<{ type: string, description: string }>, examples: string[], deprecated?: string }} Signature
  * @typedef {{ name: string, type: string, optional: boolean, readonly: boolean, static: boolean, description: string, inheritedFrom?: string }} ClassProperty
  * @typedef {{ name: string, static: boolean, description: string, signatures: Signature[], inheritedFrom?: string }} ClassMethod
- * @typedef {{ name: string, qualified: string, kind: "function" | "method" | "property" | "constructor" | "class", static?: boolean, description: string, signatures: Signature[], type?: string, deprecated?: string, examples?: string[], properties?: ClassProperty[], methods?: ClassMethod[], extends?: string }} Member
+ * @typedef {{ name: string, qualified: string, kind: "function" | "method" | "property" | "constructor" | "class", static?: boolean, description: string, signatures: Signature[], type?: string, deprecated?: string, examples?: string[], properties?: ClassProperty[], methods?: ClassMethod[], members?: Member[], extends?: string }} Member
  * @typedef {{ name: string, description: string, definition: string, typeParams: string, values?: string[], examples: string[], properties: Array<{ name: string, type: string, optional: boolean, description: string }> }} TypeInfo
- * @typedef {{ key: string, module: string, title: string, kind: "namespace" | "class", flat: boolean, subpath: string, description: string, examples: string[], members: Member[], extra: string[], types: TypeInfo[] }} Namespace
+ * @typedef {{ key: string, module: string, title: string, kind: "namespace" | "class", subpath: string, description: string, examples: string[], members: Member[], extra: string[], types: TypeInfo[] }} Namespace
  */
 
 /**
@@ -130,7 +133,7 @@ const overviewOf = (moduleName) => {
   return { description: links(parsed.description), examples: parsed.tags.filter((t) => t.tag === "example").map((t) => plain(t.text)) };
 };
 
-/** @returns {{ package: { name: string, version: string, description: string, homepage?: string }, flat: Record<string, string[]>, namespaces: Namespace[], typeOwners: Record<string, string> }} */
+/** @returns {{ package: { name: string, version: string, description: string, homepage?: string }, namespaces: Namespace[], typeOwners: Record<string, string> }} */
 function buildModel() {
   if (!fs.existsSync(TYPES)) throw new Error("types/index.d.ts is missing: run `node scripts/build-types.js` first.");
   const pkg = JSON.parse(fs.readFileSync(path.join(ROOT, "package.json"), "utf8"));
@@ -161,6 +164,22 @@ function buildModel() {
   /** @param {ts.Symbol} symbol */
   const resolve = (symbol) => (symbol.flags & ts.SymbolFlags.Alias ? checker.getAliasedSymbol(symbol) : symbol);
 
+  /**
+   * Why a name is deprecated, or nothing. Deprecated names stay out of the
+   * reference: a `@deprecated` tag, or a description that says so (an old
+   * option name like `TableDefinition.options`, the options of an old
+   * function, "(deprecated).").
+   * @param {ts.Symbol} symbol
+   * @returns {string | undefined}
+   */
+  const deprecatedOf = (symbol) => {
+    const target = resolve(symbol);
+    const tag = target.getJsDocTags(checker).find((t) => t.name === "deprecated");
+    if (tag) return links(ts.displayPartsToString(tag.text)) || "Deprecated.";
+    const text = ts.displayPartsToString(target.getDocumentationComment(checker));
+    return /(^|[.!]\s+)Deprecated[:.]|\(deprecated\)\./.test(text) ? "Deprecated." : undefined;
+  };
+
   /** Whether a declaration comes from the package's own types, not from Node or TypeScript. */
   const TYPES_DIR = path.join(ROOT, "types").split(path.sep).join("/").toLowerCase() + "/";
   const own = (/** @type {ts.Declaration | undefined} */ decl) => Boolean(decl && decl.getSourceFile().fileName.split("\\").join("/").toLowerCase().startsWith(TYPES_DIR));
@@ -184,7 +203,7 @@ function buildModel() {
   const fieldsOf = (type, at) => {
     const anonymous = (/** @type {ts.Type} */ t) => Boolean(t.flags & ts.TypeFlags.Object) && !t.aliasSymbol && /^__(type|object)$/.test(t.symbol?.getName() ?? "") && !t.getCallSignatures().length;
     const parts = type.isIntersection() ? type.types.filter(anonymous) : anonymous(type) ? [type] : [];
-    const props = parts.flatMap((part) => part.getProperties());
+    const props = parts.flatMap((part) => part.getProperties()).filter((p) => !deprecatedOf(p));
     if (!props.length) return undefined;
     return props.map((p) => ({
       name: p.getName(),
@@ -254,9 +273,12 @@ function buildModel() {
     const description = links(ts.displayPartsToString(target.getDocumentationComment(checker)));
     const statics = isStatic ? { static: true } : {};
     if (callables.length) {
-      const signatures = callables.map((s) => signatureOf(s, name));
+      const all = callables.map((s) => signatureOf(s, name));
+      // A deprecated overload is left out; the member is deprecated when they all are.
+      const live = all.filter((s) => !s.deprecated);
+      const signatures = live.length ? live : all;
       if (!signatures[0].description) signatures[0].description = description;
-      return { name, qualified, kind, ...statics, description: signatures[0].description || description, signatures, deprecated: signatures.find((s) => s.deprecated)?.deprecated };
+      return { name, qualified, kind, ...statics, description: signatures[0].description || description, signatures, deprecated: live.length ? deprecatedOf(symbol) : all[0].deprecated };
     }
     const raw = jsDocOf(target.valueDeclaration ?? target.declarations?.[0]);
     const examples = raw ? parseJSDoc(raw).tags.filter((t) => t.tag === "example").map((t) => plain(t.text)) : [];
@@ -273,10 +295,11 @@ function buildModel() {
         examples,
         signatures: constructs.map((s) => signatureOf(s, `new ${name}`)),
         ...(heritage ? { extends: heritage } : {}),
+        deprecated: deprecatedOf(symbol),
         ...classMembers(constructs[0].getReturnType(), type, name),
       };
     }
-    return { name, qualified, kind: "property", ...statics, description, examples, signatures: [], type: clean(checker.typeToString(type, undefined, FORMAT)) };
+    return { name, qualified, kind: "property", ...statics, description, examples, signatures: [], type: clean(checker.typeToString(type, undefined, FORMAT)), deprecated: deprecatedOf(symbol) };
   };
 
   /**
@@ -296,7 +319,8 @@ function buildModel() {
       for (const p of type.getProperties()) {
         const decl = p.valueDeclaration ?? p.declarations?.[0];
         const name = p.getName();
-        if (!own(decl) || name.startsWith("_") || name.startsWith("__@") || name === "prototype") continue;
+        if (!own(decl) || name.startsWith("_") || name.startsWith("#") || name.startsWith("__@") || name === "prototype") continue;
+        if (deprecatedOf(p)) continue;
         if (ts.getCombinedModifierFlags(/** @type {ts.Declaration} */ (decl)) & (ts.ModifierFlags.Private | ts.ModifierFlags.Protected)) continue;
         const parent = /** @type {ts.Declaration} */ (decl).parent;
         const parentName = parent && ts.isClassDeclaration(parent) ? parent.name?.getText() : undefined;
@@ -304,7 +328,8 @@ function buildModel() {
         const value = checker.getTypeOfSymbolAtLocation(p, /** @type {ts.Node} */ (decl));
         const description = links(ts.displayPartsToString(p.getDocumentationComment(checker)));
         if (p.flags & ts.SymbolFlags.Method) {
-          methods.push({ name, static: isStatic, description, signatures: value.getCallSignatures().map((s) => signatureOf(s, name)), ...inherited });
+          const signatures = value.getCallSignatures().map((s) => signatureOf(s, name)).filter((s) => !s.deprecated);
+          if (signatures.length) methods.push({ name, static: isStatic, description, signatures, ...inherited });
         } else {
           const readonly = Boolean(ts.getCombinedModifierFlags(/** @type {ts.Declaration} */ (decl)) & ts.ModifierFlags.Readonly);
           properties.push({ name, type: optionalType(clean(checker.typeToString(value, undefined, FORMAT))), optional: Boolean(p.flags & ts.SymbolFlags.Optional), readonly, static: isStatic, description, ...inherited });
@@ -327,16 +352,21 @@ function buildModel() {
     for (const symbol of checker.getExportsOfModule(moduleSymbol)) {
       const target = resolve(symbol);
       if (!(target.flags & (ts.SymbolFlags.TypeAlias | ts.SymbolFlags.Interface)) || target.flags & ts.SymbolFlags.Value) continue;
-      if (symbol.getName().startsWith("_")) continue;
+      if (symbol.getName().startsWith("_") || deprecatedOf(target)) continue;
       const declared = checker.getDeclaredTypeOfSymbol(target);
       const decl = target.declarations?.[0];
       // `_WatcherMethods & Disposable` reads like an object too: its members are listed, not that line.
       const isMethodsAndDisposable =
         decl && ts.isTypeAliasDeclaration(decl) && ts.isIntersectionTypeNode(decl.type) && decl.type.types.every((t) => ts.isTypeReferenceNode(t) && /^(_\w+|Disposable)$/.test(t.typeName.getText()));
       const isObjectLiteral = (decl && ts.isTypeAliasDeclaration(decl) && ts.isTypeLiteralNode(decl.type)) || isMethodsAndDisposable;
-      const definition = isObjectLiteral ? "" : decl && ts.isTypeAliasDeclaration(decl) ? clean(decl.type.getText().replace(/\/\*[\s\S]*?\*\//g, "").replace(/\s+/g, " ")) : clean(checker.typeToString(declared, undefined, FORMAT));
+      // `& _LimiterDeprecated` only carries deprecated names: it is not shown.
+      const definition = isObjectLiteral
+        ? ""
+        : decl && ts.isTypeAliasDeclaration(decl)
+          ? clean(decl.type.getText().replace(/\/\*[\s\S]*?\*\//g, "").replace(/\s+/g, " ").replace(/ & _\w+Deprecated\b/g, ""))
+          : clean(checker.typeToString(declared, undefined, FORMAT));
       const properties = isObjectLiteral
-        ? checker.getPropertiesOfType(declared).filter((p) => !p.getName().startsWith("__@")).map((p) => ({
+        ? checker.getPropertiesOfType(declared).filter((p) => !p.getName().startsWith("__@") && !deprecatedOf(p)).map((p) => ({
             name: p.getName(),
             type: clean(checker.typeToString(checker.getTypeOfSymbolAtLocation(p, /** @type {ts.Node} */ (decl)), undefined, FORMAT)).replace(/ \| undefined$/, ""),
             optional: Boolean(p.flags & ts.SymbolFlags.Optional),
@@ -353,11 +383,44 @@ function buildModel() {
     return list.sort((a, b) => a.name.localeCompare(b.name));
   };
 
+  /**
+   * The members of a big class (nc.sqlite.SQLite), each to get a page of its
+   * own: the constructor, what the class carries, then what an instance has.
+   * A static the namespace holds too (`SQLite.open` does what `nc.sqlite.open`
+   * does) is documented there, once.
+   * @param {string} key The namespace.
+   * @param {string} name The class.
+   * @param {ts.Symbol} symbol
+   * @param {any} value The class itself.
+   * @param {Set<string>} taken The names of the namespace's own members.
+   * @returns {{ members: Member[], properties: ClassProperty[], methods: ClassMethod[] }}
+   */
+  const splitClass = (key, name, symbol, value, taken) => {
+    const classType = checker.getTypeOfSymbolAtLocation(resolve(symbol), source);
+    const construct = classType.getConstructSignatures()[0];
+    /** @type {Member[]} */
+    const members = [];
+    if (construct) {
+      const sig = signatureOf(construct, `new ${name}`);
+      members.push({ name: "constructor", qualified: `new nc.${key}.${name}()`, kind: "constructor", description: sig.description, signatures: [sig] });
+    }
+    for (const prop of Object.getOwnPropertyNames(value)) {
+      if (prop === "length" || prop === "name" || prop === "prototype" || taken.has(prop)) continue;
+      const found = classType.getProperty(prop);
+      if (found) members.push(memberOf(prop, `nc.${key}.${name}.${prop}`, found, "method", true));
+    }
+    const instance = construct ? construct.getReturnType() : checker.getDeclaredTypeOfSymbol(resolve(symbol));
+    for (const prop of Object.getOwnPropertyNames(value.prototype)) {
+      if (prop === "constructor" || prop.startsWith("_")) continue;
+      const found = instance.getProperty(prop);
+      if (found) members.push(memberOf(prop, `${INSTANCE[name]}.${prop}`, found, "method"));
+    }
+    return { members: members.filter((m) => !m.deprecated), properties: [], methods: [] };
+  };
+
   const isClass = (/** @type {unknown} */ v) => typeof v === "function" && /^class\b/.test(Function.prototype.toString.call(v));
   // Since 3.0 the root only holds namespaces: the deprecated names are hidden and never documented.
   const namespaceKeys = Object.keys(nc);
-  /** @type {Record<string, string[]>} */
-  const flat = {};
 
   /** @type {Namespace[]} */
   const namespaces = [];
@@ -374,6 +437,8 @@ function buildModel() {
     const members = [];
     /** @type {string[]} */
     let extra = [];
+    /** @type {TypeInfo[]} */
+    const classTypes = [];
     if (isClass(value)) {
       const classType = checker.getTypeOfSymbolAtLocation(target, source);
       const construct = classType.getConstructSignatures()[0];
@@ -402,21 +467,29 @@ function buildModel() {
       for (const name of runtimeKeys) {
         const prop = type.getProperty(name);
         if (!prop) throw new Error(`nc.${key}.${name} exists at runtime but has no type`);
-        members.push(memberOf(name, `nc.${key}.${name}`, prop, "function"));
+        const member = memberOf(name, `nc.${key}.${name}`, prop, "function");
+        if (member.deprecated) continue;
+        if (member.kind === "class" && Object.hasOwn(INSTANCE, name)) {
+          Object.assign(member, splitClass(key, name, prop, value[name], new Set(runtimeKeys)));
+          // Its types (SQLiteOptions, Where...) are declared with the class.
+          classTypes.push(...typesOf(resolve(prop)));
+        }
+        members.push(member);
       }
       // The deprecated names are hidden at runtime (not enumerable), and stay out of the reference.
       const hidden = Object.getOwnPropertyNames(value);
-      extra = checker.getPropertiesOfType(type).map((p) => p.getName()).filter((n) => !runtimeKeys.includes(n) && !hidden.includes(n));
+      extra = checker.getPropertiesOfType(type).filter((p) => !deprecatedOf(p)).map((p) => p.getName()).filter((n) => !runtimeKeys.includes(n) && !hidden.includes(n));
     }
     const moduleSymbol = target.flags & (ts.SymbolFlags.ValueModule | ts.SymbolFlags.NamespaceModule) ? target : target.declarations?.[0] ? checker.getSymbolAtLocation(target.declarations[0].getSourceFile()) : undefined;
     const types = moduleSymbol ? typesOf(moduleSymbol) : [];
+    for (const t of classTypes) if (!types.some((own) => own.name === t.name)) types.push(t);
+    types.sort((x, y) => x.name.localeCompare(y.name));
     for (const t of types) typeOwners[t.name] = key;
     namespaces.push({
       key,
       module: moduleName,
       title: isClass(value) ? `nc.${key}` : `nc.${key}`,
       kind: isClass(value) ? "class" : "namespace",
-      flat: false,
       subpath: `${pkg.name}/${key.toLowerCase()}`,
       description: overview.description,
       examples: overview.examples,
@@ -425,7 +498,7 @@ function buildModel() {
       types,
     });
   }
-  return { package: { name: pkg.name, version: pkg.version, description: pkg.description, homepage: pkg.homepage }, flat, namespaces, typeOwners };
+  return { package: { name: pkg.name, version: pkg.version, description: pkg.description, homepage: pkg.homepage }, namespaces, typeOwners };
 }
 
 module.exports = { buildModel, parseJSDoc };

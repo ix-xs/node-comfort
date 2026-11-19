@@ -1,11 +1,9 @@
 ---
 title: "Migrer depuis la 1.x"
 description: "La version 2 conserve l'API de la 1.x : les utilitaires de premier niveau, les fonctions `fs` et les méthodes SQLite sont toujours là. Quelques comportements ont changé, et cette page les liste avec ce qu'il faut faire."
-sidebar:
-  order: 5
 ---
 
-La plupart des projets n'ont besoin que des trois premières sections.
+La plupart des projets n'ont besoin que des trois premières sections. Le code de cette page est écrit pour la 3.0 : les noms de la 2.x qu'il remplace sont dans [Passer à la 3.0](/help/upgrade-3-0/).
 
 ## Node.js 22.13 ou plus récent
 
@@ -18,7 +16,7 @@ Node 20 est en fin de vie, et la 1.x avait déjà besoin de `node:sqlite`, qui n
 const result = await db.insert("users", data);
 if (result.error) console.error(result.error);
 
-// 2.0
+// 2.0 et après
 try {
   db.insert("users", data);
 } catch (error) {
@@ -31,7 +29,7 @@ Autres changements côté SQLite :
 - **Les méthodes sont synchrones.** Elles renvoient directement leurs valeurs. `await` fonctionne toujours, mais retirez tout `.then()` appliqué à leurs résultats.
 - **`getAll()` ne limite plus à 50 lignes et ne trie plus par défaut.** Ajoutez `{ limit: 50 }` et `{ orderBy: "id", direction: "DESC" }` là où vous comptiez dessus. Avec `orderBy` et sans `direction`, l'ordre est maintenant croissant.
 - **Les tables sont lues dans le fichier de la base de données.** En 1.x, seules les tables créées avec `createTable()` dans le même processus étaient visibles. Désormais, toute table du fichier fonctionne, et une table inconnue lève une erreur.
-- **Les colonnes `BOOLEAN` et `JSON` sont converties.** Vous obtenez `true`/`false` au lieu de `1`/`0`, et des objets déjà analysés au lieu de texte JSON. L'écriture de booléens, d'objets et de dates fonctionne aussi désormais. Pour garder l'ancien comportement : `new nc.SQLite(path, { booleans: false, json: false })`.
+- **Les colonnes `BOOLEAN` et `JSON` sont converties.** Vous obtenez `true`/`false` au lieu de `1`/`0`, et des objets déjà analysés au lieu de texte JSON. L'écriture de booléens, d'objets et de dates fonctionne aussi désormais. Pour garder l'ancien comportement : `nc.sqlite.open(path, { booleans: false, json: false })`.
 - **`transaction()` lève l'erreur** après avoir annulé la transaction, au lieu de renvoyer `{ error }`.
 
 ## Fin des imports profonds
@@ -41,7 +39,7 @@ Le paquet déclare maintenant ses points d'entrée. Remplacez les imports de fic
 ```js
 // 1.x
 const Logger = require("@ix-xs/node-comfort/src/Logger");
-// 2.0
+// 2.0 et après
 const { logger } = require("@ix-xs/node-comfort");
 // ou, pour ne charger que le logger
 const logger = require("@ix-xs/node-comfort/logger");
@@ -55,7 +53,7 @@ const logger = require("@ix-xs/node-comfort/logger");
 
 ## Les fichiers
 
-Quand un chemin relatif n'existait pas, la 1.x cherchait dans l'arborescence des dossiers un fichier du même nom. Elle pouvait ainsi lire, écraser ou supprimer le mauvais fichier : ce comportement a donc disparu. Pour chercher volontairement, utilisez `nc.find("config.json")`.
+Quand un chemin relatif n'existait pas, la 1.x cherchait dans l'arborescence des dossiers un fichier du même nom. Elle pouvait ainsi lire, écraser ou supprimer le mauvais fichier : ce comportement a donc disparu. Pour chercher volontairement, utilisez `nc.fs.find("config.json")`.
 
 ## Changements mineurs
 
@@ -68,7 +66,7 @@ Quand un chemin relatif n'existait pas, la 1.x cherchait dans l'arborescence des
 
 ## Fonctions dépréciées
 
-`id.hash()`, `id.hmac()` et `id.safeEqual()` ont été déplacées dans `nc.crypto`, avec les mêmes signatures. Les anciens noms fonctionnent encore et seront supprimés en 3.0.
+`id.hash()`, `id.hmac()` et `id.safeEqual()` ont été déplacées dans `nc.crypto`, avec les mêmes signatures. Les anciens noms fonctionnent encore en 3.0, avec un avertissement, et disparaissent en 4.0.
 
 ## Correctif de sécurité
 

@@ -29,25 +29,25 @@ mirrors its English original.
 
 ```
 src/content/docs/            the pages, in English
-  index.mdx start/ project/   the guide: the introduction, then one project built page by page
-  essentials/ data/ flow/ system/ recipes/ help/   the topic pages, the complete examples, help
+  index.md start/            installation (the home page), configuration, editor
+  basics/                    organisation, conventions, errors, resources
+  modules.md                 "All functions", generated (npm run build at the root): do not edit
+  essentials/ data/ flow/ system/   one page per namespace
+  help/                      upgrading, migration, performance, FAQ, troubleshooting
   fr/                        the French translation, same paths
 src/data/api.json            the API reference, generated from the types (npm run build at the root), committed
+src/data/reference-moves.json  where each page of the 2.2 reference went, generated, read by redirects.mjs
 src/reference-i18n/fr/       the French of the reference: one file per namespace, English sentence to French sentence
 src/reference/               reads api.json and the catalogs for the reference pages
 src/pages/reference/         one page per export, in each language (fr/reference/ for French)
 src/components/reference/    the parts of a reference page
-src/components/              the header, the search extras, the terminal of the scenes (demo/)
-src/scenes/                  what the terminals of the guide run
-  scenes.mjs                 the list of scenes: command, files, simulated sites
-  project/<step>/            the files of the project at each step, as the pages show them
-src/pages/dev/               a page for the dev server only, with worst-case scenes
+src/components/              the header, the page title, the search extras, the language and theme switches
 src/styles/                  the look of the site (comfort.css)
 src/i18n.ts                  the words of the interface, in both languages
 plugins/                     links that follow the base path, names of the API in code that link to
                              their page, shared heading ids, scrollable tables
+redirects.mjs                old addresses and where they went, in every language
 scripts/
-  scenes.mjs                 runs the scenes and stores what they printed
   check-links.mjs            every link and anchor of the built site
   check-translation.mjs      a translated page has the same headings, code and links
   legacy-pages.mjs           redirects from the addresses of the previous site
@@ -56,7 +56,10 @@ scripts/
 
 ## Writing
 
-- A guide starts with an example, then explains. Sentences are short and plain. No long dash.
+- For experienced developers: straight to the point. Each section is one or two sentences, code, a table.
+  The page's `description` is shown as its lead: one sentence that says what the page is for. No long dash.
+- Every name is in the 3.0 form (`nc.<namespace>.<member>`). Old names only appear in the "Before 3.0"
+  section at the end of a namespace page and in `help/upgrade-3-0`.
 - Links between pages are written from the root of the site, without its base: `/data/time/`,
   `/reference/str/slugify/`. A name of the API in inline code, like `nc.str.slugify()`, links to its
   reference page by itself.
@@ -79,12 +82,3 @@ used:
 ```bash
 node scripts/build-reference.js --missing
 ```
-
-## The scenes
-
-A terminal in the guide (`<TerminalDemo scene="project/setup/first-run" />`) shows a real run.
-`scripts/scenes.mjs` runs each scene listed in `src/scenes/scenes.mjs` before every build, in a folder
-made of the files the reader has at that point, converts what it printed into HTML, and writes
-`src/scenes/output.json`. Each of these files must appear, as it is, in a code block of its page, in
-every language: the build fails otherwise. To add a scene, write its files, list it, and show it on the
-page. `/dev/worst/` on the dev server shows the terminal with the worst output it may get.

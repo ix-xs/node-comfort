@@ -4,8 +4,14 @@
 // docs/src/data/api.json, from the type declarations: every namespace, and one
 // entry per member and per public type, each with its own page on the site
 // (docs/src/pages/reference/). Code comes as tokens, so that the name of a
-// type links to its page. It always says what editors show. Run after
+// type links to its page. It always says what editors show. Deprecated names
+// are left out: they work until 4.0 but are never documented. Run after
 // build-types.js.
+//
+// It also writes the "All functions" page of the guide, in every language:
+// docs/src/content/docs/modules.md and docs/src/content/docs/<language>/modules.md.
+// And docs/src/data/reference-moves.json: each page of the 2.2 reference that
+// 3.0 no longer has, and the page that replaces it, for the redirects.
 //
 // English comes straight from the JSDoc. The French pages show the same data,
 // with each sentence replaced by its translation from
@@ -13,8 +19,8 @@
 // reads these catalogs). A sentence that has no translation yet stays in
 // English, and is reported here.
 //
-//   node scripts/build-reference.js             writes docs/src/data/api.json
-//   node scripts/build-reference.js --check     fails if it is out of date
+//   node scripts/build-reference.js             writes api.json, the moves and the modules pages
+//   node scripts/build-reference.js --check     fails if they are out of date
 //   node scripts/build-reference.js --missing   lists what is not translated yet
 //   node scripts/build-reference.js --strict    also fails when something is not translated
 
@@ -39,9 +45,9 @@ const GROUPS = [
   { id: "system", keys: ["crypto", "http", "sqlite", "sys", "cli", "color"] },
 ];
 
-/** Where the guide of each namespace lives on the site. */
+/** Where the guide of each namespace lives on the site. `is` and `assert` share a page. */
 const GUIDES = /** @type {Record<string, string>} */ ({
-  config: "/essentials/config/", logger: "/essentials/logger/", fs: "/essentials/fs/", env: "/essentials/env/", is: "/essentials/is/", assert: "/essentials/assert/", errors: "/essentials/errors/", json: "/essentials/json/",
+  config: "/start/configuration/", logger: "/essentials/logger/", fs: "/essentials/fs/", env: "/essentials/env/", is: "/essentials/is/", assert: "/essentials/is/", errors: "/basics/errors/", json: "/essentials/json/",
   str: "/data/str/", num: "/data/num/", arr: "/data/arr/", obj: "/data/obj/", schema: "/data/schema/", time: "/data/time/", id: "/data/id/",
   func: "/flow/func/", async: "/flow/async/", cache: "/flow/cache/", emitter: "/flow/emitter/",
   crypto: "/system/crypto/", http: "/system/http/", sqlite: "/system/sqlite/", sys: "/system/sys/", cli: "/system/cli/", color: "/system/color/",
@@ -106,12 +112,23 @@ const nsSlug = (/** @type {string} */ key) => key.toLowerCase();
 /*  Addresses                                                                  */
 /* -------------------------------------------------------------------------- */
 
-/** Every page of a namespace: its members, then its types, each with a slug unique in the namespace. */
-/** @type {Map<string, Array<{ name: string, slug: string, member?: Member, type?: TypeInfo }>>} */
+/**
+ * Every page of a namespace: its members, then its types, each with a slug
+ * unique in the namespace. The members of a big class come right after it, in
+ * the same folder: /reference/sqlite/get-all/ is `db.getAll()`.
+ * @typedef {{ name: string, slug: string, member?: Member, owner?: Member, type?: TypeInfo }} Entry
+ */
+/** @type {Map<string, Entry[]>} */
 const entries = new Map();
 for (const key of order) {
   const ns = /** @type {Namespace} */ (namespaces.get(key));
-  const list = [...ns.members.map((member) => ({ name: member.name, slug: kebab(member.name), member })), ...ns.types.map((type) => ({ name: type.name, slug: kebab(type.name), type }))];
+  /** @type {Entry[]} */
+  const list = [];
+  for (const member of ns.members) {
+    list.push({ name: member.name, slug: kebab(member.name), member });
+    for (const inner of member.members ?? []) list.push({ name: inner.name, slug: kebab(inner.name), member: inner, owner: member });
+  }
+  for (const type of ns.types) list.push({ name: type.name, slug: kebab(type.name), type });
   // Two names that differ only by case (a class `Schema` and a function
   // `schema`) would share a folder on a case-insensitive disk: the type gets
   // a suffix, and anything still shared is a mistake to fix by hand.
@@ -136,9 +153,8 @@ const addName = (/** @type {string} */ name, /** @type {string} */ key, /** @typ
 for (const [key, list] of entries) {
   for (const entry of list) {
     if (entry.type) addName(entry.name, key, `${nsSlug(key)}/${entry.slug}`);
-    else if (entry.member?.kind === "class") addName(entry.name, key, `${nsSlug(key)}/${entry.slug}`);
+    else if (entry.member?.kind === "class" && !entry.owner) addName(entry.name, key, `${nsSlug(key)}/${entry.slug}`);
   }
-  if (namespaces.get(key)?.kind === "class") addName(key, key, nsSlug(key));
 }
 // A class held by two namespaces (nc.http.HttpError is nc.errors.HttpError) is linked to the one of errors.
 for (const refs of named.values()) refs.sort((a, b) => Number(b.key === "errors") - Number(a.key === "errors"));
@@ -311,43 +327,71 @@ for (const key of order) {
   const ns = /** @type {Namespace} */ (namespaces.get(key));
   const here = key;
   const slug = nsSlug(key);
-  const isClass = ns.kind === "class";
-  const flat = new Set(model.flat[key] ?? []);
   /** @type {string[]} */
   const members = [];
   /** @type {string[]} */
   const types = [];
+  /** The page of each big class, and the pages of its members. */
+  /** @type {Map<Member, { ref: string, members: string[] }>} */
+  const owners = new Map();
 
-  for (const entry of /** @type {NonNullable<ReturnType<typeof entries.get>>} */ (entries.get(key))) {
+  for (const entry of /** @type {Entry[]} */ (entries.get(key))) {
     const ref = `${slug}/${entry.slug}`;
     const base = { ns: key, name: entry.name, slug: entry.slug, ref };
-    if (entry.member) {
+    if (entry.member && entry.owner) {
+      // A member of a big class: `db.getAll()`, `new nc.sqlite.SQLite()`.
+      const member = entry.member;
+      const owner = /** @type {{ ref: string, members: string[] }} */ (owners.get(entry.owner));
+      const className = entry.owner.name;
+      const module = fs.existsSync(path.join(ROOT, "src", `${className}.js`)) ? className : ns.module;
+      owner.members.push(ref);
+      /** @type {Record<string, any>} */
+      const item = { ...base, owner: owner.ref, title: "", kind: "" };
+      if (member.kind === "constructor") {
+        Object.assign(item, { kind: "constructor", title: member.qualified, source: sourceOf(module, "constructor", "method") });
+        item.overloads = member.signatures.map((s) => callable(s, `new ${className}`, here));
+      } else if (member.signatures.length) {
+        Object.assign(item, { kind: "method", title: member.qualified, source: sourceOf(module, member.name, "method") });
+        item.overloads = member.signatures.map((s) => callable(s, member.name, here));
+      } else {
+        Object.assign(item, { kind: "property", title: member.qualified, source: sourceOf(module, member.name, "method") });
+        item.code = merge([[`${member.static ? "static " : ""}${member.name}: `], ...tokens(member.type ?? "unknown", here)]);
+      }
+      Object.assign(item, { static: member.static, text: member.description, examples: [...new Set([...(member.examples ?? []), ...member.signatures.flatMap((s) => s.examples)])] });
+      symbols.push(compact(item));
+    } else if (entry.member) {
       const member = entry.member;
       members.push(ref);
       const examples = [...new Set([...(member.examples ?? []), ...member.signatures.flatMap((s) => s.examples)])];
       /** @type {Record<string, any>} */
       const item = { ...base, title: "", kind: "" };
-      if (member.kind === "constructor") {
-        Object.assign(item, { kind: "constructor", title: `new nc.${key}()`, source: sourceOf(ns.module, "constructor", "method") });
-        item.overloads = member.signatures.map((s) => callable(s, `new ${key}`, here));
-      } else if (member.kind === "class") {
-        Object.assign(item, { kind: "class", title: `nc.${key}.${member.name}`, source: sourceOf(ns.module, member.name, "value") });
+      if (member.kind === "class") {
+        const module = member.members && fs.existsSync(path.join(ROOT, "src", `${member.name}.js`)) ? member.name : ns.module;
+        Object.assign(item, { kind: "class", title: `nc.${key}.${member.name}`, source: sourceOf(module, member.name, "value") });
         item.code = merge([["class "], [member.name], ...(member.extends ? [[" extends "], ...tokens(member.extends, here)] : [])]);
-        if (member.signatures[0]) item.ctor = callable(member.signatures[0], `new ${member.name}`, here);
-        const parentRef = (/** @type {string | undefined} */ name) => (name ? named.get(name)?.[0]?.ref : undefined);
-        item.properties = member.properties?.map((p) => compact({ name: p.name, type: tokens(p.type, here), optional: p.optional, readonly: p.readonly, static: p.static, text: p.description, inheritedFrom: parentRef(p.inheritedFrom) }));
-        item.methods = member.methods?.map((m) => compact({ name: m.name, static: m.static, text: m.description, overloads: m.signatures.map((s) => callable(s, m.name, here)), examples: [...new Set(m.signatures.flatMap((s) => s.examples))], inheritedFrom: parentRef(m.inheritedFrom) }));
+        if (member.members) {
+          // Its members have pages of their own, listed on its page.
+          owners.set(member, { ref, members: [] });
+        } else {
+          if (member.signatures[0]) item.ctor = callable(member.signatures[0], `new ${member.name}`, here);
+          const parentRef = (/** @type {string | undefined} */ name) => (name ? named.get(name)?.[0]?.ref : undefined);
+          item.properties = member.properties?.map((p) => compact({ name: p.name, type: tokens(p.type, here), optional: p.optional, readonly: p.readonly, static: p.static, text: p.description, inheritedFrom: parentRef(p.inheritedFrom) }));
+          item.methods = member.methods?.map((m) => compact({ name: m.name, static: m.static, text: m.description, overloads: m.signatures.map((s) => callable(s, m.name, here)), examples: [...new Set(m.signatures.flatMap((s) => s.examples))], inheritedFrom: parentRef(m.inheritedFrom) }));
+        }
       } else if (member.signatures.length) {
-        const owner = isClass ? (member.static ? `nc.${key}` : member.qualified.split(".")[0]) : `nc.${key}`;
-        Object.assign(item, { kind: isClass ? "method" : "function", title: `${owner}.${member.name}`, source: sourceOf(ns.module, member.name, isClass ? "method" : "value") });
+        // `nc.assert()` is the namespace itself, called.
+        const title = member.qualified === `nc.${key}` ? `nc.${key}` : `nc.${key}.${member.name}`;
+        Object.assign(item, { kind: "function", title, source: sourceOf(ns.module, member.name, "value") });
         item.overloads = member.signatures.map((s) => callable(s, member.name, here));
       } else {
-        const owner = isClass ? (member.static ? `nc.${key}` : member.qualified.split(".")[0]) : `nc.${key}`;
-        Object.assign(item, { kind: "property", title: `${owner}.${member.name}`, source: sourceOf(ns.module, member.name, isClass ? "method" : "value") });
-        item.code = merge([[`${member.static ? "static " : ""}${member.name}: `], ...tokens(member.type ?? "unknown", here)]);
+        Object.assign(item, { kind: "property", title: `nc.${key}.${member.name}`, source: sourceOf(ns.module, member.name, "value") });
+        item.code = merge([[`${member.name}: `], ...tokens(member.type ?? "unknown", here)]);
       }
-      Object.assign(item, { static: member.static, flat: flat.has(member.name) ? `nc.${member.name}` : undefined, text: member.description, deprecated: member.deprecated, examples });
-      symbols.push(compact(item));
+      Object.assign(item, { text: member.description, examples });
+      const done = compact(item);
+      // Filled as its members come, right after it.
+      if (owners.has(member)) done.members = owners.get(member)?.members;
+      symbols.push(done);
     } else if (entry.type) {
       const type = entry.type;
       types.push(ref);
@@ -368,7 +412,7 @@ for (const key of order) {
     key,
     slug,
     kind: ns.kind,
-    title: isClass ? `nc.${key}` : `nc.${key}`,
+    title: `nc.${key}`,
     module: ns.subpath,
     guide: GUIDES[key],
     group: GROUPS.find((group) => group.keys.includes(key))?.id,
@@ -407,12 +451,10 @@ for (const item of symbols) {
 const api = {
   package: { name: model.package.name, version: model.package.version },
   groups: GROUPS.map((group) => ({ id: group.id, keys: group.keys })),
-  flat: model.flat,
   namespaces: spaces,
   symbols,
 };
 const json = `${JSON.stringify(api, null, 1)}\n`;
-const shown = path.relative(ROOT, DATA).split(path.sep).join("/");
 
 /* -------------------------------------------------------------------------- */
 /*  Checks                                                                     */
@@ -523,20 +565,202 @@ for (const language of LANGUAGES) {
 }
 
 /* -------------------------------------------------------------------------- */
+/*  The addresses of 2.2                                                       */
+/* -------------------------------------------------------------------------- */
+
+// The reference of 2.2 had pages that 3.0 no longer has (/reference/checker/is-email/,
+// /reference/fs/read-file/). docs/src/data/reference-2.2.json freezes its list
+// of pages; each one that is gone gets the 3.0 page that replaces it, from what
+// the deprecated alias says to use. docs/redirects.mjs turns them into redirects.
+
+const OLD_PAGES = path.join(ROOT, "docs", "src", "data", "reference-2.2.json");
+const MOVES = path.join(ROOT, "docs", "src", "data", "reference-moves.json");
+/** The 2.2 namespaces that 3.0 renamed or spread over others. */
+const OLD_NAMESPACES = /** @type {Record<string, string>} */ ({ checker: "/reference/is/", utils: "/help/upgrade-3-0/" });
+/** Deprecated class members, which have no alias to ask: their JSDoc names the replacement. */
+const OLD_MEMBERS = /** @type {Record<string, string>} */ ({ "sqlite/set": "sqlite/upsert" });
+
+const symbolByRef = new Map(symbols.map((item) => [item.ref, item]));
+const pageRefs = new Set([...spaces.map((ns) => ns.slug), ...symbols.map((item) => item.ref)]);
+
+/** What each deprecated name says to use instead: "nc.fs.readFile" -> "nc.fs.read()". */
+const uses = new Map();
+{
+  const nc = require(ROOT);
+  const { aliasesOf, peek } = require(path.join(ROOT, "src", "internal", "deprecate.js"));
+  for (const { name, use } of aliasesOf(nc)) uses.set(`nc.${name}`, use);
+  for (const key of Object.getOwnPropertyNames(nc)) {
+    // peek() reads an old namespace (nc.checker) without its warning.
+    const value = peek(nc, key);
+    if (value && (typeof value === "object" || typeof value === "function")) for (const { name, use } of aliasesOf(value)) uses.set(`nc.${key}.${name}`, use);
+  }
+}
+
+/** The 3.0 page a replacement names: `nc.fs.read()` -> "fs/read", `nc.is` -> "is". */
+const pageOfUse = (/** @type {string | undefined} */ use) => {
+  const match = use ? /\bnc\.(\w+)(?:\.(\w+))?/.exec(use) : null;
+  const ns = match ? spaces.find((space) => space.key === match[1]) : undefined;
+  if (!match || !ns) return undefined;
+  const member = match[2] ? ns.members.map((/** @type {string} */ ref) => symbolByRef.get(ref)).find((/** @type {any} */ item) => item?.name === match[2]) : undefined;
+  return member?.ref ?? ns.slug;
+};
+
+/** Where a 2.2 namespace lives now. */
+const namespaceMove = (/** @type {string} */ key) => OLD_NAMESPACES[key] ?? (pageRefs.has(key.toLowerCase()) ? `/reference/${key.toLowerCase()}/` : "/reference/");
+
+const oldPages = /** @type {{ pages: Array<{ ref: string, ns: string, kind: string, name: string }> }} */ (JSON.parse(fs.readFileSync(OLD_PAGES, "utf8"))).pages;
+/** @type {Record<string, string>} */
+const moves = {};
+for (const page of oldPages) {
+  if (pageRefs.has(page.ref)) continue;
+  /** @type {string | undefined} */
+  let ref;
+  if (page.kind === "interface" || page.kind === "type") {
+    // Types kept their names: find the one of the same name.
+    ref = symbols.find((item) => item.name === page.name && (item.kind === "interface" || item.kind === "type" || item.kind === "class") && !item.owner)?.ref;
+  } else if (page.kind !== "namespace") ref = OLD_MEMBERS[page.ref] ?? pageOfUse(uses.get(`nc.${page.ns}.${page.name}`));
+  moves[`/reference/${page.ref}/`] = ref ? `/reference/${ref}/` : namespaceMove(page.ns);
+}
+const movesJson = `${JSON.stringify(Object.fromEntries(Object.entries(moves).sort(([a], [b]) => a.localeCompare(b, "en"))), null, 2)}\n`;
+
+// Every target must be a page: of the reference, or of the guide.
+for (const [from, to] of Object.entries(moves)) {
+  const ref = to.replace(/^\/reference\/|\/$/g, "");
+  const exists = to.startsWith("/reference/") ? ref === "" || pageRefs.has(ref) : [".md", ".mdx"].some((ext) => fs.existsSync(path.join(CONTENT, `${to.replace(/^\/|\/$/g, "")}${ext}`)));
+  if (!exists) {
+    console.error(`[build-reference] the 2.2 page ${from} would be sent to ${to}, which does not exist.`);
+    failed = true;
+  }
+}
+
+/* -------------------------------------------------------------------------- */
+/*  The "All functions" page                                                   */
+/* -------------------------------------------------------------------------- */
+
+/** The words of the page, per language. Its tables come from the model. */
+const MODULES_PAGE = /** @type {Record<string, Record<string, any>>} */ ({
+  en: {
+    file: path.join(CONTENT, "modules.md"),
+    title: "All functions",
+    description: (/** @type {number} */ count) => `Every function, class and value of the ${count} namespaces, one line each, with a link to its page in the reference.`,
+    intro: "One table per namespace, in the order of the guide: the call, which leads to its page in the [reference](/reference/), and what it does. Optional parameters end with `?`. Types and options are detailed in the reference.",
+    groups: { essentials: "Essentials", data: "Data", flow: "Functions and async", system: "System and network" },
+    see: (/** @type {string} */ guide, /** @type {string} */ ref) => `See [the guide](${guide}) and [the namespace in the reference](${ref}).`,
+    head: "| Call | What it does |",
+    creates: (/** @type {string} */ name) => `Creates a \`${name}\`.`,
+  },
+  fr: {
+    file: path.join(CONTENT, "fr", "modules.md"),
+    title: "Toutes les fonctions",
+    description: (/** @type {number} */ count) => `Chaque fonction, classe et valeur des ${count} namespaces, une ligne chacune, avec un lien vers sa page dans la référence.`,
+    intro: "Un tableau par namespace, dans l'ordre du guide : l'appel, qui mène à sa page dans la [référence](/reference/), et son rôle. Les paramètres facultatifs finissent par `?`. Les types et les options sont détaillés dans la référence.",
+    groups: { essentials: "Essentiels", data: "Données", flow: "Fonctions et asynchrone", system: "Système et réseau" },
+    see: (/** @type {string} */ guide, /** @type {string} */ ref) => `Voir [le guide](${guide}) et [le namespace dans la référence](${ref}).`,
+    head: "| Appel | Rôle |",
+    creates: (/** @type {string} */ name) => `Crée un \`${name}\`.`,
+  },
+});
+
+/** @type {Map<string, Record<string, string>>} */
+const catalogCache = new Map();
+/** A description in a language, paragraph by paragraph, as docs/src/reference/model.ts does it. */
+const translated = (/** @type {string} */ language, /** @type {string} */ key, /** @type {string | undefined} */ english) => {
+  if (!english || language === "en") return english ?? "";
+  const id = `${language}/${key}`;
+  if (!catalogCache.has(id)) {
+    const file = path.join(CATALOGS, language, `${key.toLowerCase()}.json`);
+    catalogCache.set(id, fs.existsSync(file) ? JSON.parse(fs.readFileSync(file, "utf8")) : {});
+  }
+  const catalog = /** @type {Record<string, string>} */ (catalogCache.get(id));
+  return english
+    .split(/\n\s*\n/)
+    .map((block) => (Object.hasOwn(catalog, keyOf(block)) && catalog[keyOf(block)]) || block)
+    .join("\n\n");
+};
+
+/** The first sentence of a description, as the lists of the reference show it. */
+const firstSentence = (text = "") => {
+  const paragraph = text.split(/\n\s*\n/)[0].replace(/\s+/g, " ").trim();
+  const stop = /[.!?](?=\s+[\p{Lu}`*[]|$)/gu;
+  for (let match; (match = stop.exec(paragraph)); ) {
+    if (/\b(e\.g|i\.e|p\. ex|etc)$/.test(paragraph.slice(0, match.index))) continue;
+    return paragraph.slice(0, match.index + 1);
+  }
+  return paragraph;
+};
+
+/** How a member is called, short: `nc.fs.read(path, encoding?)`, `db.getAll(tableName, where?, options?)`. */
+const callOf = (/** @type {Record<string, any>} */ item) => {
+  const params = (/** @type {Array<Record<string, any>>} */ list = []) => list.map((p) => `${p.rest ? "..." : ""}${p.name}${p.optional ? "?" : ""}`).join(", ");
+  if (item.kind === "constructor") return `${item.title.replace(/\(\)$/, "")}(${params(item.overloads?.[0]?.params)})`;
+  if (item.kind === "function" || item.kind === "method") return `${item.title}(${params(item.overloads?.[0]?.params)})`;
+  return item.title;
+};
+
+/** A cell of a table: one line, with its pipes escaped. */
+const cell = (/** @type {string} */ text) => text.replace(/\s+/g, " ").replace(/\|/g, "\\|").trim();
+
+/** @param {string} language */
+const modulesPage = (language) => {
+  const w = MODULES_PAGE[language];
+  const byRef = new Map(symbols.map((item) => [item.ref, item]));
+  const lines = [
+    "---",
+    `title: ${JSON.stringify(w.title)}`,
+    `description: ${JSON.stringify(w.description(spaces.length))}`,
+    "---",
+    "",
+    "<!-- Generated by scripts/build-reference.js from the JSDoc of src/ and the catalogs of docs/src/reference-i18n/. Do not edit: run `npm run build`. -->",
+    "",
+    w.intro,
+  ];
+  for (const group of GROUPS) {
+    lines.push("", `## ${w.groups[group.id]}`);
+    for (const key of group.keys) {
+      const ns = /** @type {Record<string, any>} */ (spaces.find((space) => space.key === key));
+      lines.push("", `### nc.${key}`, "", w.see(ns.guide, `/reference/${ns.slug}/`), "", w.head, "| --- | --- |");
+      // A big class is followed by its members: nc.sqlite.SQLite, then db.getAll().
+      const items = ns.members.flatMap((/** @type {string} */ ref) => {
+        const item = byRef.get(ref);
+        return item ? [item, ...(item.members ?? []).map((/** @type {string} */ inner) => byRef.get(inner)).filter(Boolean)] : [];
+      });
+      for (const item of items) {
+        // A constructor without a comment of its own creates its class.
+        const text = firstSentence(translated(language, key, item.text)) || (item.kind === "constructor" ? w.creates(item.title.replace(/^new (?:\w+\.)*(\w+)\(\)$/, "$1")) : "");
+        lines.push(`| [\`${cell(callOf(item))}\`](/reference/${item.ref}/) | ${cell(text)} |`);
+      }
+    }
+  }
+  return `${lines.join("\n")}\n`;
+};
+
+/* -------------------------------------------------------------------------- */
 /*  Output                                                                     */
 /* -------------------------------------------------------------------------- */
 
-const summary = `${spaces.length} namespaces and classes, ${symbols.length} pages of members and types`;
-if (CHECK) {
-  const current = fs.existsSync(DATA) ? fs.readFileSync(DATA, "utf8").replace(/\r\n/g, "\n") : "";
-  if (current !== json) {
-    console.error(`[build-reference] ${shown} is out of date. Run \`npm run build\` and commit the result.`);
+const summary = `${spaces.length} namespaces, ${symbols.length} pages of members and types`;
+const outputs = [
+  { file: DATA, text: json, what: summary },
+  { file: MOVES, text: movesJson, what: `${Object.keys(moves).length} pages of 2.2 sent to their 3.0 page` },
+  ...Object.keys(MODULES_PAGE).map((language) => ({ file: MODULES_PAGE[language].file, text: modulesPage(language), what: `the "All functions" page (${language})` })),
+];
+for (const output of outputs) {
+  const name = path.relative(ROOT, output.file).split(path.sep).join("/");
+  if (DASHES.test(output.text)) {
+    console.error(`[build-reference] ${name} would contain an em or en dash: fix the JSDoc or the catalog it comes from.`);
     failed = true;
-  } else console.log(`[build-reference] OK: ${shown} matches the source (${summary}).`);
-} else {
-  fs.mkdirSync(path.dirname(DATA), { recursive: true });
-  fs.writeFileSync(DATA, json);
-  console.log(`[build-reference] ${shown}: ${summary}.`);
+  }
+  if (CHECK) {
+    const current = fs.existsSync(output.file) ? fs.readFileSync(output.file, "utf8").replace(/\r\n/g, "\n") : "";
+    if (current !== output.text) {
+      console.error(`[build-reference] ${name} is out of date. Run \`npm run build\` and commit the result.`);
+      failed = true;
+    } else console.log(`[build-reference] OK: ${name} matches the source (${output.what}).`);
+  } else {
+    fs.mkdirSync(path.dirname(output.file), { recursive: true });
+    fs.writeFileSync(output.file, output.text);
+    console.log(`[build-reference] ${name}: ${output.what}.`);
+  }
 }
 
 if (STRICT && untranslated) {

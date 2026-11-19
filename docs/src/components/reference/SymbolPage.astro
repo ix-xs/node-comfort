@@ -5,7 +5,7 @@
 import StarlightPage from "@astrojs/starlight/components/StarlightPage.astro";
 import { Code } from "@astrojs/starlight/components";
 import type { ApiSymbol } from "../../reference/model";
-import { example, find, model, namespaceOf, nsKind, pathOf, sidebar, translate, untranslated, words } from "../../reference/model";
+import { example, find, firstSentence, membersOf, model, namespaceOf, nsKind, ownedName, pathOf, sidebar, translate, untranslated, words } from "../../reference/model";
 import { href, render } from "../../reference/markdown";
 import { guideTitle } from "../../reference/guide";
 import Tokens from "./Tokens.astro";
@@ -40,7 +40,6 @@ const importCode = isType
       `const { ${variable} } = require("${pkg}");`,
       w.orAlone,
       `const ${variable} = require("${ns.module}");`,
-      ...(symbol.flat ? [w.topLevel, `const { ${symbol.name} } = require("${pkg}");`] : []),
     ].join("\n");
 const typedefCode = isType ? `/** @typedef {import("${pkg}").${symbol.name}} ${symbol.name} */` : "";
 const examples = (symbol.examples ?? []).map((code) => example(key, code, locale));
@@ -57,11 +56,20 @@ async function member<T extends { name: string; text?: string; inheritedFrom?: s
 const properties = await Promise.all((symbol.properties ?? []).map(member));
 const methods = await Promise.all((symbol.methods ?? []).map(member));
 // A member named like a section of the page gets another id.
-const SECTIONS = new Set(["parameters", "constructor", "values", "example", "properties", "methods", "used-by", "declaration"]);
+const SECTIONS = new Set(["parameters", "constructor", "values", "example", "members", "properties", "methods", "used-by", "declaration"]);
 const idOf = (name: string) => (SECTIONS.has(name.toLowerCase()) ? `${name}-member` : name);
 
 const guide = await guideTitle(ns.guide, locale);
 const usedBy = (symbol.usedBy ?? []).map(find).filter((s): s is ApiSymbol => Boolean(s));
+// A member of a big class names its class, the class lists its members.
+const owner = symbol.owner ? find(symbol.owner) : undefined;
+const inner = await Promise.all(
+  membersOf(symbol).map(async (item) => ({
+    symbol: item,
+    html: await render(firstSentence(translate(key, item.text, locale)), locale, { ...options, inline: true }),
+  })),
+);
+const membersHint = inner.length ? await render(w.classMembersText(symbol.name), locale, { ...options, inline: true }) : "";
 const callable = symbol.kind === "function" || symbol.kind === "method" || symbol.kind === "constructor";
 
 const headings = [
@@ -69,6 +77,7 @@ const headings = [
   ...(symbol.ctor ? [{ depth: 2, slug: "constructor", text: w.constructor }] : []),
   ...(symbol.values?.length ? [{ depth: 2, slug: "values", text: w.values }] : []),
   ...(examples.length ? [{ depth: 2, slug: "example", text: examples.length > 1 ? w.examples : w.example }] : []),
+  ...(inner.length ? [{ depth: 2, slug: "members", text: w.members }] : []),
   ...(properties.length ? [{ depth: 2, slug: "properties", text: w.properties }, ...properties.map((p) => ({ depth: 3, slug: idOf(p.name), text: p.name }))] : []),
   ...(methods.length ? [{ depth: 2, slug: "methods", text: w.methods }, ...methods.map((m) => ({ depth: 3, slug: idOf(m.name), text: `${m.name}()` }))] : []),
   ...(usedBy.length ? [{ depth: 2, slug: "used-by", text: w.usedBy }] : []),
@@ -88,7 +97,11 @@ const headings = [
 >
   <div class="nc-rf-meta">
     <span class="nc-rf-kind" data-kind={symbol.kind}>{w.kinds[symbol.kind]}</span>
-    <a class="nc-rf-owner" href={href(pathOf(ns.slug), locale)} data-kind={nsKind(ns)} translate="no">{ns.title}</a>
+    {owner ? (
+      <a class="nc-rf-owner" href={href(pathOf(owner.ref), locale)} data-kind={owner.kind} translate="no">{owner.title}</a>
+    ) : (
+      <a class="nc-rf-owner" href={href(pathOf(ns.slug), locale)} data-kind={nsKind(ns)} translate="no">{ns.title}</a>
+    )}
     <a class="nc-rf-source" href={symbol.source} rel="noopener">{w.source}<span aria-hidden="true"> ↗</span></a>
   </div>
 
@@ -146,6 +159,21 @@ const headings = [
     <section class="nc-rf-section">
       <h2 id="example">{examples.length > 1 ? w.examples : w.example}</h2>
       {examples.map((code) => <Code code={code} lang="js" />)}
+    </section>
+  )}
+
+  {inner.length > 0 && (
+    <section class="nc-rf-section">
+      <h2 id="members">{w.members}</h2>
+      <p class="nc-rf-hint" set:html={membersHint} />
+      <ul class="nc-rf-list">
+        {inner.map((item) => (
+          <li>
+            <a href={href(pathOf(item.symbol.ref), locale)} data-kind={item.symbol.kind} translate="no">{ownedName(item.symbol)}</a>
+            <span set:html={item.html} />
+          </li>
+        ))}
+      </ul>
     </section>
   )}
 

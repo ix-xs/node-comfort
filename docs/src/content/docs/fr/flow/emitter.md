@@ -1,52 +1,74 @@
 ---
 title: "Événements typés"
-description: "`nc.Emitter` est un petit émetteur d'événements où les événements et leurs arguments sont déclarés une seule fois. Votre éditeur vérifie alors chaque `on` et chaque `emit`."
-sidebar:
-  order: 4
+description: "`nc.emitter` crée de petits émetteurs d'événements dont les événements et leurs arguments sont déclarés une fois : l'éditeur vérifie chaque `on` et chaque `emit`. Un événement peut être attendu, et parcouru dans une boucle."
 ---
 
-```ts
-const chat = new nc.Emitter<{ message: [text: string, from: string]; close: [] }>();
-
-const off = chat.on("message", (text, from) => console.log(`${from}: ${text}`));
-chat.emit("message", "hello", "ada");
-chat.emit("mesage", "hi");   // erreur : événement inconnu
-off();                       // arrête l'écoute
+```js
+const { emitter } = require("@ix-xs/node-comfort");
 ```
 
-En JavaScript, déclarez le type avec JSDoc :
+## Créer un émetteur
+
+```ts
+const chat = emitter.create<{ message: [text: string, from: string]; close: [] }>();
+
+const off = chat.on("message", (text, from) => console.log(`${from}: ${text}`));
+chat.emit("message", "hello", "ada"); // ada: hello
+chat.emit("mesage", "hi");            // erreur de type : événement inconnu
+off();
+```
+
+`emitter.create()` équivaut à `new emitter.Emitter()`. Étendez la classe pour donner des événements typés à l'une de vos classes :
+
+```ts
+class Job extends emitter.Emitter<{ done: [result: string] }> {
+  run() {
+    this.emit("done", "ok");
+  }
+}
+```
+
+En JavaScript, déclarez les événements avec JSDoc :
 
 ```js
 /** @type {import("@ix-xs/node-comfort").Emitter<{ ready: [port: number] }>} */
-const events = new nc.Emitter();
+const events = emitter.create();
 ```
 
 ## Écouter
 
 ```js
-events.on("ready", (port) => nc.info(`Listening on ${port}`)); // renvoie une fonction qui le retire
-events.once("ready", onReady);                                 // s'exécute une seule fois
-events.onAny((name, ...args) => nc.debug(name, args));        // tous les événements, pratique pour les logs
+const off = events.on("ready", onReady); // renvoie une fonction qui retire l'écouteur
+events.once("ready", onReady);           // ne s'exécute qu'une fois
+events.onAny((name, ...args) => console.log(name, args));
 
-events.off("ready", onReady); // un seul écouteur
+events.off("ready", onReady); // un écouteur, y compris un écouteur once() qui n'a pas encore tourné
 events.off("ready");          // tous les écouteurs de "ready"
 events.clear();               // tout
 ```
 
-`off(event, listener)` prend la fonction que vous avez donnée à `on` ou à `once`. Un écouteur ajouté avec `once` peut ainsi être retiré avant de s'être exécuté.
+| Méthode | Renvoie |
+| --- | --- |
+| `on(event, listener, { signal })` | Une fonction qui retire l'écouteur |
+| `once(event, listener, { signal })` | Pareil |
+| `onAny(listener)` | Pareil ; l'écouteur reçoit d'abord le nom de l'événement |
+| `off(event, listener?)` | L'émetteur |
+| `clear(event?)` | L'émetteur |
 
-La fonction que renvoient `on`, `once` et `onAny` fonctionne aussi avec `using` (Node.js 24 ou plus récent), qui retire l'écouteur à la fin du bloc :
+Ici, `on()` renvoie une fonction de désabonnement. Ailleurs dans la bibliothèque (`nc.fs.watch()`, `nc.async.when()`), `on()` renvoie l'objet, pour enchaîner les appels.
+
+La fonction renvoyée par `on`, `once` et `onAny` fonctionne avec `using`, qui retire l'écouteur à la fin du bloc :
 
 ```js
 {
   using off = events.on("ready", onReady);
   await startServer();
-} // l'écouteur n'est plus là
+} // l'écouteur est retiré ici
 ```
 
-## Un seul signal pour plusieurs écouteurs
+## Un signal pour plusieurs écouteurs
 
-`on` et `once` acceptent un `signal`. Quand il est interrompu, l'écouteur est retiré :
+Quand le signal s'annule, tous les écouteurs ajoutés avec lui sont retirés. Avec un signal déjà annulé, rien n'est ajouté.
 
 ```js
 const controller = new AbortController();
@@ -57,36 +79,42 @@ chat.once("close", onClose, { signal: controller.signal });
 controller.abort(); // retire les deux
 ```
 
-Cela vous évite de conserver une fonction de retrait par écouteur. Avec un signal déjà interrompu, rien n'est ajouté.
-
 ## Émettre
 
-`emit` appelle les écouteurs tout de suite, dans l'ordre où ils ont été ajoutés, et indique en retour si quelqu'un écoutait. Si un écouteur lève une erreur, elle se propage, comme avec l'`EventEmitter` de Node.
-
-`emitAsync` les appelle l'un après l'autre, en attendant chacun, et se résout avec ce qu'ils ont renvoyé. Il convient bien aux hooks :
+| Méthode | Rôle |
+| --- | --- |
+| `emit(event, ...args)` | Appelle les écouteurs tout de suite, dans l'ordre d'ajout. Renvoie s'il y en avait un. Un écouteur qui lève une erreur interrompt l'appel et l'erreur se propage, comme avec l'`EventEmitter` de Node |
+| `emitAsync(event, ...args)` | Les appelle l'un après l'autre, en attendant chacun, et se résout avec ce qu'ils ont renvoyé |
 
 ```js
+hooks.on("beforeSave", async (record) => validate(record));
 await hooks.emitAsync("beforeSave", record);
 ```
 
 ## Attendre un événement
+
+`waitFor` se résout avec les arguments du prochain événement qui correspond :
 
 ```js
 const [code] = await child.waitFor("exit", { timeout: "30s" });
 const [text] = await chat.waitFor("message", { filter: (text, from) => from === "ada" });
 ```
 
-`waitFor` rejette sa promesse avec une `TimeoutError` après `timeout`, ou avec une `AbortError` si vous passez un signal qui se déclenche. Le timeout s'écrit en millisecondes ou en texte, par exemple `"30s"` ou `"2m"`.
+| Option | |
+| --- | --- |
+| `timeout` | Rejette avec une `TimeoutError`. `false` ou `Infinity` : sans limite, par défaut |
+| `signal` | Rejette avec une `AbortError` |
+| `filter` | `(...args) => boolean` : seuls ces événements comptent |
 
-## Boucler sur les événements
+## Parcourir les événements
 
 ```js
-for await (const [job] of queue.iterate("job")) {
-  await process(job);
+for await (const [job] of jobs.iterate("job")) {
+  await handle(job);
 }
 ```
 
-Les événements qui arrivent pendant que votre boucle est occupée sont mis en file d'attente. Sortir de la boucle retire l'écouteur. Passez un `signal` pour terminer la boucle de l'extérieur.
+Les événements qui arrivent pendant que la boucle travaille sont mis en file. Sortir de la boucle retire l'écouteur. `iterate(event, { signal })` termine la boucle depuis l'extérieur.
 
 ## Qui écoute
 
@@ -96,4 +124,23 @@ events.listeners("ready");     // [onReady, logReady], dans l'ordre d'exécution
 events.eventNames();           // ["ready"]
 ```
 
-Pour un écouteur ajouté avec `once`, `listeners` vous donne la fonction que vous avez passée. Les écouteurs `onAny` ne sont pas comptés.
+Les écouteurs `onAny` ne sont pas comptés. Pour un écouteur ajouté avec `once`, `listeners` donne la fonction passée.
+
+## Importer la classe seule
+
+Le sous-chemin exporte la classe, avec une méthode statique `create` :
+
+```js
+const Emitter = require("@ix-xs/node-comfort/emitter");
+
+const events = Emitter.create();
+```
+
+## Avant la 3.0
+
+| 2.2 | 3.0 |
+| --- | --- |
+| `new nc.Emitter()` | `nc.emitter.create()` ou `new nc.emitter.Emitter()` |
+| `class Job extends nc.Emitter {}` | `class Job extends nc.emitter.Emitter {}` |
+
+`nc.Emitter` fonctionne toujours, avertit une fois et sera retiré en 4.0.

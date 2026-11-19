@@ -883,6 +883,7 @@ const _monthsOf = (locale) => {
  * @returns {Date | undefined} `undefined` when the text doesn't match or isn't a real date.
  */
 function parse(text, pattern, options = {}) {
+  if (typeof pattern !== "string") throw new TypeError(`time.parse() needs a pattern, like "DD/MM/YYYY": got ${pattern === undefined ? "none" : typeof pattern}. For ISO text, use new Date(text).`);
   let parser = _parsers.get(pattern);
   if (!parser) {
     const compiled = _compile(pattern);

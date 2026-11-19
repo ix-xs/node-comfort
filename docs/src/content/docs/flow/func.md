@@ -1,97 +1,38 @@
 ---
 title: "Functions"
-description: "`nc.func` wraps functions to change when and how they run: debounce, throttle, memoize, retry, timeouts, batching, and error handling without try/catch."
-sidebar:
-  order: 1
+description: "`nc.func` wraps a function to change when and how it runs: debounce, throttle, memoize, batching, deduplication, composition."
 ---
 
 ```js
 const { func } = require("@ix-xs/node-comfort");
-
-const save = func.debounce(persist, 300);
-const data = await func.retry(() => fetchJSON(url), { attempts: 5, delay: 200, backoff: 2 });
-const [error, user] = await func.to(getUser(id));
 ```
 
-Every duration here takes milliseconds or text: `300`, `"300ms"`, `"5s"`, `"2m"`, `"1h"`.
+Every function returns a new function and leaves the original untouched. Durations take milliseconds or text: `300`, `"300ms"`, `"5s"`.
 
 ## Debounce and throttle
 
-**Debounce** waits for calls to stop, then runs once with the latest arguments. Use it for search boxes, resize handlers and autosave:
+`debounce` waits for the calls to stop, then runs once with the latest arguments. `throttle` runs at most once per interval.
 
 ```js
-const search = func.debounce((query) => api.search(query), 300);
-input.on("input", (e) => search(e.target.value));
+const save = func.debounce(persist, "1s", { maxWait: "5s" }); // at least every 5s while calls keep coming
+save.flush();   // run the waiting call now
+save.cancel();  // drop it
+save.pending(); // true while a call is waiting
 
-const save = func.debounce(persist, "1s", { maxWait: "5s" }); // but at least every 5s
-save.flush();  // run the pending call now
-save.cancel(); // drop it
+const report = func.throttle((percent) => console.log(`${percent}%`), "1s");
 ```
 
-**Throttle** runs at most once per interval, however often it's called. Use it for progress reports and scroll handlers:
+| Option | `debounce` | `throttle` |
+| --- | --- | --- |
+| `leading` | `false`: call at the start of a burst | `true`: call on the first call |
+| `trailing` | `true`: call once the burst is over | `true`: last call with the latest arguments |
+| `maxWait` | Never postpone longer than this | |
 
-```js
-const report = func.throttle((percent) => nc.info(`${percent}%`), "1s");
-```
-
-## Retry
-
-`retry` calls a function until it succeeds, waiting between attempts. If every attempt fails, you get the last error.
-
-```js
-const data = await func.retry(() => fetchJSON(url), {
-  attempts: 5,
-  delay: 200,
-  backoff: 2,   // waits 200, 400, 800, 1600 ms
-  jitter: 0.2,  // spreads retries so clients don't retry in sync
-  shouldRetry: (error) => !(error instanceof nc.errors.HttpError && error.status < 500),
-  onRetry: (error, attempt, wait) => nc.warn(`Attempt ${attempt} failed, retrying in ${wait}ms`),
-});
-```
-
-The function receives the attempt number, starting at 1. Pass a `signal` to stop retrying.
-
-An `AbortError` thrown by the function ends the retries at once. A cancelled operation was stopped on purpose, so it is not tried again.
-
-## Timeouts
-
-```js
-const res = await func.timeout(fetch(url), "5s");                    // TimeoutError after 5s
-const rows = await func.timeout(() => slowQuery(), 2000, "Database too slow");
-```
-
-Given a promise, `timeout` only stops waiting: the request itself goes on in the background. Give it a function instead, and the function receives an `AbortSignal` that fires when time is up, so the work stops too:
-
-```js
-const res = await func.timeout((signal) => fetch(url, { signal }), "5s");
-```
-
-A timeout is a `TimeoutError`, not an `AbortError`, so it combines with `retry`:
-
-```js
-const res = await func.retry(() => func.timeout((signal) => fetch(url, { signal }), "5s"), { attempts: 3, delay: "1s" });
-```
-
-## Errors as values
-
-`to` turns a promise into `[error, value]`, so a failure is just a value you check:
-
-```js
-const [error, user] = await func.to(db.users.find(id));
-if (error) return res.status(500).send(error.message);
-res.json(user);
-```
-
-`attempt` does the same for a function you'll call later:
-
-```js
-const safeParse = func.attempt(JSON.parse);
-const [error, data] = await safeParse(input);
-```
+The debounced function has `flush()`, `cancel()` and `pending()`; the throttled one has `cancel()`.
 
 ## Memoize
 
-`memoize` caches results by arguments. It can expire entries, cap their number, and it handles async functions: a rejected promise isn't cached, so the next call tries again.
+`memoize` caches results by arguments. A rejected promise is not kept, so the next call tries again.
 
 ```js
 const getUser = func.memoize((id) => db.users.find(id), { ttl: "1m", max: 1000 });
@@ -99,68 +40,107 @@ getUser.delete(42); // forget one entry
 getUser.clear();    // forget everything
 ```
 
-Primitive arguments are compared by value and type, plain objects and arrays by content. So `{ page: 1 }` passed twice hits the cache, while `undefined` and `null`, or `10`, `10n` and `"10"`, each get their own entry. To choose the key yourself, pass a `resolver`: `func.memoize(fn, { resolver: (user) => user.id })`.
+| Option | Default | |
+| --- | --- | --- |
+| `ttl` | forever | How long a result stays |
+| `max` | no limit | Number of results; the least recently used goes first |
+| `resolver` | the arguments | `(...args) => key`, also accepted as the second argument itself |
+| `cacheRejections` | `false` | Keep rejected promises |
 
-For a shared cache with statistics and more control, see [`nc.Cache`](/flow/cache/).
+Primitives are compared by value and type (`10`, `10n` and `"10"` are three entries), plain objects and arrays by content (`{ page: 1 }` twice is one entry), anything else by identity. For a shared cache with stats, see [Cache](/flow/cache/).
 
 ## Batch
 
-`batch` collects calls made close together and runs your function once with all their items. Each caller gets its own result:
+`batch` collects the calls made close together and runs the function once with all their items. Each caller gets its own result.
 
 ```js
-const loadUser = func.batch(async (ids) => {
+const loadUser = func.batch(async function(ids) {
   const users = await db.getAll("users", { id: ids });
   return ids.map((id) => users.find((user) => user.id === id));
 });
 
-// Asked from three places at once: one query.
-const [ada, bob, eve] = await Promise.all([loadUser(1), loadUser(2), loadUser(3)]);
-```
-
-The function returns one result per item, in the same order, or a `Map` keyed by item. An `Error` in the results rejects that call only. If the function throws, every call of the batch rejects.
-
-By default, calls made in the same tick go together. `wait` collects for longer, and `max` runs the batch as soon as that many calls are waiting:
-
-```js
-const loadUser = func.batch(loadUsers, { wait: "20ms", max: 100 });
+const [ada, bob, eve] = await Promise.all([loadUser(1), loadUser(2), loadUser(3)]); // one query
 loadUser.flush(); // run the waiting calls now
 ```
 
+| Option | Default | |
+| --- | --- | --- |
+| `wait` | same tick | How long to collect calls |
+| `max` | no limit | Run as soon as this many calls wait |
+
+The function returns one result per item in the same order, or a `Map` keyed by item. An `Error` among the results rejects that call only; a thrown error rejects every call of the batch.
+
 ## Dedupe
 
-`dedupe` makes calls that happen at the same time share one run:
+`dedupe` makes the calls that overlap share one run:
 
 ```js
 const refreshToken = func.dedupe(async () => (await api.post("auth/refresh")).data);
 
-// Ten requests get a 401 at the same moment: one refresh, ten answers.
-const token = await refreshToken();
+await Promise.all([refreshToken(), refreshToken(), refreshToken()]); // one refresh
 ```
 
-Calls with the same arguments get the promise of the run in flight. Once it settles, the next call starts a new run: nothing is kept, unlike `memoize`. A second parameter lets you build the key yourself, as in `func.dedupe(fetchUser, (id, options) => id)`.
+Calls with the same arguments get the promise in flight. Once it settles, the next call starts a new run: nothing is kept, unlike `memoize`. The second argument builds the key: `func.dedupe(fetchUser, (id, options) => id)`.
 
-## Once, before, after
+## Call counts
 
 ```js
-const connect = func.once(() => createPool(config)); // later calls return the same pool
-const tryLogin = func.before(4, login);               // 3 real attempts at most
-const done = func.after(3, () => nc.info("All 3 uploads finished"));
+const connect = func.once(() => createPool(config)); // later calls return the first result
+const tryLogin = func.before(4, login);              // runs for the first 3 calls, then returns the last result
+const done = func.after(3, () => "all done");        // runs from the 3rd call on
+
+done(); // undefined
+done(); // undefined
+done(); // "all done"
 ```
 
-## Composition
+## Errors as values
 
-`pipe` chains functions left to right, with types flowing through:
+`attempt` wraps a function so that it resolves to `[error, value]` instead of throwing:
+
+```js
+const safeParse = func.attempt(JSON.parse);
+
+await safeParse('{"a":1}'); // [null, { a: 1 }]
+await safeParse("oops");    // [SyntaxError, undefined]
+```
+
+For a promise, use `nc.async.to()`.
+
+## Composition
 
 ```js
 const toSlug = func.pipe(nc.str.deburr, nc.str.kebabCase);
 toSlug("Crème Brûlée"); // "creme-brulee"
-```
 
-`pipeAsync` does the same when some steps are async. Each one is awaited before the next runs:
-
-```js
-const publish = func.pipeAsync(loadDraft, renderMarkdown, uploadToCDN);
+const publish = func.pipeAsync(loadDraft, renderMarkdown, uploadToCDN); // each step awaited
 const url = await publish(postId);
 ```
 
-Also available: `compose` (right to left), `curry`, `partial`, `negate`, `delay`, `promisify`, `noop` and `identity`. The [reference](/reference/func/) lists everything.
+| Function | Example | Result |
+| --- | --- | --- |
+| `pipe` | `func.pipe(f, g)(x)` | `g(f(x))`, left to right, typed through |
+| `pipeAsync` | `await func.pipeAsync(f, g)(x)` | Same, each step awaited |
+| `compose` | `func.compose((s) => s + "!", (s) => s.toUpperCase())("hi")` | `"HI!"`, right to left |
+| `curry` | `func.curry((a, b, c) => a + b + c)(1)(2)(3)` | `6` |
+| `partial` | `func.partial((a, b, c) => a + b + c, 1, 2)(3)` | `6` |
+| `negate` | `[1, 2, 3, 4].filter(func.negate(isEven))` | `[1, 3]` |
+
+## Other functions
+
+| Function | Does |
+| --- | --- |
+| `delay(fn, ms, ...args)` | Calls `fn(...args)` after `ms` and resolves with its result |
+| `promisify(fn)` | Turns a function whose last parameter is a `(error, result)` callback into one that returns a promise |
+| `noop()` | Does nothing, returns `undefined` |
+| `identity(value)` | Returns `value` |
+
+## Before 3.0
+
+| 2.2 | 3.0 |
+| --- | --- |
+| `nc.func.retry()` | `nc.async.retry()` |
+| `nc.func.timeout()` | `nc.async.timeout()` |
+| `nc.func.to()` | `nc.async.to()` |
+
+The old names still work and warn once. They are removed in 4.0. See [Async and concurrency](/flow/async/).

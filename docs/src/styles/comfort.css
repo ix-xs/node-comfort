@@ -380,8 +380,8 @@ site-search .dialog-frame { scrollbar-width: thin; scrollbar-color: var(--nc-lin
 .sl-markdown-content .sl-heading-wrapper.level-h3 { line-height: 1.25; }
 :root .sl-markdown-content a.sl-anchor-link { color: var(--nc-faint); text-decoration: none; text-indent: 0; }
 
-/* Prose only: what a component draws inside `.not-content` (a terminal
-   scene) has colours of its own. */
+/* Prose only: what a component draws inside `.not-content` has colours of
+   its own. */
 .sl-markdown-content :is(p, li, dd):not(:where(.not-content *)) { color: var(--nc-muted); }
 .sl-markdown-content :is(strong, b, dt):not(:where(.not-content *)) { color: var(--nc-fg); font-weight: 600; }
 .sl-markdown-content a:not(.sl-link-button, .sl-link-card a, :where(.not-content *)) { color: var(--nc-fg); text-decoration: underline; text-decoration-color: var(--nc-accent); text-decoration-thickness: 1px; text-underline-offset: 0.2em; }
@@ -678,31 +678,6 @@ mobile-starlight-toc nav {
   src: url("../../node_modules/@fontsource-variable/geist-mono/files/geist-mono-symbols2-wght-normal.woff2") format("woff2-variations");
   unicode-range: U+2500-259F;
   size-adjust: 103%;
-}
-
-/* The colours a terminal prints, for the scenes of the guide. */
-:root,
-:root[data-theme="dark"] {
-  --nc-ansi-black: #4b4943;
-  --nc-ansi-red: #e5645c;
-  --nc-ansi-green: #34d399;
-  --nc-ansi-yellow: #e3b24c;
-  --nc-ansi-blue: #7aa7f0;
-  --nc-ansi-magenta: #c79bf0;
-  --nc-ansi-cyan: #6fd3dc;
-  --nc-ansi-white: #edebe4;
-  --nc-ansi-gray: #8a877d;
-}
-:root[data-theme="light"] {
-  --nc-ansi-black: #b9b3a3;
-  --nc-ansi-red: #b3362f;
-  --nc-ansi-green: #047857;
-  --nc-ansi-yellow: #8a6100;
-  --nc-ansi-blue: #2457b3;
-  --nc-ansi-magenta: #8544b8;
-  --nc-ansi-cyan: #0d7480;
-  --nc-ansi-white: #1b1a16;
-  --nc-ansi-gray: #7a7567;
 }
 
 /* The lead of a page is written like the rest of the docs, with code in it. */

@@ -64,7 +64,9 @@
   "Language used by `natural`. Defaults to the system's.": "Langue utilisée par `natural`. Par défaut : celle du système.",
   "A sort key for `sortBy()`: an iteratee, or `[iteratee, \"asc\" | \"desc\"]` to give that key its own direction.": "Une clé de tri pour `sortBy()` : un iteratee, ou `[iteratee, \"asc\" | \"desc\"]` pour donner à cette clé son propre sens.",
   "Options for `toSentence()`.": "Options de `toSentence()`.",
-  "Language of the joining word. Defaults to `\"en\"`.": "Langue du mot de liaison. Par défaut : `\"en\"`.",
   "`\"conjunction\"` joins with \"and\", `\"disjunction\"` with \"or\", `\"unit\"` with commas only. Defaults to `\"conjunction\"`.": "`\"conjunction\"` relie avec « et », `\"disjunction\"` avec « ou », `\"unit\"` avec des virgules seulement. Par défaut : `\"conjunction\"`.",
-  "Defaults to `\"long\"`.": "Par défaut : `\"long\"`."
+  "Defaults to `\"long\"`.": "Par défaut : `\"long\"`.",
+  "The page, or `{ page, perPage }`.": "La page, ou `{ page, perPage }`.",
+  "A function, or a property name (its value is tested for truthiness).": "Une fonction, ou un nom de propriété (sa valeur est testée comme vraie ou fausse).",
+  "Language of the joining word. Defaults to the one set with `nc.config.set()`, `\"en\"` out of the box.": "Langue du mot de liaison. Par défaut : celle définie avec `nc.config.set()`, `\"en\"` à l'origine."
 }

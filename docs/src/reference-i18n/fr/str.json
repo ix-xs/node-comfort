@@ -80,7 +80,6 @@
   "\"Few\" form (Polish, Czech, Russian...).": "Forme « quelques » (polonais, tchèque, russe...).",
   "\"Many\" form (Polish, Russian, Arabic...).": "Forme « beaucoup » (polonais, russe, arabe...).",
   "Options for `plural()`.": "Options de `plural()`.",
-  "Language whose plural rules apply. Defaults to `\"en\"`.": "Langue dont les règles de pluriel s'appliquent. Par défaut : `\"en\"`.",
   "Put the formatted count before the word. Defaults to `true`.": "Place le nombre formaté devant le mot. Par défaut : `true`.",
   "Use ordinal rules (1st, 2nd, 3rd).": "Utilise les règles des ordinaux (1st, 2nd, 3rd).",
   "Options for `random()`.": "Options de `random()`.",
@@ -101,5 +100,6 @@
   "Maximum visible characters per line. Defaults to `80`.": "Nombre maximal de caractères, tels que vous les voyez, par ligne. Par défaut : `80`.",
   "Added at the start of every line.": "Ajouté au début de chaque ligne.",
   "Break words longer than `width` instead of letting them overflow.": "Coupe les mots plus longs que `width` au lieu de les laisser dépasser.",
-  "Line separator. Defaults to `\"\\n\"`.": "Séparateur de lignes. Par défaut : `\"\\n\"`."
+  "Line separator. Defaults to `\"\\n\"`.": "Séparateur de lignes. Par défaut : `\"\\n\"`.",
+  "Language whose plural rules apply. Defaults to the one set with `nc.config.set()`, `\"en\"` out of the box.": "Langue dont les règles de pluriel s'appliquent. Par défaut : celle définie avec `nc.config.set()`, `\"en\"` à l'origine."
 }

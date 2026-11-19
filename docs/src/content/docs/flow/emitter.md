@@ -1,52 +1,74 @@
 ---
 title: "Typed events"
-description: "`nc.Emitter` is a small event emitter where the events and their arguments are declared once. Your editor then checks every `on` and `emit`."
-sidebar:
-  order: 4
+description: "`nc.emitter` creates small event emitters whose events and arguments are declared once, so the editor checks every `on` and `emit`. Events can be awaited and looped over."
 ---
 
-```ts
-const chat = new nc.Emitter<{ message: [text: string, from: string]; close: [] }>();
-
-const off = chat.on("message", (text, from) => console.log(`${from}: ${text}`));
-chat.emit("message", "hello", "ada");
-chat.emit("mesage", "hi");   // error: unknown event
-off();                       // stop listening
+```js
+const { emitter } = require("@ix-xs/node-comfort");
 ```
 
-In JavaScript, declare the type with JSDoc:
+## Creating an emitter
+
+```ts
+const chat = emitter.create<{ message: [text: string, from: string]; close: [] }>();
+
+const off = chat.on("message", (text, from) => console.log(`${from}: ${text}`));
+chat.emit("message", "hello", "ada"); // ada: hello
+chat.emit("mesage", "hi");            // type error: unknown event
+off();
+```
+
+`emitter.create()` is `new emitter.Emitter()`. Extend the class to give a class of yours typed events:
+
+```ts
+class Job extends emitter.Emitter<{ done: [result: string] }> {
+  run() {
+    this.emit("done", "ok");
+  }
+}
+```
+
+In JavaScript, declare the events with JSDoc:
 
 ```js
 /** @type {import("@ix-xs/node-comfort").Emitter<{ ready: [port: number] }>} */
-const events = new nc.Emitter();
+const events = emitter.create();
 ```
 
 ## Listening
 
 ```js
-events.on("ready", (port) => nc.info(`Listening on ${port}`)); // returns a function that removes it
-events.once("ready", onReady);                                 // runs one time only
-events.onAny((name, ...args) => nc.debug(name, args));        // every event, handy for logs
+const off = events.on("ready", onReady); // returns a function that removes the listener
+events.once("ready", onReady);           // runs one time only
+events.onAny((name, ...args) => console.log(name, args));
 
-events.off("ready", onReady); // one listener
-events.off("ready");          // all "ready" listeners
+events.off("ready", onReady); // one listener, also one added with once() that has not run
+events.off("ready");          // every "ready" listener
 events.clear();               // everything
 ```
 
-`off(event, listener)` takes the function you gave to `on` or `once`. A listener added with `once` can be removed this way before it has run.
+| Method | Returns |
+| --- | --- |
+| `on(event, listener, { signal })` | A function that removes the listener |
+| `once(event, listener, { signal })` | Same |
+| `onAny(listener)` | Same; the listener gets the event name first |
+| `off(event, listener?)` | The emitter |
+| `clear(event?)` | The emitter |
 
-The function that `on`, `once` and `onAny` return also works with `using` (Node.js 24 and later), which removes the listener at the end of the block:
+Here `on()` returns an unsubscribe function. Elsewhere in the library (`nc.fs.watch()`, `nc.async.when()`), `on()` returns the object, so calls chain.
+
+The function that `on`, `once` and `onAny` return works with `using`, which removes the listener at the end of the block:
 
 ```js
 {
   using off = events.on("ready", onReady);
   await startServer();
-} // the listener is gone here
+} // the listener is removed here
 ```
 
 ## One signal for many listeners
 
-`on` and `once` accept a `signal`. When it aborts, the listener is removed:
+When the signal aborts, every listener added with it is removed. With a signal already aborted, nothing is added.
 
 ```js
 const controller = new AbortController();
@@ -57,36 +79,42 @@ chat.once("close", onClose, { signal: controller.signal });
 controller.abort(); // removes both
 ```
 
-This saves you from keeping one remove function per listener. With a signal that is already aborted, nothing is added.
-
 ## Emitting
 
-`emit` calls listeners right away, in the order they were added, and returns whether anyone was listening. If a listener throws, the error propagates, as with Node's `EventEmitter`.
-
-`emitAsync` calls them one after another, waiting for each, and resolves with what they returned. It's a good fit for hooks:
+| Method | Does |
+| --- | --- |
+| `emit(event, ...args)` | Calls the listeners now, in the order they were added. Returns whether there was one. A listener that throws stops the call and the error propagates, as with Node's `EventEmitter` |
+| `emitAsync(event, ...args)` | Calls them one after another, awaiting each, and resolves with what they returned |
 
 ```js
+hooks.on("beforeSave", async (record) => validate(record));
 await hooks.emitAsync("beforeSave", record);
 ```
 
 ## Waiting for an event
+
+`waitFor` resolves with the arguments of the next matching event:
 
 ```js
 const [code] = await child.waitFor("exit", { timeout: "30s" });
 const [text] = await chat.waitFor("message", { filter: (text, from) => from === "ada" });
 ```
 
-`waitFor` rejects with a `TimeoutError` after `timeout`, or an `AbortError` if you pass a signal that fires. The timeout is in milliseconds or text such as `"30s"` or `"2m"`.
+| Option | |
+| --- | --- |
+| `timeout` | Rejects with a `TimeoutError`. `false` or `Infinity`: no limit, the default |
+| `signal` | Rejects with an `AbortError` |
+| `filter` | `(...args) => boolean`: only these events count |
 
 ## Looping over events
 
 ```js
-for await (const [job] of queue.iterate("job")) {
-  await process(job);
+for await (const [job] of jobs.iterate("job")) {
+  await handle(job);
 }
 ```
 
-Events that arrive while your loop is busy are queued. Leaving the loop removes the listener. Pass a `signal` to end the loop from outside.
+Events that arrive while the loop is busy are queued. Leaving the loop removes the listener. `iterate(event, { signal })` ends the loop from outside.
 
 ## Who is listening
 
@@ -96,4 +124,23 @@ events.listeners("ready");     // [onReady, logReady], in the order they run
 events.eventNames();           // ["ready"]
 ```
 
-For a listener added with `once`, `listeners` gives you the function you passed. `onAny` listeners are not counted.
+`onAny` listeners are not counted. For a listener added with `once`, `listeners` gives the function that was passed.
+
+## Importing the class alone
+
+The subpath exports the class, with a static `create`:
+
+```js
+const Emitter = require("@ix-xs/node-comfort/emitter");
+
+const events = Emitter.create();
+```
+
+## Before 3.0
+
+| 2.2 | 3.0 |
+| --- | --- |
+| `new nc.Emitter()` | `nc.emitter.create()` or `new nc.emitter.Emitter()` |
+| `class Job extends nc.Emitter {}` | `class Job extends nc.emitter.Emitter {}` |
+
+`nc.Emitter` still works, warns once, and is removed in 4.0.

@@ -1,62 +1,58 @@
 ---
 title: "Performance"
-description: "A library that bundles many tools shouldn't make your program slower to start. node-comfort loads almost nothing until you use it."
-sidebar:
-  order: 4
+description: "What the library costs at startup and per call, and how to keep both low."
 ---
 
-## Lazy loading
+## Startup
 
-`require("@ix-xs/node-comfort")` creates the `nc` object and stops there. Each namespace is loaded the first time you touch it, and only then. Expensive setup, like `node:crypto` or the `Intl` objects used for text segmentation, is also deferred until a function needs it.
-
-Measured on a Windows machine with Node.js 24 (median of 15 runs):
+`require()` builds the root object and stops there. Each namespace loads the first time it is read, and expensive setup (`node:crypto`, `Intl` objects) waits until a function needs it.
 
 | Scenario | Time |
 | --- | --- |
-| `require()` the package | about 4 ms |
-| ... then use `nc.str` and `nc.isEmail` | about 13 ms in total |
-| ... then touch all 23 namespaces | about 43 ms in total |
+| `require()` the package | about 12 ms |
+| ... then use `nc.str` and `nc.is` | about 20 ms in total |
+| ... then touch the 25 namespaces | about 65 ms in total |
+| `import` the root from an ES module | about 65 ms: every namespace is loaded |
+| `import` one entry point, like `@ix-xs/node-comfort/str` | about 13 ms |
 
-You pay for what you use. A script that only logs and reads a JSON file never loads the SQLite, HTTP or crypto code.
-
-## What runs fast
-
-The functions a program calls thousands of times a second are written for that. What is slow in JavaScript is done once and kept: `Intl` formatters, compiled date patterns, parsed durations, prepared SQL statements, a pool of random bytes. On the same machine, on one core:
-
-| Operation | Per second |
-| --- | --- |
-| `nc.info()` to a terminal | 2.9 million |
-| `nc.debug()` when debug is off | more than 100 million |
-| `time.format()` with month and day names | 280,000 |
-| `time.parseDuration("5m")` | 90 million |
-| `id.uuidv7()` | 7 million |
-| `id.nano()` | 5.8 million |
-| `str.slugify()` | 3.4 million |
-| `num.format()` | 1.3 million |
-| `obj.get()` with a dot path | 24 million |
-| `schema.parse()` on a five-field object | 1.6 million |
-| `emitter.emit()` to two listeners | 35 to 60 million |
-| `db.get()` by primary key | 460,000 |
-| `db.getAll()` of 200 rows | 7,400 |
-
-Compared with 2.0, the logger is about a hundred times faster, dates with names thirty times, ids ten to forty times and SQLite reads three to four times. The [changelog](https://github.com/ix-xs/node-comfort/blob/main/CHANGELOG.md) has the list.
-
-These are micro-benchmarks: they say what the library costs, not how fast your program is. Measure your own code with `time.stopwatch()` or `time.measure()` before you optimize it.
+Measured on a Windows machine with Node.js 26, median of 11 runs.
 
 ## ES modules
 
-When you `import` the root package from an ES module, Node.js has to read every named export up front, which loads every namespace (about 45 ms). To keep startup lean in ES modules, import the namespaces you need from their own entry points:
+Node.js reads every named export of a CommonJS package when an ES module imports it, which loads every namespace. In a short-lived program (a CLI, a serverless function), import the entry points you need:
 
 ```js
 import { slugify } from "@ix-xs/node-comfort/str";
 import { get } from "@ix-xs/node-comfort/obj";
 ```
 
-Each entry point loads only its own module and the few it depends on.
+## Per call
+
+What JavaScript does slowly is done once and kept: `Intl` formatters, compiled date patterns, parsed durations, prepared SQL statements, a pool of random bytes. On the same machine, one core:
+
+| Operation | Per second |
+| --- | --- |
+| `nc.logger.info()` | 320,000 |
+| `nc.logger.debug()` when debug is off | 100 million |
+| `nc.time.format()` with month and day names | 200,000 |
+| `nc.time.parseDuration("5m")` | 32 million |
+| `nc.id.uuidv7()` | 1.9 million |
+| `nc.str.slugify()` | 2.6 million |
+| `nc.num.format()` | 740,000 |
+| `nc.obj.get()` with a dot path | 20 million |
+| `schema.parse()` on a five-field object | 1.7 million |
+| `emitter.emit()` | 24 million |
+| `db.get()` by primary key | 200,000 |
+| `db.getAll()` of 200 rows | 4,200 |
+
+These are micro-benchmarks: they say what the library costs, not how fast a program is. `node scripts/bench.js` in the repository measures them on your machine. Measure your own code with `nc.time.stopwatch()` or `nc.time.measure()`.
 
 ## Tips
 
-- **Import namespaces directly in hot paths of short-lived scripts** (CLIs, serverless functions), where startup time matters most.
-- **Enable Node's compile cache in your app** for faster startups across the board: set `NODE_COMPILE_CACHE=.cache`, or call `require("node:module").enableCompileCache()` at the top of your entry file. This speeds up every module, not just this one.
-- **Reuse clients and caches.** `nc.http.create()` and `new nc.Cache()` are cheap, but creating them once and sharing them avoids repeated work.
-- **Use `db.insertMany()`** for bulk inserts: one transaction is dramatically faster than thousands of separate ones.
+| Tip | |
+| --- | --- |
+| Entry points | In ES modules and short-lived programs, import `@ix-xs/node-comfort/<namespace>` |
+| Compile cache | `NODE_COMPILE_CACHE=.cache`, or `require("node:module").enableCompileCache()` in the entry file, speeds up the startup of every module |
+| Reuse | Create a client (`nc.http.create()`), a cache (`nc.cache.create()`) or a database (`nc.sqlite.open()`) once and share it |
+| Bulk writes | `db.insertMany()` writes in one transaction, much faster than one insert at a time |
+| Logs | `nc.logger.isLevelEnabled("debug")` before building an expensive debug message |
