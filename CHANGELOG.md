@@ -4,7 +4,7 @@ All notable changes to this project are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and the project uses
 [Semantic Versioning](https://semver.org/).
 
-## [3.0.0] - Unreleased
+## [3.0.0] - 2026-11-19
 
 One way to call everything: `nc.<namespace>.<member>`. The root holds the 25 namespaces and nothing
 else. Every name of 2.x keeps working as a deprecated alias: it calls the 2.2 implementation, warns once,
