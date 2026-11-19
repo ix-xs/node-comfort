@@ -746,7 +746,9 @@ describe("fs 3.0: temp, sanitizeFilename, watch", () => {
     const dir = at(`watch${count++}`);
     fs.mkdirSync(dir);
     const seen = new Promise((resolve) => {
+      // macOS may first report the folder itself: wait for the file
       const watcher = nc.fs.watch({ path: dir }).on("all", (event, file) => {
+        if (file !== path.join(dir, "new.txt")) return;
         watcher.stop();
         resolve(file);
       });

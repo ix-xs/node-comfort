@@ -240,7 +240,8 @@ describe("the new names", () => {
     log.info("hello");
     assert.match(lines.join(""), /hello/);
 
-    await nc.async.sleep(1, { unref: true });
+    // unref lets the process end while it waits: a test needs a timer that keeps it alive
+    await nc.async.sleep(1);
     assert.deepEqual(await nc.async.to(Promise.resolve(1)), [null, 1]);
     const [error] = await nc.async.to(Promise.reject(new Error("x")));
     assert.equal(error.message, "x");
