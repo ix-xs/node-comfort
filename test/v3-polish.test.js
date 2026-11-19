@@ -459,7 +459,8 @@ describe("3.0: fixes found by running the docs", () => {
           "db.close();",
         ].join("\n"),
       );
-      const out = require("node:child_process").execFileSync(process.execPath, [entry], { encoding: "utf8" });
+      // FORCE_COLOR from the terminal would color what console.log prints
+      const out = require("node:child_process").execFileSync(process.execPath, [entry], { encoding: "utf8", env: { ...process.env, FORCE_COLOR: "0" } });
       assert.equal(out.trim(), "true function true true");
     } finally {
       fs.rmSync(dir, { recursive: true, force: true });
