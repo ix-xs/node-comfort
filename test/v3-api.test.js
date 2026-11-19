@@ -48,7 +48,8 @@ const runScript = (code, flags = [], extension = ".js") => {
   const file = path.join(dir, `script${extension}`);
   fs.writeFileSync(file, code);
   try {
-    return execFileSync(process.execPath, [...flags, file], { env: { ...process.env, NODE_COMFORT_DOTENV: "false" }, encoding: "utf8" });
+    // FORCE_COLOR from the terminal would color what console.log prints
+    return execFileSync(process.execPath, [...flags, file], { env: { ...process.env, NODE_COMFORT_DOTENV: "false", FORCE_COLOR: "0" }, encoding: "utf8" });
   } finally {
     fs.rmSync(dir, { recursive: true, force: true });
   }
