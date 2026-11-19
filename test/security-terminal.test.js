@@ -24,7 +24,7 @@ const SGR = /\x1b\[[\d;]*m/g;
 const capture = (/** @type {Record<string, unknown>} */ options = {}) => {
   let text = "";
   const sink = { write: (/** @type {string} */ chunk) => void (text += chunk) };
-  const log = nc.createLogger({ stdout: sink, stderr: sink, timestamp: false, colors: false, ...options });
+  const log = nc.logger.create({ stdout: sink, stderr: sink, timestamp: false, colors: false, ...options });
   return { log, text: () => text, lines: () => text.replace(/\n$/, "").split("\n") };
 };
 

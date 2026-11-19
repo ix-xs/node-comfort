@@ -7,7 +7,8 @@ const os = require("node:os");
 const path = require("node:path");
 const nc = require("..");
 
-const { SQLite, errors } = nc;
+const { errors } = nc;
+const { SQLite } = nc.sqlite;
 
 /** @type {InstanceType<typeof SQLite>} */
 let db;
@@ -48,6 +49,7 @@ describe("SQLite: schema", () => {
     assert.ok(db.queryOne("SELECT name FROM sqlite_master WHERE type = 'index' AND name = 'idx_users_role_age'"));
   });
 
+  // tests the deprecated alias on purpose
   it("accepts the 1.x `options` key and table constraints", () => {
     db.createTable({
       name: "memberships",
@@ -183,6 +185,7 @@ describe("SQLite: CRUD and conversions", () => {
     assert.equal(db.count("users"), 3);
     assert.throws(() => db.upsert("users", { email: "z" }, []), /conflict column/);
 
+    // tests the deprecated alias on purpose: set() finds the row with a where, upsert() needs a unique conflict column
     assert.deepEqual(db.set("users", { id: 2, age: 31 }), { ok: true });
     assert.equal(db.get("users", { id: 2 }).age, 31);
     db.set("users", { email: "d@x.io" }, { email: "d@x.io" });
@@ -283,13 +286,13 @@ describe("SQLite: transactions", () => {
   it("async callbacks commit after the promise settles", async () => {
     await db.transaction(async () => {
       db.insert("users", { email: "a@x.io" });
-      await nc.wait(1);
+      await nc.async.sleep(1);
       db.insert("users", { email: "b@x.io" });
     });
     await assert.rejects(
       db.transaction(async () => {
         db.insert("users", { email: "c@x.io" });
-        await nc.wait(1);
+        await nc.async.sleep(1);
         throw new Error("late");
       }),
       /late/,

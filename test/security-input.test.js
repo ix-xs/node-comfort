@@ -17,14 +17,14 @@ describe("hostile input", () => {
   it("isMimeType does not backtrack on many quoted parameters", () => {
     const hostile = "a/b" + ';a="x"'.repeat(25) + ";";
     let result;
-    const ms = elapsed(() => (result = nc.isMimeType(hostile)));
+    const ms = elapsed(() => (result = nc.is.mimeType(hostile)));
     assert.equal(result, false);
     assert.ok(ms < 200, `isMimeType took ${ms.toFixed(0)} ms`);
-    assert.equal(nc.isMimeType(`a/b${';a="x"'.repeat(25)}`), true);
-    assert.equal(nc.isMimeType('text/plain; a="b c"'), true);
-    assert.equal(nc.isMimeType("text/html; charset=utf-8"), true);
-    assert.equal(nc.isMimeType('a/b; x="\r\nInjected: 1"'), false);
-    assert.equal(nc.isMimeType('a/b; x="unterminated'), false);
+    assert.equal(nc.is.mimeType(`a/b${';a="x"'.repeat(25)}`), true);
+    assert.equal(nc.is.mimeType('text/plain; a="b c"'), true);
+    assert.equal(nc.is.mimeType("text/html; charset=utf-8"), true);
+    assert.equal(nc.is.mimeType('a/b; x="\r\nInjected: 1"'), false);
+    assert.equal(nc.is.mimeType('a/b; x="unterminated'), false);
   });
 
   it("case converters split long runs of capitals in linear time", () => {
@@ -52,11 +52,11 @@ describe("hostile input", () => {
       "https:\\\\a.com",
       "https://a.com/`x`",
     ]) {
-      assert.equal(nc.isURL(value), false, JSON.stringify(value));
+      assert.equal(nc.is.url(value), false, JSON.stringify(value));
     }
-    assert.equal(nc.isURL("https://example.com/a?b=1&c=%22#top"), true);
-    assert.equal(nc.isURL("https://user@example.com:8080/path"), true);
-    assert.equal(nc.isURL("https://en.wikipedia.org/wiki/Ender's_Game"), true);
+    assert.equal(nc.is.url("https://example.com/a?b=1&c=%22#top"), true);
+    assert.equal(nc.is.url("https://user@example.com:8080/path"), true);
+    assert.equal(nc.is.url("https://en.wikipedia.org/wiki/Ender's_Game"), true);
   });
 
   it("mask hides everything when the text is too short", () => {
@@ -118,38 +118,38 @@ describe("hostile input", () => {
   });
 
   it("isHostname counts label length in octets", () => {
-    assert.equal(nc.isHostname("é".repeat(63) + ".com"), false);
-    assert.equal(nc.isHostname("ü".repeat(62) + ".de"), false);
+    assert.equal(nc.is.hostname("é".repeat(63) + ".com"), false);
+    assert.equal(nc.is.hostname("ü".repeat(62) + ".de"), false);
     // 220 characters, 262 bytes once encoded.
-    assert.equal(nc.isHostname(Array(7).fill("é".repeat(30)).join(".") + ".com"), false);
-    assert.equal(nc.isHostname(Array(6).fill("é".repeat(30)).join(".") + ".com"), true);
-    assert.equal(nc.isHostname("é".repeat(20) + ".com"), true);
-    assert.equal(nc.isHostname("exemple.fr"), true);
-    assert.equal(nc.isHostname("münchen.de"), true);
+    assert.equal(nc.is.hostname(Array(7).fill("é".repeat(30)).join(".") + ".com"), false);
+    assert.equal(nc.is.hostname(Array(6).fill("é".repeat(30)).join(".") + ".com"), true);
+    assert.equal(nc.is.hostname("é".repeat(20) + ".com"), true);
+    assert.equal(nc.is.hostname("exemple.fr"), true);
+    assert.equal(nc.is.hostname("münchen.de"), true);
   });
 
   it("isEmail does not fold look-alike characters into ASCII", () => {
-    assert.equal(nc.isEmail("a@\u212Abc.com"), false);
-    assert.equal(nc.isEmail("a@b.xn--\u017F\u017F"), false);
-    assert.equal(nc.isEmail("a@b.XN--P1AI"), true);
-    assert.equal(nc.isEmail("josé@exemple.fr"), true);
-    assert.equal(nc.isEmail("user@xn--p1ai.xn--p1ai"), true);
+    assert.equal(nc.is.email("a@\u212Abc.com"), false);
+    assert.equal(nc.is.email("a@b.xn--\u017F\u017F"), false);
+    assert.equal(nc.is.email("a@b.XN--P1AI"), true);
+    assert.equal(nc.is.email("josé@exemple.fr"), true);
+    assert.equal(nc.is.email("user@xn--p1ai.xn--p1ai"), true);
   });
 
   it("isDataURL can restrict the media type", () => {
-    assert.equal(nc.isDataURL("data:text/html,<script>alert(1)</script>", { types: ["image/png"] }), false);
-    assert.equal(nc.isDataURL("data:image/svg+xml,<svg onload=alert(1)>", { types: ["image/png", "image/jpeg"] }), false);
-    assert.equal(nc.isDataURL("data:image/PNG;base64,iVBORw0KGgo=", { types: ["image/png"] }), true);
-    assert.equal(nc.isDataURL("data:,Hello", { types: ["text/plain"] }), true);
-    assert.equal(nc.isDataURL("data:,Hello", { types: ["image/png"] }), false);
-    assert.equal(nc.isDataURL("data:text/html,<p>"), true);
+    assert.equal(nc.is.dataUrl("data:text/html,<script>alert(1)</script>", { types: ["image/png"] }), false);
+    assert.equal(nc.is.dataUrl("data:image/svg+xml,<svg onload=alert(1)>", { types: ["image/png", "image/jpeg"] }), false);
+    assert.equal(nc.is.dataUrl("data:image/PNG;base64,iVBORw0KGgo=", { types: ["image/png"] }), true);
+    assert.equal(nc.is.dataUrl("data:,Hello", { types: ["text/plain"] }), true);
+    assert.equal(nc.is.dataUrl("data:,Hello", { types: ["image/png"] }), false);
+    assert.equal(nc.is.dataUrl("data:text/html,<p>"), true);
   });
 
   it("isCron refuses trailing garbage in a step or a range", () => {
-    assert.equal(nc.isCron("*/5/garbage * * * *"), false);
-    assert.equal(nc.isCron("1-5-junk * * * *"), false);
-    assert.equal(nc.isCron("0 9 * * 1-5/2"), true);
-    assert.equal(nc.isCron("*/15 * * * *"), true);
+    assert.equal(nc.is.cron("*/5/garbage * * * *"), false);
+    assert.equal(nc.is.cron("1-5-junk * * * *"), false);
+    assert.equal(nc.is.cron("0 9 * * 1-5/2"), true);
+    assert.equal(nc.is.cron("*/15 * * * *"), true);
     // the scheduler reads cron the same way
     assert.throws(() => nc.time.nextRun("*/5/garbage * * * *"), SyntaxError);
     assert.throws(() => nc.time.nextRun("1-5-junk * * * *"), SyntaxError);
@@ -182,7 +182,7 @@ describe("hostile input", () => {
   it("blank lines around a logged message are trimmed in linear time", () => {
     const out = [];
     const sink = { write: (text) => out.push(String(text)) };
-    const log = nc.createLogger({ timestamp: false, colors: false, stdout: sink, stderr: sink });
+    const log = nc.logger.create({ timestamp: false, colors: false, stdout: sink, stderr: sink });
     // a regex used to backtrack exponentially on a run of new lines
     const started = performance.now();
     log.info("a" + "\n".repeat(5000) + "\t".repeat(50) + "x");

@@ -6,7 +6,7 @@ const fs = require("node:fs");
 const path = require("node:path");
 const nc = require("..");
 
-const { SQLite } = nc;
+const { SQLite } = nc.sqlite;
 const { op } = SQLite;
 
 /**
@@ -70,6 +70,7 @@ describe("security: SQLite writes never reach the whole table by accident", () =
     unchanged();
   });
 
+  // tests the deprecated alias on purpose
   it("set() can't turn into an update of every row", () => {
     assert.throws(() => db.set("users", { role: "admin" }, { id: undefined }), /where\.id is undefined/);
     unchanged();

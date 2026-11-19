@@ -21,15 +21,17 @@
 
 const fs = require("node:fs");
 const nodePath = require("node:path");
-const { ValidationError } = require("./errors.js");
+const { ValidationError, NodeComfortError } = require("./errors.js");
+const { deprecate } = require("./internal/deprecate.js");
 const { parseDuration } = require("./internal/shared.js");
 
 /**
  * Options for `load()`.
  * @typedef {object} EnvLoadOptions
  * @property {boolean} [override] Overwrite variables that are already set.
+ * @property {boolean} [overwrite] Same as `override`, the word `nc.fs` uses.
  * @property {boolean} [expand] Replace `${OTHER}` references. Defaults to `true`.
- * @property {boolean} [required] Throw if a file is missing.
+ * @property {boolean} [required] Throw if a file is missing (a `NodeComfortError` with the code `ERR_ENV_FILE_MISSING`).
  * @property {boolean | string} [cascade] Also load the files that go with each one: `.env.production.local`, `.env.local`, `.env.production`, then `.env`. `true` takes the mode from `NODE_ENV`; a string names it. `.env.local` is skipped in test mode, so tests run the same for everyone.
  * @property {NodeJS.ProcessEnv} [target] Where to put the variables. Defaults to `process.env`.
  */
@@ -148,7 +150,7 @@ const _convert = (name, raw, spec) => {
       }
     }
     case "email": {
-      const { isEmail } = require("./Checker.js");
+      const { email: isEmail } = require("./Is.js");
       if (!isEmail(value)) _fail(name, "invalid_string", `must be an email address, got "${raw}"`);
       return value;
     }
@@ -377,7 +379,7 @@ const _cascade = (file, mode) => [`${file}.${mode}.local`, ...(mode === "test" ?
  * @param {string | string[]} [files=".env"] Relative to the working directory.
  * @param {EnvLoadOptions} [options]
  * @returns {Record<string, string>} Everything read from the files.
- * @throws {Error} If `required` is set and a file is missing.
+ * @throws {NodeComfortError} With the code `ERR_ENV_FILE_MISSING`, if `required` is set and a file is missing.
  */
 function load(files = ".env", options = {}) {
   const target = options.target ?? process.env;
@@ -392,7 +394,7 @@ function load(files = ".env", options = {}) {
    * @returns {string | undefined}
    */
   const kept = (key) => {
-    if (options.override) return undefined;
+    if (options.override || options.overwrite) return undefined;
     const current = _raw(target, key);
     return current !== undefined && !(own && _automatic.get(key) === current) ? current : undefined;
   };
@@ -407,7 +409,7 @@ function load(files = ".env", options = {}) {
         content = fs.readFileSync(full, "utf8");
       } catch (error) {
         // Only the file you named has to exist, not the ones that go with it.
-        if (options.required && file === name) throw new Error(`Environment file not found: ${full}`, { cause: error });
+        if (options.required && file === name) throw new NodeComfortError(`Environment file not found: ${full}`, { code: "ERR_ENV_FILE_MISSING", cause: error });
         continue;
       }
       const values = _parse(content, { expand: options.expand, env: target }, wins);
@@ -508,16 +510,22 @@ function number(name, options = {}) {
  * Reads a boolean: `true`/`false`, `1`/`0`, `yes`/`no` or `on`/`off`.
  *
  * @example
- * if (env.bool("FEATURE_BETA", { default: false })) enableBeta();
+ * if (env.boolean("FEATURE_BETA", { default: false })) enableBeta();
  *
  * @param {string} name
  * @param {EnvGetterOptions<boolean>} [options]
  * @returns {boolean}
  * @throws {ValidationError}
  */
-function bool(name, options = {}) {
+function boolean(name, options = {}) {
   return /** @type {boolean} */ (_read(name, { ...options, type: "boolean" }, options.env ?? process.env));
 }
+
+/**
+ * @deprecated Use `nc.env.boolean()`. It will be removed in 4.0.
+ * @type {typeof boolean}
+ */
+const bool = boolean;
 
 /**
  * Reads a port number.
@@ -755,6 +763,7 @@ module.exports = {
   required,
   string,
   number,
+  boolean,
   bool,
   port,
   url,
@@ -769,3 +778,7 @@ module.exports = {
   isDevelopment,
   isTest,
 };
+
+deprecate(module.exports, "nc.env", {
+  bool: { use: "nc.env.boolean()" },
+});

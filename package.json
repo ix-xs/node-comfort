@@ -75,6 +75,10 @@
       "types": "./types/index.d.ts",
       "default": "./index.js"
     },
+    "./config": {
+      "types": "./types/src/Config.d.ts",
+      "default": "./src/Config.js"
+    },
     "./logger": {
       "types": "./types/src/Logger.d.ts",
       "default": "./src/Logger.js"
@@ -83,13 +87,25 @@
       "types": "./types/src/FS.d.ts",
       "default": "./src/FS.js"
     },
-    "./checker": {
-      "types": "./types/src/Checker.d.ts",
-      "default": "./src/Checker.js"
+    "./env": {
+      "types": "./types/src/Env.d.ts",
+      "default": "./src/Env.js"
     },
-    "./utils": {
-      "types": "./types/src/Utils.d.ts",
-      "default": "./src/Utils.js"
+    "./is": {
+      "types": "./types/src/Is.d.ts",
+      "default": "./src/Is.js"
+    },
+    "./assert": {
+      "types": "./types/src/Assert.d.ts",
+      "default": "./src/Assert.js"
+    },
+    "./errors": {
+      "types": "./types/src/errors.d.ts",
+      "default": "./src/errors.js"
+    },
+    "./json": {
+      "types": "./types/src/Json.d.ts",
+      "default": "./src/Json.js"
     },
     "./str": {
       "types": "./types/src/Str.d.ts",
@@ -107,9 +123,9 @@
       "types": "./types/src/Obj.d.ts",
       "default": "./src/Obj.js"
     },
-    "./func": {
-      "types": "./types/src/Func.d.ts",
-      "default": "./src/Func.js"
+    "./schema": {
+      "types": "./types/src/Schema.d.ts",
+      "default": "./src/Schema.js"
     },
     "./time": {
       "types": "./types/src/Time.d.ts",
@@ -123,41 +139,13 @@
       "types": "./types/src/Crypto.d.ts",
       "default": "./src/Crypto.js"
     },
-    "./color": {
-      "types": "./types/src/Color.d.ts",
-      "default": "./src/Color.js"
-    },
-    "./cli": {
-      "types": "./types/src/Cli.d.ts",
-      "default": "./src/Cli.js"
-    },
-    "./sys": {
-      "types": "./types/src/Sys.d.ts",
-      "default": "./src/Sys.js"
+    "./func": {
+      "types": "./types/src/Func.d.ts",
+      "default": "./src/Func.js"
     },
     "./async": {
       "types": "./types/src/Async.d.ts",
       "default": "./src/Async.js"
-    },
-    "./schema": {
-      "types": "./types/src/Schema.d.ts",
-      "default": "./src/Schema.js"
-    },
-    "./http": {
-      "types": "./types/src/Http.d.ts",
-      "default": "./src/Http.js"
-    },
-    "./env": {
-      "types": "./types/src/Env.d.ts",
-      "default": "./src/Env.js"
-    },
-    "./errors": {
-      "types": "./types/src/errors.d.ts",
-      "default": "./src/errors.js"
-    },
-    "./sqlite": {
-      "types": "./types/src/SQLite.d.ts",
-      "default": "./src/SQLite.js"
     },
     "./cache": {
       "types": "./types/src/Cache.d.ts",
@@ -166,6 +154,34 @@
     "./emitter": {
       "types": "./types/src/Emitter.d.ts",
       "default": "./src/Emitter.js"
+    },
+    "./sqlite": {
+      "types": "./types/src/SQLite.d.ts",
+      "default": "./src/SQLite.js"
+    },
+    "./http": {
+      "types": "./types/src/Http.d.ts",
+      "default": "./src/Http.js"
+    },
+    "./sys": {
+      "types": "./types/src/Sys.d.ts",
+      "default": "./src/Sys.js"
+    },
+    "./cli": {
+      "types": "./types/src/Cli.d.ts",
+      "default": "./src/Cli.js"
+    },
+    "./color": {
+      "types": "./types/src/Color.d.ts",
+      "default": "./src/Color.js"
+    },
+    "./checker": {
+      "types": "./types/src/Checker.d.ts",
+      "default": "./src/Checker.js"
+    },
+    "./utils": {
+      "types": "./types/src/Utils.d.ts",
+      "default": "./src/Utils.js"
     },
     "./package.json": "./package.json"
   },

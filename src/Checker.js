@@ -1,1184 +1,461 @@
 "use strict";
 
 /**
- * Type checks and validators. Every `isX` accepts anything and never throws,
- * and most of them are type guards: inside `if (nc.isString(value))`, your
- * editor knows `value` is a string, in JavaScript too.
+ * The checks of node-comfort 2, under their old names. Deprecated: use
+ * `nc.is` (`nc.isEmail()` is now `nc.is.email()`) and `nc.assert`. Each
+ * name warns once when it is used, and they will be removed in 4.0.
  *
  * @example
- * if (nc.isEmail(body.email) && nc.isPort(body.port)) connect(body);
- * nc.assert(user, "User not found");
+ * nc.is.email("a@b.co"); // instead of nc.checker.isEmail("a@b.co")
  */
 
-const { types } = require("node:util");
-const shared = require("./internal/shared.js");
+const is = require("./Is.js");
+const assertModule = require("./Assert.js");
+const { deprecate } = require("./internal/deprecate.js");
 
-/** @type {typeof import("node:net") | undefined} */
-let _net;
-/** @type {typeof import("node:url") | undefined} */
-let _url;
+/**
+ * @deprecated Use `nc.is.array()`. It will be removed in 4.0.
+ * @type {(typeof is)["array"]}
+ */
+const isArray = is.array;
+
+/**
+ * @deprecated Use `nc.is.number()`. It will be removed in 4.0.
+ * @type {(typeof is)["number"]}
+ */
+const isNumber = is.number;
+
+/**
+ * @deprecated Use `nc.is.finite()`. It will be removed in 4.0.
+ * @type {(typeof is)["finite"]}
+ */
+const isFinite = is.finite;
+
+/**
+ * @deprecated Use `nc.is.integer()`. It will be removed in 4.0.
+ * @type {(typeof is)["integer"]}
+ */
+const isInteger = is.integer;
+
+/**
+ * @deprecated Use `nc.is.safeInteger()`. It will be removed in 4.0.
+ * @type {(typeof is)["safeInteger"]}
+ */
+const isSafeInteger = is.safeInteger;
+
+/**
+ * @deprecated Use `nc.is.float()`. It will be removed in 4.0.
+ * @type {(typeof is)["float"]}
+ */
+const isFloat = is.float;
+
+/**
+ * @deprecated Use `nc.is.positive()`. It will be removed in 4.0.
+ * @type {(typeof is)["positive"]}
+ */
+const isPositive = is.positive;
+
+/**
+ * @deprecated Use `nc.is.negative()`. It will be removed in 4.0.
+ * @type {(typeof is)["negative"]}
+ */
+const isNegative = is.negative;
+
+/**
+ * @deprecated Use `nc.is.boolean()`. It will be removed in 4.0.
+ * @type {(typeof is)["boolean"]}
+ */
+const isBoolean = is.boolean;
+
+/**
+ * @deprecated Use `nc.is.string()`. It will be removed in 4.0.
+ * @type {(typeof is)["string"]}
+ */
+const isString = is.string;
+
+/**
+ * @deprecated Use `nc.is.symbol()`. It will be removed in 4.0.
+ * @type {(typeof is)["symbol"]}
+ */
+const isSymbol = is.symbol;
+
+/**
+ * @deprecated Use `nc.is.bigInt()`. It will be removed in 4.0.
+ * @type {(typeof is)["bigInt"]}
+ */
+const isBigInt = is.bigInt;
+
+/**
+ * @deprecated Use `nc.is.undefined()`. It will be removed in 4.0.
+ * @type {(typeof is)["undefined"]}
+ */
+const isUndefined = is.undefined;
+
+/**
+ * @deprecated Use `nc.is.null()`. It will be removed in 4.0.
+ * @type {(typeof is)["null"]}
+ */
+const isNull = is.null;
+
+/**
+ * @deprecated Use `nc.is.nil()`. It will be removed in 4.0.
+ * @type {(typeof is)["nil"]}
+ */
+const isNil = is.nil;
+
+/**
+ * @deprecated Use `nc.is.defined()`. It will be removed in 4.0.
+ * @type {(typeof is)["defined"]}
+ */
+const isDefined = is.defined;
+
+/**
+ * @deprecated Use `nc.is.primitive()`. It will be removed in 4.0.
+ * @type {(typeof is)["primitive"]}
+ */
+const isPrimitive = is.primitive;
+
+/**
+ * @deprecated Use `nc.is.function()`. It will be removed in 4.0.
+ * @type {(typeof is)["function"]}
+ */
+const isFunction = is.function;
+
+/**
+ * @deprecated Use `nc.is.asyncFunction()`. It will be removed in 4.0.
+ * @type {(typeof is)["asyncFunction"]}
+ */
+const isAsyncFunction = is.asyncFunction;
+
+/**
+ * @deprecated Use `nc.is.generatorFunction()`. It will be removed in 4.0.
+ * @type {(typeof is)["generatorFunction"]}
+ */
+const isGeneratorFunction = is.generatorFunction;
+
+/**
+ * @deprecated Use `nc.is.generator()`. It will be removed in 4.0.
+ * @type {(typeof is)["generator"]}
+ */
+const isGenerator = is.generator;
+
+/**
+ * @deprecated Use `nc.is.class()`. It will be removed in 4.0.
+ * @type {(typeof is)["class"]}
+ */
+const isClass = is.class;
+
+/**
+ * @deprecated Use `nc.is.object()`. It will be removed in 4.0.
+ * @type {(typeof is)["object"]}
+ */
+const isObject = is.object;
+
+/**
+ * @deprecated Use `nc.is.plainObject()`. It will be removed in 4.0.
+ * @type {(typeof is)["plainObject"]}
+ */
+const isPlainObject = is.plainObject;
+
+/**
+ * @deprecated Use `nc.is.promise()`. It will be removed in 4.0.
+ * @type {(typeof is)["promise"]}
+ */
+const isPromise = is.promise;
+
+/**
+ * @deprecated Use `nc.is.regExp()`. It will be removed in 4.0.
+ * @type {(typeof is)["regExp"]}
+ */
+const isRegExp = is.regExp;
+
+/**
+ * @deprecated Use `nc.is.date()`. It will be removed in 4.0.
+ * @type {(typeof is)["date"]}
+ */
+const isDate = is.date;
+
+/**
+ * @deprecated Use `nc.is.validDate()`. It will be removed in 4.0.
+ * @type {(typeof is)["validDate"]}
+ */
+const isValidDate = is.validDate;
+
+/**
+ * @deprecated Use `nc.is.map()`. It will be removed in 4.0.
+ * @type {(typeof is)["map"]}
+ */
+const isMap = is.map;
+
+/**
+ * @deprecated Use `nc.is.set()`. It will be removed in 4.0.
+ * @type {(typeof is)["set"]}
+ */
+const isSet = is.set;
+
+/**
+ * @deprecated Use `nc.is.weakMap()`. It will be removed in 4.0.
+ * @type {(typeof is)["weakMap"]}
+ */
+const isWeakMap = is.weakMap;
+
+/**
+ * @deprecated Use `nc.is.weakSet()`. It will be removed in 4.0.
+ * @type {(typeof is)["weakSet"]}
+ */
+const isWeakSet = is.weakSet;
 
-// No "i" flag: with "u", it would let the Kelvin sign match "k" and the long s match "s".
-const EMAIL = /^(?!\.)(?!.*\.\.)[\p{L}\p{N}.!#$%&'*+/=?^_`{|}~-]{1,64}(?<!\.)@(?:[\p{L}\p{N}](?:[\p{L}\p{N}-]{0,61}[\p{L}\p{N}])?\.)+(?:\p{L}{2,}|[xX][nN]--[A-Za-z0-9-]{2,})$/u;
-// The same rules for ASCII addresses, the common case, which need no further check.
-const EMAIL_ASCII = /^(?!\.)(?!.*\.\.)[A-Za-z0-9.!#$%&'*+/=?^_`{|}~-]{1,64}(?<!\.)@(?:[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?\.)+(?:[A-Za-z]{2,}|[xX][nN]--[A-Za-z0-9-]{2,})$/;
-const TLD = /\.(?:[a-z]{2,}|xn--[a-z0-9-]{2,})\.?$/i;
-const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-([1-8])[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
-const UUID_NIL_OR_MAX = /^(?:0{8}-0{4}-0{4}-0{4}-0{12}|f{8}-f{4}-f{4}-f{4}-f{12})$/i;
-const ISO_DATE = /^(\d{4})-(\d{2})-(\d{2})(?:[T ](\d{2}):(\d{2})(?::(\d{2})(?:\.\d{1,9})?)?(?:Z|([+-])(\d{2}):?(\d{2}))?)?$/;
-const HOST_LABEL = /^[\p{L}\p{N}](?:[\p{L}\p{N}-]{0,61}[\p{L}\p{N}])?$/u;
-// Characters a URL parser silently drops, encodes or rewrites.
-// The apostrophe is legal, as in /wiki/Ender's_Game.
-const URL_UNSAFE = /[\x00-\x20\x7f<>"`\\]/;
-// Quoted and bare parameter values can't overlap, so there is nothing to backtrack into.
-const MIME_TYPE = /^[a-z0-9][a-z0-9!#$&^_.+-]*\/[a-z0-9][a-z0-9!#$&^_.+-]*(?:\s*;\s*[a-z0-9-]+=(?:"[^"\r\n]*"|[^;\s"]+))*$/i;
-const DATA_URL = /^data:(?:[a-z0-9!#$&^_.+-]+\/[a-z0-9!#$&^_.+-]+)?(?:;[a-z0-9-]+=[^;,]*)*(?:;base64)?,/i;
-const DAYS_IN_MONTH = [31, 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31];
+/**
+ * @deprecated Use `nc.is.iterable()`. It will be removed in 4.0.
+ * @type {(typeof is)["iterable"]}
+ */
+const isIterable = is.iterable;
+
+/**
+ * @deprecated Use `nc.is.asyncIterable()`. It will be removed in 4.0.
+ * @type {(typeof is)["asyncIterable"]}
+ */
+const isAsyncIterable = is.asyncIterable;
+
+/**
+ * @deprecated Use `nc.is.buffer()`. It will be removed in 4.0.
+ * @type {(typeof is)["buffer"]}
+ */
+const isBuffer = is.buffer;
+
+/**
+ * @deprecated Use `nc.is.typedArray()`. It will be removed in 4.0.
+ * @type {(typeof is)["typedArray"]}
+ */
+const isTypedArray = is.typedArray;
+
+/**
+ * @deprecated Use `nc.is.error()`. It will be removed in 4.0.
+ * @type {(typeof is)["error"]}
+ */
+const isError = is.error;
+
+/**
+ * @deprecated Use `nc.is.empty()`. It will be removed in 4.0.
+ * @type {(typeof is)["empty"]}
+ */
+const isEmpty = is.empty;
+
+/**
+ * @deprecated Use `nc.is.blank()`. It will be removed in 4.0.
+ * @type {(typeof is)["blank"]}
+ */
+const isBlank = is.blank;
+
+/**
+ * @deprecated Use `nc.is.arrayOf()`. It will be removed in 4.0.
+ * @type {(typeof is)["arrayOf"]}
+ */
+const isArrayOf = is.arrayOf;
+
+/**
+ * @deprecated Use `nc.is.oneOf()`. It will be removed in 4.0.
+ * @type {(typeof is)["oneOf"]}
+ */
+const isOneOf = is.oneOf;
+
+/**
+ * @deprecated Use `nc.is.email()`. It will be removed in 4.0.
+ * @type {(typeof is)["email"]}
+ */
+const isEmail = is.email;
+
+/**
+ * @deprecated Use `nc.is.url()`. It will be removed in 4.0.
+ * @type {(typeof is)["url"]}
+ */
+const isURL = is.url;
+
+/**
+ * @deprecated Use `nc.is.uuid()`. It will be removed in 4.0.
+ * @type {(typeof is)["uuid"]}
+ */
+const isUUID = is.uuid;
+
+/**
+ * @deprecated Use `nc.is.json()`. It will be removed in 4.0.
+ * @type {(typeof is)["json"]}
+ */
+const isJSON = is.json;
+
+/**
+ * @deprecated Use `nc.is.numeric()`. It will be removed in 4.0.
+ * @type {(typeof is)["numeric"]}
+ */
+const isNumeric = is.numeric;
+
+/**
+ * @deprecated Use `nc.is.ip()`. It will be removed in 4.0.
+ * @type {(typeof is)["ip"]}
+ */
+const isIP = is.ip;
+
+/**
+ * @deprecated Use `nc.is.ipv4()`. It will be removed in 4.0.
+ * @type {(typeof is)["ipv4"]}
+ */
+const isIPv4 = is.ipv4;
+
+/**
+ * @deprecated Use `nc.is.ipv6()`. It will be removed in 4.0.
+ * @type {(typeof is)["ipv6"]}
+ */
+const isIPv6 = is.ipv6;
+
+/**
+ * @deprecated Use `nc.is.port()`. It will be removed in 4.0.
+ * @type {(typeof is)["port"]}
+ */
+const isPort = is.port;
+
+/**
+ * @deprecated Use `nc.is.hex()`. It will be removed in 4.0.
+ * @type {(typeof is)["hex"]}
+ */
+const isHex = is.hex;
+
+/**
+ * @deprecated Use `nc.is.hexColor()`. It will be removed in 4.0.
+ * @type {(typeof is)["hexColor"]}
+ */
+const isHexColor = is.hexColor;
+
+/**
+ * @deprecated Use `nc.is.base64()`. It will be removed in 4.0.
+ * @type {(typeof is)["base64"]}
+ */
+const isBase64 = is.base64;
+
+/**
+ * @deprecated Use `nc.is.semver()`. It will be removed in 4.0.
+ * @type {(typeof is)["semver"]}
+ */
+const isSemver = is.semver;
+
+/**
+ * @deprecated Use `nc.is.isoDate()`. It will be removed in 4.0.
+ * @type {(typeof is)["isoDate"]}
+ */
+const isISODate = is.isoDate;
+
+/**
+ * @deprecated Use `nc.is.slug()`. It will be removed in 4.0.
+ * @type {(typeof is)["slug"]}
+ */
+const isSlug = is.slug;
+
+/**
+ * @deprecated Use `nc.is.alpha()`. It will be removed in 4.0.
+ * @type {(typeof is)["alpha"]}
+ */
+const isAlpha = is.alpha;
+
+/**
+ * @deprecated Use `nc.is.alphanumeric()`. It will be removed in 4.0.
+ * @type {(typeof is)["alphanumeric"]}
+ */
+const isAlphanumeric = is.alphanumeric;
+
+/**
+ * @deprecated Use `nc.is.creditCard()`. It will be removed in 4.0.
+ * @type {(typeof is)["creditCard"]}
+ */
+const isCreditCard = is.creditCard;
+
+/**
+ * @deprecated Use `nc.is.jwt()`. It will be removed in 4.0.
+ * @type {(typeof is)["jwt"]}
+ */
+const isJWT = is.jwt;
+
+/**
+ * @deprecated Use `nc.is.hostname()`. It will be removed in 4.0.
+ * @type {(typeof is)["hostname"]}
+ */
+const isHostname = is.hostname;
+
+/**
+ * @deprecated Use `nc.is.macAddress()`. It will be removed in 4.0.
+ * @type {(typeof is)["macAddress"]}
+ */
+const isMACAddress = is.macAddress;
+
+/**
+ * @deprecated Use `nc.is.iban()`. It will be removed in 4.0.
+ * @type {(typeof is)["iban"]}
+ */
+const isIBAN = is.iban;
+
+/**
+ * @deprecated Use `nc.is.e164()`. It will be removed in 4.0.
+ * @type {(typeof is)["e164"]}
+ */
+const isE164 = is.e164;
 
 /**
- * Any built-in typed array.
- * @typedef {Int8Array | Uint8Array | Uint8ClampedArray | Int16Array | Uint16Array | Int32Array | Uint32Array | Float32Array | Float64Array | BigInt64Array | BigUint64Array} AnyTypedArray
+ * @deprecated Use `nc.is.objectId()`. It will be removed in 4.0.
+ * @type {(typeof is)["objectId"]}
  */
+const isObjectId = is.objectId;
 
 /**
- * Any primitive value.
- * @typedef {string | number | boolean | symbol | bigint | null | undefined} Primitive
+ * @deprecated Use `nc.is.ulid()`. It will be removed in 4.0.
+ * @type {(typeof is)["ulid"]}
  */
+const isULID = is.ulid;
 
 /**
- * Options for `isURL()`.
- * @typedef {object} IsURLOptions
- * @property {string[]} [protocols] Accepted protocols, colon included. Defaults to `["http:", "https:"]`.
- * @property {boolean} [requireTld] Require a domain like `example.com`, rejecting `localhost` and bare IPs.
+ * @deprecated Use `nc.is.dataUrl()`. It will be removed in 4.0.
+ * @type {(typeof is)["dataUrl"]}
  */
+const isDataURL = is.dataUrl;
 
 /**
- * Options for `isUUID()`.
- * @typedef {object} IsUUIDOptions
- * @property {1|2|3|4|5|6|7|8} [version] Only accept this version. Otherwise versions 1 to 8 pass, plus the nil and max UUIDs.
+ * @deprecated Use `nc.is.mimeType()`. It will be removed in 4.0.
+ * @type {(typeof is)["mimeType"]}
  */
+const isMimeType = is.mimeType;
 
 /**
- * Options for `isHostname()`.
- * @typedef {object} IsHostnameOptions
- * @property {boolean} [requireTld] Require a domain like `example.com`, rejecting `localhost`.
+ * @deprecated Use `nc.is.timeZone()`. It will be removed in 4.0.
+ * @type {(typeof is)["timeZone"]}
  */
+const isTimeZone = is.timeZone;
 
 /**
- * Options for `isBase64()`.
- * @typedef {object} IsBase64Options
- * @property {boolean} [urlSafe] Expect the URL-safe alphabet (`-` and `_`), padding optional.
+ * @deprecated Use `nc.is.locale()`. It will be removed in 4.0.
+ * @type {(typeof is)["locale"]}
  */
+const isLocale = is.locale;
 
 /**
- * Options for `isDataURL()`.
- * @typedef {object} IsDataURLOptions
- * @property {string[]} [types] Accepted media types, like `["image/png", "image/jpeg"]`, case ignored. A URL without a type, like `data:,Hello`, counts as `text/plain`. Without this option, any type passes.
+ * @deprecated Use `nc.is.cron()`. It will be removed in 4.0.
+ * @type {(typeof is)["cron"]}
  */
+const isCron = is.cron;
 
 /**
- * Is it an array?
- *
- * @example
- * nc.isArray([1, 2]);        // true
- * nc.isArray({ length: 0 }); // false
- *
- * @param {unknown} value
- * @returns {value is any[]}
+ * @deprecated Use `nc.is.ascii()`. It will be removed in 4.0.
+ * @type {(typeof is)["ascii"]}
  */
-function isArray(value) {
-  return Array.isArray(value);
-}
+const isASCII = is.ascii;
 
 /**
- * Is it a number? `NaN` is rejected, `Infinity` passes (see `isFinite`).
- *
- * @example
- * nc.isNumber(42);   // true
- * nc.isNumber(NaN);  // false
- * nc.isNumber("42"); // false, use isNumeric for strings
- *
- * @param {unknown} value
- * @returns {value is number}
+ * @deprecated Use `nc.assert()`. It will be removed in 4.0.
+ * @type {typeof assertModule}
  */
-function isNumber(value) {
-  return typeof value === "number" && !Number.isNaN(value);
-}
+const assert = assertModule;
 
 /**
- * Is it a finite number? Unlike the global `isFinite`, strings are rejected.
- *
- * @example
- * nc.isFinite(42);       // true
- * nc.isFinite(Infinity); // false
- * nc.isFinite("42");     // false
- *
- * @param {unknown} value
- * @returns {value is number}
- */
-function isFinite(value) {
-  return typeof value === "number" && Number.isFinite(value);
-}
-
-/**
- * Is it an integer?
- *
- * @example
- * nc.isInteger(4);   // true
- * nc.isInteger(4.5); // false
- *
- * @param {unknown} value
- * @returns {value is number}
- */
-function isInteger(value) {
-  return Number.isInteger(value);
-}
-
-/**
- * Is it an integer JavaScript can represent exactly (up to 2^53 - 1)?
- *
- * @example
- * nc.isSafeInteger(2 ** 53 - 1); // true
- * nc.isSafeInteger(2 ** 53);     // false
- *
- * @param {unknown} value
- * @returns {value is number}
- */
-function isSafeInteger(value) {
-  return Number.isSafeInteger(value);
-}
-
-/**
- * Is it a finite number with a decimal part?
- *
- * @example
- * nc.isFloat(4.2); // true
- * nc.isFloat(4);   // false
- *
- * @param {unknown} value
- * @returns {value is number}
- */
-function isFloat(value) {
-  return typeof value === "number" && Number.isFinite(value) && !Number.isInteger(value);
-}
-
-/**
- * Is it a number greater than zero?
- *
- * @example
- * nc.isPositive(3); // true
- * nc.isPositive(0); // false
- *
- * @param {unknown} value
- * @returns {value is number}
- */
-function isPositive(value) {
-  return typeof value === "number" && value > 0;
-}
-
-/**
- * Is it a number lower than zero?
- *
- * @example
- * nc.isNegative(-3); // true
- * nc.isNegative(0);  // false
- *
- * @param {unknown} value
- * @returns {value is number}
- */
-function isNegative(value) {
-  return typeof value === "number" && value < 0;
-}
-
-/**
- * Is it `true` or `false`? Truthy and falsy values don't count.
- *
- * @example
- * nc.isBoolean(false); // true
- * nc.isBoolean(0);     // false
- *
- * @param {unknown} value
- * @returns {value is boolean}
- */
-function isBoolean(value) {
-  return typeof value === "boolean";
-}
-
-/**
- * Is it a string?
- *
- * @example
- * nc.isString("hello");             // true
- * nc.isString(new String("hello")); // false
- *
- * @param {unknown} value
- * @returns {value is string}
- */
-function isString(value) {
-  return typeof value === "string";
-}
-
-/**
- * Is it a symbol?
- *
- * @param {unknown} value
- * @returns {value is symbol}
- */
-function isSymbol(value) {
-  return typeof value === "symbol";
-}
-
-/**
- * Is it a bigint?
- *
- * @example
- * nc.isBigInt(10n); // true
- * nc.isBigInt(10);  // false
- *
- * @param {unknown} value
- * @returns {value is bigint}
- */
-function isBigInt(value) {
-  return typeof value === "bigint";
-}
-
-/**
- * Is it `undefined`?
- *
- * @param {unknown} value
- * @returns {value is undefined}
- */
-function isUndefined(value) {
-  return value === undefined;
-}
-
-/**
- * Is it `null`?
- *
- * @param {unknown} value
- * @returns {value is null}
- */
-function isNull(value) {
-  return value === null;
-}
-
-/**
- * Is it `null` or `undefined`?
- *
- * @example
- * nc.isNil(undefined); // true
- * nc.isNil(0);         // false
- *
- * @param {unknown} value
- * @returns {value is null | undefined}
- */
-function isNil(value) {
-  return value === null || value === undefined;
-}
-
-/**
- * Is it anything but `null` or `undefined`? Pass it to `filter()` to drop
- * missing values and keep the right type.
- *
- * @example
- * const ids = [1, null, 2, undefined].filter(nc.isDefined); // number[]
- *
- * @template T
- * @param {T} value
- * @returns {value is NonNullable<T>}
- */
-function isDefined(value) {
-  return value !== null && value !== undefined;
-}
-
-/**
- * Is it a primitive (string, number, boolean, symbol, bigint, `null` or `undefined`)?
- *
- * @param {unknown} value
- * @returns {value is Primitive}
- */
-function isPrimitive(value) {
-  return value === null || (typeof value !== "object" && typeof value !== "function");
-}
-
-/**
- * Is it callable? Classes, async and generator functions count.
- *
- * @param {unknown} value
- * @returns {value is (...args: any[]) => any}
- */
-function isFunction(value) {
-  return typeof value === "function";
-}
-
-/**
- * Was it declared with `async`? A function that merely returns a promise
- * doesn't count.
- *
- * @example
- * nc.isAsyncFunction(async () => {});         // true
- * nc.isAsyncFunction(() => Promise.resolve()); // false
- *
- * @param {unknown} value
- * @returns {value is (...args: any[]) => Promise<any>}
- */
-function isAsyncFunction(value) {
-  return types.isAsyncFunction(value);
-}
-
-/**
- * Is it a generator function (`function*`)?
- *
- * @param {unknown} value
- * @returns {value is (...args: any[]) => Generator}
- */
-function isGeneratorFunction(value) {
-  return types.isGeneratorFunction(value);
-}
-
-/**
- * Is it a generator object, the result of calling a `function*`?
- *
- * @param {unknown} value
- * @returns {value is Generator}
- */
-function isGenerator(value) {
-  return types.isGeneratorObject(value);
-}
-
-/**
- * Is it a `class` rather than a plain function?
- *
- * @example
- * nc.isClass(class User {});  // true
- * nc.isClass(function () {}); // false
- *
- * @param {unknown} value
- * @returns {value is new (...args: any[]) => any}
- */
-function isClass(value) {
-  return typeof value === "function" && /^class[\s{]/.test(Function.prototype.toString.call(value));
-}
-
-/**
- * Is it an object, and not `null`? Arrays, dates and class instances count;
- * use `isPlainObject` for `{}` literals only.
- *
- * @param {unknown} value
- * @returns {value is object}
- */
-function isObject(value) {
-  return typeof value === "object" && value !== null;
-}
-
-/**
- * Is it a plain object, made with `{}`, `new Object()` or
- * `Object.create(null)`? Arrays, dates, maps and class instances are rejected.
- *
- * @example
- * nc.isPlainObject({ a: 1 });   // true
- * nc.isPlainObject(new Date()); // false
- *
- * @param {unknown} value
- * @returns {value is Record<string, unknown>}
- */
-function isPlainObject(value) {
-  return shared.isPlainObject(value);
-}
-
-/**
- * Can it be awaited like a promise (anything with a `then` method)?
- *
- * @param {unknown} value
- * @returns {value is PromiseLike<any>}
- */
-function isPromise(value) {
-  return (
-    types.isPromise(value) ||
-    (value !== null &&
-      (typeof value === "object" || typeof value === "function") &&
-      typeof (/** @type {{ then?: unknown }} */ (value)).then === "function")
-  );
-}
-
-/**
- * Is it a regular expression?
- *
- * @param {unknown} value
- * @returns {value is RegExp}
- */
-function isRegExp(value) {
-  return types.isRegExp(value);
-}
-
-/**
- * Is it a `Date`, valid or not? Use `isValidDate` to reject `Invalid Date`.
- *
- * @param {unknown} value
- * @returns {value is Date}
- */
-function isDate(value) {
-  return types.isDate(value);
-}
-
-/**
- * Is it a `Date` holding a real point in time?
- *
- * @example
- * nc.isValidDate(new Date());       // true
- * nc.isValidDate(new Date("nope")); // false
- *
- * @param {unknown} value
- * @returns {value is Date}
- */
-function isValidDate(value) {
-  return types.isDate(value) && !Number.isNaN(/** @type {Date} */ (value).getTime());
-}
-
-/**
- * Is it a `Map`?
- *
- * @param {unknown} value
- * @returns {value is Map<unknown, unknown>}
- */
-function isMap(value) {
-  return types.isMap(value);
-}
-
-/**
- * Is it a `Set`?
- *
- * @param {unknown} value
- * @returns {value is Set<unknown>}
- */
-function isSet(value) {
-  return types.isSet(value);
-}
-
-/**
- * Is it a `WeakMap`?
- *
- * @param {unknown} value
- * @returns {value is WeakMap<object, unknown>}
- */
-function isWeakMap(value) {
-  return types.isWeakMap(value);
-}
-
-/**
- * Is it a `WeakSet`?
- *
- * @param {unknown} value
- * @returns {value is WeakSet<object>}
- */
-function isWeakSet(value) {
-  return types.isWeakSet(value);
-}
-
-/**
- * Does it work with `for...of`? Strings, arrays, maps, sets and generators do.
- *
- * @param {unknown} value
- * @returns {value is Iterable<unknown>}
- */
-function isIterable(value) {
-  return value != null && typeof (/** @type {any} */ (value))[Symbol.iterator] === "function";
-}
-
-/**
- * Does it work with `for await...of`, like streams and async generators?
- *
- * @param {unknown} value
- * @returns {value is AsyncIterable<unknown>}
- */
-function isAsyncIterable(value) {
-  return value != null && typeof (/** @type {any} */ (value))[Symbol.asyncIterator] === "function";
-}
-
-/**
- * Is it a Node.js `Buffer`?
- *
- * @param {unknown} value
- * @returns {value is Buffer}
- */
-function isBuffer(value) {
-  return Buffer.isBuffer(value);
-}
-
-/**
- * Is it a typed array (`Uint8Array`, `Float64Array`...)? Buffers count.
- *
- * @param {unknown} value
- * @returns {value is AnyTypedArray}
- */
-function isTypedArray(value) {
-  return types.isTypedArray(value);
-}
-
-/**
- * Is it an `Error`, including subclasses and errors from other realms?
- *
- * @param {unknown} value
- * @returns {value is Error}
- */
-function isError(value) {
-  return types.isNativeError(value) || value instanceof Error;
-}
-
-/**
- * Is it empty? `null`, `undefined`, `""`, `[]`, `{}` and empty maps and sets
- * are. Numbers, booleans, functions, dates, regular expressions and errors
- * never are.
- *
- * @example
- * nc.isEmpty({});  // true
- * nc.isEmpty(0);   // false
- * nc.isEmpty(" "); // false, see isBlank
- *
- * @param {unknown} value
- * @returns {boolean}
- */
-function isEmpty(value) {
-  if (value === null || value === undefined) return true;
-  if (typeof value === "string" || Array.isArray(value)) return value.length === 0;
-  if (typeof value !== "object") return false;
-  if (types.isMap(value) || types.isSet(value)) return /** @type {Map<unknown, unknown>} */ (value).size === 0;
-  if (types.isDate(value) || types.isRegExp(value) || types.isNativeError(value)) return false;
-  return Object.keys(value).length === 0;
-}
-
-/**
- * Is it `null`, `undefined`, or a string with nothing but whitespace?
- *
- * @example
- * nc.isBlank("  \n"); // true
- * nc.isBlank(" a ");  // false
- *
- * @param {unknown} value
- * @returns {boolean}
- */
-function isBlank(value) {
-  if (value === null || value === undefined) return true;
-  return typeof value === "string" && value.trim() === "";
-}
-
-/**
- * Is it an array where every item passes `guard`?
- *
- * @example
- * if (nc.isArrayOf(input, nc.isString)) input.join(", "); // input: string[]
- *
- * @template T
- * @param {unknown} value
- * @param {(item: unknown) => item is T} guard Checked against every item, like `nc.isString`.
- * @returns {value is T[]}
- */
-function isArrayOf(value, guard) {
-  return Array.isArray(value) && value.every((item) => guard(item));
-}
-
-/**
- * Is it one of the allowed values? With a constant list, the value gets the
- * matching literal type.
- *
- * @example
- * const ROLES = ["admin", "user"] as const;
- * if (nc.isOneOf(input, ROLES)) input; // "admin" | "user"
- *
- * @template {readonly unknown[]} L
- * @param {unknown} value
- * @param {L} allowed
- * @returns {value is L[number]}
- */
-function isOneOf(value, allowed) {
-  return allowed.includes(value);
-}
-
-/**
- * Does it look like an email address? The rules are practical rather than
- * the full RFC: one `@`, no stray dots, a real top-level domain.
- * International addresses are accepted, but not look-alike characters such
- * as the Kelvin sign in the domain. A valid address can still contain
- * quotes, `&`, `|` or backticks: it is not safe to put unescaped into HTML
- * or a shell command.
- *
- * @example
- * nc.isEmail("jose@exemple.fr");     // true
- * nc.isEmail("john..doe@example.com"); // false
- * nc.isEmail("john@localhost");       // false
- *
- * @param {unknown} value
- * @returns {value is string}
- */
-function isEmail(value) {
-  if (typeof value !== "string" || value.length > 254) return false;
-  if (EMAIL_ASCII.test(value)) return true;
-  if (shared.ASCII.test(value) || !EMAIL.test(value)) return false;
-  // Compatibility characters (Kelvin sign, fullwidth letters...) become other letters in DNS.
-  const domain = value.slice(value.lastIndexOf("@") + 1);
-  return domain === domain.normalize("NFKC");
-}
-
-/**
- * Is it an absolute URL with an allowed protocol (http and https by default)?
- * The text must already be clean: spaces, control characters, double
- * quotes, backticks, `<`, `>` and backslashes are refused, even where the URL
- * parser would quietly fix them. An apostrophe is fine.
- *
- * @example
- * nc.isURL("https://example.com/a?b=1");                 // true
- * nc.isURL("ftp://example.com", { protocols: ["ftp:"] }); // true
- * nc.isURL("http://localhost:3000", { requireTld: true }); // false
- *
- * @param {unknown} value
- * @param {IsURLOptions} [options]
- * @returns {value is string}
- */
-function isURL(value, options = {}) {
-  if (typeof value !== "string" || URL_UNSAFE.test(value)) return false;
-  const url = URL.parse(value);
-  if (!url) return false;
-  const protocols = options.protocols;
-  if (protocols ? !protocols.includes(url.protocol) : url.protocol !== "http:" && url.protocol !== "https:") return false;
-  return !options.requireTld || TLD.test(url.hostname);
-}
-
-/**
- * Is it a UUID?
- *
- * @example
- * nc.isUUID(nc.id.uuid());           // true
- * nc.isUUID(id, { version: 7 });     // only v7
- *
- * @param {unknown} value
- * @param {IsUUIDOptions} [options]
- * @returns {value is string}
- */
-function isUUID(value, options = {}) {
-  if (typeof value !== "string") return false;
-  if (value.length !== 36) return false;
-  const match = UUID.exec(value);
-  if (!match) return options.version === undefined && UUID_NIL_OR_MAX.test(value);
-  return options.version === undefined || Number(match[1]) === options.version;
-}
-
-/**
- * Is it a string of valid JSON?
- *
- * @example
- * nc.isJSON('{"a":1}'); // true
- * nc.isJSON("{a:1}");   // false
- *
- * @param {unknown} value
- * @returns {value is string}
- */
-function isJSON(value) {
-  if (typeof value !== "string") return false;
-  try {
-    JSON.parse(value);
-    return true;
-  } catch {
-    return false;
-  }
-}
-
-/**
- * Is it a finite number, or a string that is exactly one (spaces around are fine)?
- *
- * @example
- * nc.isNumeric("4.2e3"); // true
- * nc.isNumeric(" 12 ");  // true
- * nc.isNumeric("12px");  // false
- *
- * @param {unknown} value
- * @returns {value is number | string}
- */
-function isNumeric(value) {
-  if (typeof value === "number") return Number.isFinite(value);
-  if (typeof value !== "string" || value.trim() === "") return false;
-  return Number.isFinite(Number(value));
-}
-
-/**
- * Is it an IP address?
- *
- * @example
- * nc.isIP("192.168.0.1"); // true
- * nc.isIP("::1");         // true
- * nc.isIP("::1", 4);      // false
- *
- * @param {unknown} value
- * @param {4|6} [version] Only accept IPv4 or IPv6.
- * @returns {value is string}
- */
-function isIP(value, version) {
-  if (typeof value !== "string") return false;
-  const detected = (_net ??= require("node:net")).isIP(value);
-  return version === undefined ? detected !== 0 : detected === version;
-}
-
-/**
- * Is it an IPv4 address, like `192.168.0.1`?
- *
- * @param {unknown} value
- * @returns {value is string}
- */
-function isIPv4(value) {
-  return isIP(value, 4);
-}
-
-/**
- * Is it an IPv6 address, like `::1`?
- *
- * @param {unknown} value
- * @returns {value is string}
- */
-function isIPv6(value) {
-  return isIP(value, 6);
-}
-
-/**
- * Is it a valid port (0 to 65535), as a number or a numeric string?
- *
- * @example
- * nc.isPort("8080"); // true
- * nc.isPort(70000);  // false
- *
- * @param {unknown} value
- * @returns {boolean}
- */
-function isPort(value) {
-  const n = typeof value === "string" && /^\d+$/.test(value.trim()) ? Number(value) : value;
-  return Number.isInteger(n) && /** @type {number} */ (n) >= 0 && /** @type {number} */ (n) <= 65535;
-}
-
-/**
- * Is it a hexadecimal string? A `0x` prefix is allowed.
- *
- * @param {unknown} value
- * @returns {value is string}
- */
-function isHex(value) {
-  return typeof value === "string" && /^(0x)?[0-9a-f]+$/i.test(value);
-}
-
-/**
- * Is it a CSS hex color (`#rgb`, `#rgba`, `#rrggbb` or `#rrggbbaa`)?
- *
- * @example
- * nc.isHexColor("#f80"); // true
- * nc.isHexColor("f80");  // false, the # is required
- *
- * @param {unknown} value
- * @returns {value is string}
- */
-function isHexColor(value) {
-  return typeof value === "string" && /^#(?:[0-9a-f]{3,4}|[0-9a-f]{6}|[0-9a-f]{8})$/i.test(value);
-}
-
-/**
- * Is it valid Base64?
- *
- * @example
- * nc.isBase64("aGVsbG8=");                   // true
- * nc.isBase64("aGVsbG8", { urlSafe: true }); // true
- *
- * @param {unknown} value
- * @param {IsBase64Options} [options]
- * @returns {value is string}
- */
-function isBase64(value, options = {}) {
-  if (typeof value !== "string" || value === "") return false;
-  if (options.urlSafe) return /^[A-Za-z0-9_-]+={0,2}$/.test(value) && value.replace(/=+$/, "").length % 4 !== 1;
-  return value.length % 4 === 0 && /^[A-Za-z0-9+/]+={0,2}$/.test(value);
-}
-
-/**
- * Is it a semantic version? A leading `v` is fine.
- *
- * @example
- * nc.isSemver("v2.0.0-rc.1"); // true
- * nc.isSemver("1.2");         // false
- *
- * @param {unknown} value
- * @returns {value is string}
- */
-function isSemver(value) {
-  return (
-    typeof value === "string" &&
-    /^v?(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)(?:-((?:0|[1-9]\d*|\d*[a-zA-Z-][0-9a-zA-Z-]*)(?:\.(?:0|[1-9]\d*|\d*[a-zA-Z-][0-9a-zA-Z-]*))*))?(?:\+([0-9a-zA-Z-]+(?:\.[0-9a-zA-Z-]+)*))?$/.test(value)
-  );
-}
-
-/**
- * Is it an ISO 8601 date or date-time, and a real calendar date?
- *
- * @example
- * nc.isISODate("2024-02-29T10:00:00Z"); // true
- * nc.isISODate("2023-02-29");           // false, not a leap year
- *
- * @param {unknown} value
- * @returns {value is string}
- */
-function isISODate(value) {
-  if (typeof value !== "string") return false;
-  const match = ISO_DATE.exec(value);
-  if (!match) return false;
-  const [, y, m, d, hh = "0", mm = "0", ss = "0", , offsetHours = "0", offsetMinutes = "0"] = match;
-  const year = Number(y);
-  const month = Number(m);
-  const day = Number(d);
-  if (month < 1 || month > 12 || day < 1) return false;
-  const leap = (year % 4 === 0 && year % 100 !== 0) || year % 400 === 0;
-  if (day > (month === 2 && leap ? 29 : DAYS_IN_MONTH[month - 1])) return false;
-  return Number(hh) <= 23 && Number(mm) <= 59 && Number(ss) <= 59 && Number(offsetHours) <= 14 && Number(offsetMinutes) <= 59;
-}
-
-/**
- * Is it a URL slug like `my-first-post`? See `nc.str.slugify()` to make one.
- *
- * @param {unknown} value
- * @returns {value is string}
- */
-function isSlug(value) {
-  return typeof value === "string" && /^[a-z0-9]+(?:-[a-z0-9]+)*$/.test(value);
-}
-
-/**
- * Is it made only of letters, in any alphabet?
- *
- * @example
- * nc.isAlpha("Élodie"); // true
- * nc.isAlpha("abc1");   // false
- *
- * @param {unknown} value
- * @returns {value is string}
- */
-function isAlpha(value) {
-  return typeof value === "string" && /^\p{L}+$/u.test(value);
-}
-
-/**
- * Is it made only of letters and digits, in any alphabet?
- *
- * @param {unknown} value
- * @returns {value is string}
- */
-function isAlphanumeric(value) {
-  return typeof value === "string" && /^[\p{L}\p{N}]+$/u.test(value);
-}
-
-/**
- * Could it be a card number? Checks the length and the Luhn checksum;
- * spaces and dashes are ignored.
- *
- * @example
- * nc.isCreditCard("4242 4242 4242 4242"); // true
- *
- * @param {unknown} value
- * @returns {value is string}
- */
-function isCreditCard(value) {
-  if (typeof value !== "string") return false;
-  const digits = value.replace(/[\s-]/g, "");
-  if (!/^\d{12,19}$/.test(digits)) return false;
-  let sum = 0;
-  let double = false;
-  for (let i = digits.length - 1; i >= 0; i--) {
-    let digit = digits.charCodeAt(i) - 48;
-    if (double) {
-      digit *= 2;
-      if (digit > 9) digit -= 9;
-    }
-    sum += digit;
-    double = !double;
-  }
-  return sum % 10 === 0;
-}
-
-/**
- * Does it look like a JSON Web Token? The signature is not verified; use
- * `nc.crypto.verifyJWT()` for that.
- *
- * @param {unknown} value
- * @returns {value is string}
- */
-function isJWT(value) {
-  if (typeof value !== "string") return false;
-  const parts = value.split(".");
-  if (parts.length !== 3 || !parts.slice(0, 2).every((p) => /^[A-Za-z0-9_-]+$/.test(p))) return false;
-  if (parts[2] !== "" && !/^[A-Za-z0-9_-]+$/.test(parts[2])) return false;
-  try {
-    const header = JSON.parse(Buffer.from(parts[0], "base64url").toString("utf8"));
-    return isPlainObject(header) && typeof header.alg === "string";
-  } catch {
-    return false;
-  }
-}
-
-/**
- * Is it a host name, like `example.com`, `api.internal` or `localhost`?
- * International names are accepted. IP addresses aren't: see `isIP`.
- * Lengths are counted the way DNS sees them, once converted to ASCII
- * (`xn--`): 63 bytes per label, 253 in all.
- *
- * @example
- * nc.isHostname("api.example.com");                    // true
- * nc.isHostname("localhost");                          // true
- * nc.isHostname("localhost", { requireTld: true });    // false
- * nc.isHostname("-bad-.com");                          // false
- *
- * @param {unknown} value
- * @param {IsHostnameOptions} [options]
- * @returns {value is string}
- */
-function isHostname(value, options = {}) {
-  if (typeof value !== "string" || value.length === 0 || value.length > 253) return false;
-  const labels = value.split(".");
-  if (!labels.every((label) => HOST_LABEL.test(label))) return false;
-  if (/^\d+$/.test(labels[labels.length - 1])) return false;
-  if (!shared.ASCII.test(value)) {
-    // An international label takes more room once encoded: "é" x 63 is 67 bytes long.
-    const ascii = (_url ??= require("node:url")).domainToASCII(value);
-    if (ascii === "" || ascii.length > 253 || ascii.split(".").some((label) => label.length > 63)) return false;
-  }
-  return !options.requireTld || (labels.length > 1 && TLD.test(value));
-}
-
-/**
- * Is it a MAC address? Accepts `aa:bb:cc:dd:ee:ff`, `aa-bb-cc-dd-ee-ff` and
- * `aabb.ccdd.eeff`.
- *
- * @example
- * nc.isMACAddress("00:1B:44:11:3A:B7"); // true
- * nc.isMACAddress("00:1B:44:11:3A");    // false
- *
- * @param {unknown} value
- * @returns {value is string}
- */
-function isMACAddress(value) {
-  return typeof value === "string" && /^(?:[0-9a-f]{2}(?::[0-9a-f]{2}){5}|[0-9a-f]{2}(?:-[0-9a-f]{2}){5}|[0-9a-f]{4}(?:\.[0-9a-f]{4}){2})$/i.test(value);
-}
-
-/**
- * Is it a valid IBAN? Checks the format and the checksum, spaces allowed.
- *
- * @example
- * nc.isIBAN("FR76 3000 6000 0112 3456 7890 189"); // true
- * nc.isIBAN("FR76 3000 6000 0112 3456 7890 180"); // false, wrong checksum
- *
- * @param {unknown} value
- * @returns {value is string}
- */
-function isIBAN(value) {
-  if (typeof value !== "string") return false;
-  const iban = value.replace(/\s+/g, "").toUpperCase();
-  if (!/^[A-Z]{2}\d{2}[A-Z0-9]{11,30}$/.test(iban)) return false;
-  const rearranged = iban.slice(4) + iban.slice(0, 4);
-  let remainder = 0;
-  for (let i = 0; i < rearranged.length; i++) {
-    const code = rearranged.charCodeAt(i);
-    // Letters count as two digits (A = 10 ... Z = 35).
-    remainder = code >= 65 ? (remainder * 100 + code - 55) % 97 : (remainder * 10 + code - 48) % 97;
-  }
-  return remainder === 1;
-}
-
-/**
- * Is it a phone number in the international E.164 format: a `+`, then 7 to
- * 15 digits, no spaces? That's what SMS and telephony APIs expect.
- *
- * @example
- * nc.isE164("+33612345678"); // true
- * nc.isE164("06 12 34 56 78"); // false
- *
- * @param {unknown} value
- * @returns {value is string}
- */
-function isE164(value) {
-  return typeof value === "string" && /^\+[1-9]\d{6,14}$/.test(value);
-}
-
-/**
- * Is it a MongoDB ObjectId, 24 hexadecimal characters?
- *
- * @example
- * nc.isObjectId("507f1f77bcf86cd799439011"); // true
- *
- * @param {unknown} value
- * @returns {value is string}
- */
-function isObjectId(value) {
-  return typeof value === "string" && value.length === 24 && /^[0-9a-f]{24}$/i.test(value);
-}
-
-/**
- * Is it a ULID, like the ones `nc.id.ulid()` makes?
- *
- * @example
- * nc.isULID(nc.id.ulid()); // true
- *
- * @param {unknown} value
- * @returns {value is string}
- */
-function isULID(value) {
-  return typeof value === "string" && value.length === 26 && /^[0-7][0-9A-HJKMNP-TV-Z]{25}$/i.test(value);
-}
-
-/**
- * Is it a `data:` URL, like an inline image? Only the header is checked,
- * not the data. Without `types`, any media type passes, `text/html` and
- * `image/svg+xml` included, and both can run scripts.
- *
- * @example
- * nc.isDataURL("data:image/png;base64,iVBORw0KGgo="); // true
- * nc.isDataURL("data:,Hello");                         // true
- * nc.isDataURL("data:text/html,<p>Hi</p>", { types: ["image/png"] }); // false
- *
- * @param {unknown} value
- * @param {IsDataURLOptions} [options]
- * @returns {value is string}
- */
-function isDataURL(value, options = {}) {
-  if (typeof value !== "string" || !DATA_URL.test(value)) return false;
-  const types = options.types;
-  if (!types) return true;
-  const type = value.slice(5, value.search(/[;,]/)).toLowerCase() || "text/plain";
-  return types.some((allowed) => allowed.toLowerCase() === type);
-}
-
-/**
- * Is it a media type, like `application/json` or
- * `text/html; charset=utf-8`?
- *
- * @example
- * nc.isMimeType("image/svg+xml"); // true
- * nc.isMimeType("json");          // false
- *
- * @param {unknown} value
- * @returns {value is string}
- */
-function isMimeType(value) {
-  return typeof value === "string" && MIME_TYPE.test(value);
-}
-
-/**
- * Is it a time zone Node.js knows, like `"Europe/Paris"` or `"UTC"`?
- *
- * @example
- * nc.isTimeZone("America/New_York"); // true
- * nc.isTimeZone("Mars/Olympus");     // false
- *
- * @param {unknown} value
- * @returns {value is string}
- */
-function isTimeZone(value) {
-  if (typeof value !== "string" || value === "") return false;
-  try {
-    shared.intl.dateTime("en", { timeZone: value });
-    return true;
-  } catch {
-    return false;
-  }
-}
-
-/**
- * Is it a well-formed locale, like `"fr"`, `"en-GB"` or `"zh-Hant-TW"`?
- *
- * @example
- * nc.isLocale("pt-BR"); // true
- * nc.isLocale("en_US"); // false, use a dash
- *
- * @param {unknown} value
- * @returns {value is string}
- */
-function isLocale(value) {
-  if (typeof value !== "string" || value === "") return false;
-  try {
-    return Intl.getCanonicalLocales(value).length === 1;
-  } catch {
-    return false;
-  }
-}
-
-/**
- * Is it a cron expression `nc.time.cron()` understands?
- *
- * @example
- * nc.isCron("0 9 * * 1-5"); // true
- * nc.isCron("@daily");      // true
- * nc.isCron("61 * * * *");  // false
- *
- * @param {unknown} value
- * @returns {value is string}
- */
-function isCron(value) {
-  if (typeof value !== "string") return false;
-  // "*/5/x" is not a step and "1-5-x" is not a range, even though the parser stops reading early.
-  for (const part of value.trim().split(/[\s,]+/)) {
-    const step = part.split("/");
-    if (step.length > 2 || step[0].split("-").length > 2) return false;
-  }
-  try {
-    shared.parseCron(value);
-    return true;
-  } catch {
-    return false;
-  }
-}
-
-/**
- * Is it made only of ASCII characters?
- *
- * @example
- * nc.isASCII("hello"); // true
- * nc.isASCII("héllo"); // false
- *
- * @param {unknown} value
- * @returns {value is string}
- */
-function isASCII(value) {
-  return typeof value === "string" && shared.ASCII.test(value);
-}
-
-/**
- * Throws an `AssertionError` if `condition` is falsy. Afterwards, TypeScript
- * knows the condition holds.
- *
- * @example
- * const user = users.find((u) => u.id === id);
- * nc.assert(user, `User ${id} not found`);
- * user.name; // no "possibly undefined" here
- *
- * @param {unknown} condition
- * @param {string | (() => string)} [message="Assertion failed"] A message, or a function that builds it.
- * @returns {asserts condition}
- * @throws {AssertionError}
- */
-function assert(condition, message = "Assertion failed") {
-  if (!condition) throw new (require("./errors.js").AssertionError)(typeof message === "function" ? message() : message);
-}
-
-/**
- * Throws an `AssertionError` unless `value` passes `guard`. Afterwards,
- * `value` has the guarded type.
- *
- * @example
- * nc.assertType(config.port, nc.isInteger, "port must be an integer");
- *
- * @template T
- * @param {unknown} value
- * @param {(value: unknown) => value is T} guard A check like `nc.isString`.
- * @param {string | (() => string)} [message]
- * @returns {asserts value is T}
- * @throws {AssertionError}
- */
-function assertType(value, guard, message) {
-  if (!guard(value)) {
-    const text = typeof message === "function" ? message() : message;
-    throw new (require("./errors.js").AssertionError)(text ?? `Expected value to pass ${guard.name || "the type guard"}`);
-  }
-}
+ * @deprecated Use `nc.assert.type()`. It will be removed in 4.0.
+ * @type {typeof assertModule.type}
+ */
+const assertType = assertModule.type;
 
 module.exports = {
   isArray,
@@ -1256,3 +533,80 @@ module.exports = {
   assert,
   assertType,
 };
+
+deprecate(module.exports, "nc.checker", {
+  isArray: { use: "nc.is.array()" },
+  isNumber: { use: "nc.is.number()" },
+  isFinite: { use: "nc.is.finite()" },
+  isInteger: { use: "nc.is.integer()" },
+  isSafeInteger: { use: "nc.is.safeInteger()" },
+  isFloat: { use: "nc.is.float()" },
+  isPositive: { use: "nc.is.positive()" },
+  isNegative: { use: "nc.is.negative()" },
+  isBoolean: { use: "nc.is.boolean()" },
+  isString: { use: "nc.is.string()" },
+  isSymbol: { use: "nc.is.symbol()" },
+  isBigInt: { use: "nc.is.bigInt()" },
+  isUndefined: { use: "nc.is.undefined()" },
+  isNull: { use: "nc.is.null()" },
+  isNil: { use: "nc.is.nil()" },
+  isDefined: { use: "nc.is.defined()" },
+  isPrimitive: { use: "nc.is.primitive()" },
+  isFunction: { use: "nc.is.function()" },
+  isAsyncFunction: { use: "nc.is.asyncFunction()" },
+  isGeneratorFunction: { use: "nc.is.generatorFunction()" },
+  isGenerator: { use: "nc.is.generator()" },
+  isClass: { use: "nc.is.class()" },
+  isObject: { use: "nc.is.object()" },
+  isPlainObject: { use: "nc.is.plainObject()" },
+  isPromise: { use: "nc.is.promise()" },
+  isRegExp: { use: "nc.is.regExp()" },
+  isDate: { use: "nc.is.date()" },
+  isValidDate: { use: "nc.is.validDate()" },
+  isMap: { use: "nc.is.map()" },
+  isSet: { use: "nc.is.set()" },
+  isWeakMap: { use: "nc.is.weakMap()" },
+  isWeakSet: { use: "nc.is.weakSet()" },
+  isIterable: { use: "nc.is.iterable()" },
+  isAsyncIterable: { use: "nc.is.asyncIterable()" },
+  isBuffer: { use: "nc.is.buffer()" },
+  isTypedArray: { use: "nc.is.typedArray()" },
+  isError: { use: "nc.is.error()" },
+  isEmpty: { use: "nc.is.empty()" },
+  isBlank: { use: "nc.is.blank()" },
+  isArrayOf: { use: "nc.is.arrayOf()" },
+  isOneOf: { use: "nc.is.oneOf()" },
+  isEmail: { use: "nc.is.email()" },
+  isURL: { use: "nc.is.url()" },
+  isUUID: { use: "nc.is.uuid()" },
+  isJSON: { use: "nc.is.json()" },
+  isNumeric: { use: "nc.is.numeric()" },
+  isIP: { use: "nc.is.ip()" },
+  isIPv4: { use: "nc.is.ipv4()" },
+  isIPv6: { use: "nc.is.ipv6()" },
+  isPort: { use: "nc.is.port()" },
+  isHex: { use: "nc.is.hex()" },
+  isHexColor: { use: "nc.is.hexColor()" },
+  isBase64: { use: "nc.is.base64()" },
+  isSemver: { use: "nc.is.semver()" },
+  isISODate: { use: "nc.is.isoDate()" },
+  isSlug: { use: "nc.is.slug()" },
+  isAlpha: { use: "nc.is.alpha()" },
+  isAlphanumeric: { use: "nc.is.alphanumeric()" },
+  isCreditCard: { use: "nc.is.creditCard()" },
+  isJWT: { use: "nc.is.jwt()" },
+  isHostname: { use: "nc.is.hostname()" },
+  isMACAddress: { use: "nc.is.macAddress()" },
+  isIBAN: { use: "nc.is.iban()" },
+  isE164: { use: "nc.is.e164()" },
+  isObjectId: { use: "nc.is.objectId()" },
+  isULID: { use: "nc.is.ulid()" },
+  isDataURL: { use: "nc.is.dataUrl()" },
+  isMimeType: { use: "nc.is.mimeType()" },
+  isTimeZone: { use: "nc.is.timeZone()" },
+  isLocale: { use: "nc.is.locale()" },
+  isCron: { use: "nc.is.cron()" },
+  isASCII: { use: "nc.is.ascii()" },
+  assert: { use: "nc.assert()" },
+  assertType: { use: "nc.assert.type()" },
+});

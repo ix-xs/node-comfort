@@ -33,18 +33,18 @@ const STRICT = process.argv.includes("--strict");
 
 /** The parts of the guide, in its order, and the namespaces each explains. */
 const GROUPS = [
-  { id: "essentials", keys: ["logger", "fs", "checker", "env", "errors", "utils"] },
-  { id: "data", keys: ["str", "num", "arr", "obj", "time", "id", "schema"] },
-  { id: "flow", keys: ["func", "async", "Cache", "Emitter"] },
-  { id: "system", keys: ["http", "SQLite", "cli", "color", "sys", "crypto"] },
+  { id: "essentials", keys: ["config", "logger", "fs", "env", "is", "assert", "errors", "json"] },
+  { id: "data", keys: ["str", "num", "arr", "obj", "schema", "time", "id"] },
+  { id: "flow", keys: ["func", "async", "cache", "emitter"] },
+  { id: "system", keys: ["crypto", "http", "sqlite", "sys", "cli", "color"] },
 ];
 
 /** Where the guide of each namespace lives on the site. */
 const GUIDES = /** @type {Record<string, string>} */ ({
-  logger: "/essentials/logger/", fs: "/essentials/fs/", checker: "/essentials/checker/", env: "/essentials/env/", errors: "/essentials/errors/", utils: "/essentials/utils/",
-  str: "/data/str/", num: "/data/num/", arr: "/data/arr/", obj: "/data/obj/", time: "/data/time/", id: "/data/id/", schema: "/data/schema/",
-  func: "/flow/func/", async: "/flow/async/", Cache: "/flow/cache/", Emitter: "/flow/emitter/",
-  http: "/system/http/", SQLite: "/system/sqlite/", cli: "/system/cli/", color: "/system/color/", sys: "/system/sys/", crypto: "/system/crypto/",
+  config: "/essentials/config/", logger: "/essentials/logger/", fs: "/essentials/fs/", env: "/essentials/env/", is: "/essentials/is/", assert: "/essentials/assert/", errors: "/essentials/errors/", json: "/essentials/json/",
+  str: "/data/str/", num: "/data/num/", arr: "/data/arr/", obj: "/data/obj/", schema: "/data/schema/", time: "/data/time/", id: "/data/id/",
+  func: "/flow/func/", async: "/flow/async/", cache: "/flow/cache/", emitter: "/flow/emitter/",
+  crypto: "/system/crypto/", http: "/system/http/", sqlite: "/system/sqlite/", sys: "/system/sys/", cli: "/system/cli/", color: "/system/color/",
 });
 
 /** The built-in types worth a link, and where they are explained. */

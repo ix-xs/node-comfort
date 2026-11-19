@@ -2,7 +2,8 @@
 
 /**
  * Promises and concurrency: map with a limit, queues with priorities,
- * mutexes, polling, and friendlier `Promise.allSettled`.
+ * mutexes, retries with backoff, timeouts, polling, waiting for a condition,
+ * and friendlier `Promise.allSettled`.
  *
  * @example
  * const pages = await async.map(urls, (url) => fetchPage(url), { concurrency: 5 });
@@ -14,8 +15,51 @@
  */
 
 const { AbortError, TimeoutError } = require("./errors.js");
-const { toMs } = require("./internal/shared.js");
-const { retry, timeout } = require("./Func.js");
+const { toMs, sleep: _sleep, setLongTimeout } = require("./internal/shared.js");
+const { deprecate } = require("./internal/deprecate.js");
+
+/**
+ * Options for `retry()`.
+ * @typedef {object} RetryOptions
+ * @property {number} [attempts] Total attempts, the first one included. Defaults to `3`.
+ * @property {number | string | ((attempt: number, error: unknown) => number)} [delay] Wait before the next attempt, in ms or like `"1s"`, or a function that computes it.
+ * @property {number} [backoff] Multiplies the delay after each failure: `2` gives 200, 400, 800... Defaults to `1`.
+ * @property {number | string} [maxDelay] Cap for the computed delay.
+ * @property {number | boolean} [jitter] Randomizes the delay, from `0` (none) to `1` (anywhere between 0 and 2x). `true` is `0.5`. Stops many clients from retrying in sync.
+ * @property {(error: unknown, attempt: number) => boolean | Promise<boolean>} [shouldRetry] Return `false` to give up early, for example on a 4xx error.
+ * @property {(error: unknown, attempt: number, delay: number) => void} [onRetry] Called before each wait, for logs or metrics.
+ * @property {AbortSignal} [signal] Stops retrying. The attempt in progress isn't interrupted.
+ */
+
+/**
+ * Options for `sleep()`.
+ * @typedef {object} WaitOptions
+ * @property {AbortSignal} [signal] Cancels the wait; the promise rejects with an `AbortError`.
+ * @property {boolean} [unref] Let the process exit even if the timer is still pending.
+ */
+
+/**
+ * Options for `when()`.
+ * @typedef {object} WhenOptions
+ * @property {number | string} [interval] Time between two checks, in ms or like `"1s"`. Defaults to `50`.
+ * @property {number | string | null | false} [timeout] Give up after this long, in ms or like `"10s"`, and emit `"timeout"`. `null`, `false` or `Infinity` means no limit, the default.
+ * @property {number | null} [max] Stop after this many triggers.
+ * @property {AbortSignal} [signal] Stops the task, like `stop()`.
+ */
+
+/**
+ * The task returned by `when()`. Every method returns the task, so calls chain.
+ * With `using`, it stops at the end of the block.
+ * @typedef {_WhenTaskMethods & Disposable} WhenTask
+ */
+
+/**
+ * @typedef {object} _WhenTaskMethods
+ * @property {() => WhenTask} start Starts checking. A stopped task can't be restarted.
+ * @property {() => WhenTask} stop Stops checking and clears the timers.
+ * @property {<E extends "trigger" | "error" | "timeout">(event: E, handler: E extends "error" ? (error: unknown) => void : (payload: any) => void) => WhenTask} on Listens to `"trigger"` (the condition is true), `"error"` (it threw) or `"timeout"`.
+ * @property {(event: "trigger" | "error" | "timeout", handler: Function) => WhenTask} off Removes a listener added with `on()`.
+ */
 
 /**
  * Options for `map()`, `forEach()` and `filter()`.
@@ -27,13 +71,23 @@ const { retry, timeout } = require("./Func.js");
 
 /**
  * A rate limiter from `rateLimit()`. Call it with a function to run it as
- * soon as the rate allows.
- * @typedef {(<T>(fn: () => T | PromiseLike<T>) => Promise<Awaited<T>>) & { readonly pendingCount: number }} RateLimiter
+ * soon as the rate allows. `activeCount` counts the calls running,
+ * `pendingCount` the ones waiting, and `clear()` drops the waiting ones
+ * (their promises never settle).
+ * @typedef {(<T>(fn: () => T | PromiseLike<T>) => Promise<Awaited<T>>) & { readonly activeCount: number, readonly pendingCount: number, clear(): void }} RateLimiter
  */
 
 /**
  * A limiter from `limit()`. Call it with a function to run it when there's room.
- * @typedef {(<T>(fn: () => T | PromiseLike<T>) => Promise<Awaited<T>>) & { readonly activeCount: number, readonly pendingCount: number, concurrency: number, clearQueue(): void, onIdle(): Promise<void> }} Limiter
+ * `activeCount` counts the calls running, `pendingCount` the ones waiting,
+ * and `clear()` drops the waiting ones (their promises never settle).
+ * @typedef {(<T>(fn: () => T | PromiseLike<T>) => Promise<Awaited<T>>) & { readonly activeCount: number, readonly pendingCount: number, concurrency: number, clear(): void, onIdle(): Promise<void> } & _LimiterDeprecated} Limiter
+ */
+
+/**
+ * Options for `series()`.
+ * @typedef {object} SeriesOptions
+ * @property {AbortSignal} [signal] Stops before the next task and rejects with an `AbortError`. The task in progress isn't interrupted.
  */
 
 /**
@@ -41,18 +95,24 @@ const { retry, timeout } = require("./Func.js");
  * @typedef {object} QueueOptions
  * @property {number} [concurrency] How many tasks run at the same time. Defaults to `1`.
  * @property {boolean} [autoStart] Start right away. Defaults to `true`.
- * @property {number | string} [timeout] Time limit per task, like `"30s"`. A slower task rejects with a `TimeoutError`.
+ * @property {number | string | false} [timeout] Time limit per task, like `"30s"`. A slower task rejects with a `TimeoutError`. `false` or `Infinity` means no limit, the default.
  */
 
 /**
  * Options for `queue.add()`.
  * @typedef {object} QueueAddOptions
  * @property {number} [priority] Higher goes first; equal priorities keep their order. Defaults to `0`.
+ * @property {AbortSignal} [signal] Takes the task out of the queue if it fires before the task starts: its promise rejects with an `AbortError`. A task already running isn't interrupted.
  */
 
 /**
- * A queue from `queue()`.
- * @typedef {object} Queue
+ * A queue from `queue()`. `activeCount` counts the tasks running,
+ * `pendingCount` the ones waiting.
+ * @typedef {_QueueMembers & _QueueDeprecated} Queue
+ */
+
+/**
+ * @typedef {object} _QueueMembers
  * @property {<T>(task: () => T | PromiseLike<T>, options?: QueueAddOptions) => Promise<Awaited<T>>} add Adds a task; resolves with its result.
  * @property {<T>(tasks: Array<() => T | PromiseLike<T>>, options?: QueueAddOptions) => Promise<Array<Awaited<T>>>} addAll Adds several tasks; resolves with all results.
  * @property {() => Queue} pause Stops starting tasks. Running ones finish.
@@ -60,8 +120,8 @@ const { retry, timeout } = require("./Func.js");
  * @property {() => void} clear Drops the tasks that haven't started. Their promises never settle.
  * @property {() => Promise<void>} onIdle Resolves when nothing is waiting or running.
  * @property {() => Promise<void>} onEmpty Resolves when nothing is waiting.
- * @property {number} size Tasks waiting.
- * @property {number} pending Tasks running.
+ * @property {number} activeCount Tasks running. Read-only.
+ * @property {number} pendingCount Tasks waiting. Read-only.
  * @property {boolean} isPaused
  * @property {number} concurrency Can be changed on the fly.
  */
@@ -89,7 +149,7 @@ const { retry, timeout } = require("./Func.js");
  * Options for `poll()`.
  * @typedef {object} PollOptions
  * @property {number | string} [interval] Time between tries. Defaults to 100 ms.
- * @property {number | string} [timeout] Give up with a `TimeoutError` after this long.
+ * @property {number | string | false} [timeout] Give up with a `TimeoutError` after this long. `false` or `Infinity` means no limit, the default.
  * @property {AbortSignal} [signal] Stops with an `AbortError`.
  */
 
@@ -100,6 +160,40 @@ const { retry, timeout } = require("./Func.js");
  * @property {() => Promise<() => void>} lock Waits for the lock and gives you the function that releases it.
  * @property {boolean} isLocked
  */
+
+// The old names of a few members, for the types only, so editors strike them
+// through. At run time they are deprecated aliases added by deprecate().
+
+/** @ignore */
+class _QueueDeprecated {
+  /**
+   * Tasks waiting.
+   * @deprecated Use `pendingCount`. It will be removed in 4.0.
+   * @returns {number}
+   */
+  get size() {
+    return 0;
+  }
+
+  /**
+   * Tasks running.
+   * @deprecated Use `activeCount`. It will be removed in 4.0.
+   * @returns {number}
+   */
+  get pending() {
+    return 0;
+  }
+}
+
+/** @ignore */
+class _LimiterDeprecated {
+  /**
+   * Drops the calls that haven't started.
+   * @deprecated Use `clear()`. It will be removed in 4.0.
+   * @returns {void}
+   */
+  clearQueue() {}
+}
 
 /** @param {number | string | undefined} value */
 const _ms = (value) => (value === undefined ? undefined : toMs(value));
@@ -192,6 +286,21 @@ class _Heap {
     return top;
   }
 
+  /**
+   * Takes an entry out. Rare (an aborted task), so it simply rebuilds the heap.
+   * @param {T} item
+   * @returns {boolean} Whether it was there.
+   */
+  remove(item) {
+    const at = this.#items.indexOf(item);
+    if (at === -1) return false;
+    const rest = this.#items;
+    rest.splice(at, 1);
+    this.#items = [];
+    for (const entry of rest) this.push(entry);
+    return true;
+  }
+
   clear() {
     this.#items = [];
   }
@@ -202,17 +311,106 @@ class _Heap {
 }
 
 /**
- * Waits for a while. Same as `nc.wait()`.
+ * Resolves after a delay, given in milliseconds or as a duration string.
  *
  * @example
- * await async.sleep("250ms");
+ * await nc.async.sleep(500);
+ * await nc.async.sleep("2s");
+ * await nc.async.sleep("1m", { signal: controller.signal });
  *
- * @param {number | string} duration
- * @param {{ signal?: AbortSignal }} [options]
+ * @param {number | string} duration Milliseconds, or a string like `"250ms"`, `"2s"`, `"1m30s"`.
+ * @param {WaitOptions} [options]
  * @returns {Promise<void>}
+ * @throws {AbortError} If the signal is aborted.
+ * @throws {TypeError} If the duration can't be parsed.
  */
 function sleep(duration, options = {}) {
-  return require("./Utils.js").wait(duration, options);
+  let ms;
+  try {
+    ms = toMs(duration);
+  } catch (error) {
+    return Promise.reject(error);
+  }
+  if (!Number.isFinite(ms)) return Promise.reject(new TypeError(`Invalid duration: ${String(duration)}`));
+  return _sleep(ms, options.signal, options.unref ?? false);
+}
+
+/**
+ * Calls `fn` until it succeeds, waiting between attempts. If every attempt
+ * fails, the last error is thrown.
+ *
+ * @example
+ * const data = await async.retry(() => fetchJSON(url), {
+ *   attempts: 5,
+ *   delay: 200,
+ *   backoff: 2, // 200, 400, 800, 1600 ms
+ *   shouldRetry: (error) => !(error instanceof nc.errors.HttpError && error.status < 500),
+ * });
+ *
+ * @template T
+ * @param {(attempt: number) => T | PromiseLike<T>} fn Receives the attempt number, starting at 1.
+ * @param {RetryOptions} [options]
+ * @returns {Promise<Awaited<T>>}
+ * @throws The last error, or an `AbortError` if the signal fires.
+ */
+async function retry(fn, options = {}) {
+  const attempts = Math.max(1, options.attempts ?? 3);
+  const backoff = options.backoff ?? 1;
+  const maxDelay = options.maxDelay === undefined ? Infinity : toMs(options.maxDelay, "maxDelay");
+  const delay = typeof options.delay === "function" || options.delay === undefined ? 0 : toMs(options.delay, "delay");
+  const jitter = options.jitter === true ? 0.5 : Math.min(1, Math.max(0, Number(options.jitter ?? 0) || 0));
+  /** @type {unknown} */
+  let lastError;
+  for (let attempt = 1; attempt <= attempts; attempt++) {
+    if (options.signal?.aborted) throw new AbortError(undefined, { cause: options.signal.reason });
+    try {
+      return await fn(attempt);
+    } catch (error) {
+      lastError = error;
+      if (attempt >= attempts) break;
+      // A cancelled operation was stopped on purpose: trying again would undo that.
+      if (error instanceof Error && error.name === "AbortError") break;
+      if (options.shouldRetry && !(await options.shouldRetry(error, attempt))) break;
+      const base = typeof options.delay === "function" ? options.delay(attempt, error) : delay * backoff ** (attempt - 1);
+      const wait = Math.max(0, Math.round(Math.min(base, maxDelay) * (1 + jitter * (Math.random() * 2 - 1))));
+      options.onRetry?.(error, attempt, wait);
+      if (wait > 0) await _sleep(wait, options.signal);
+    }
+  }
+  throw lastError;
+}
+
+/**
+ * Rejects with a `TimeoutError` if the promise takes longer than `ms`. Pass
+ * a function to get an `AbortSignal` that fires when time is up, so the work
+ * actually stops instead of running on in the background.
+ *
+ * @example
+ * const res = await async.timeout(fetch(url), 5000);
+ * const rows = await async.timeout(() => slowQuery(), 2000, "Database too slow");
+ *
+ * @template T
+ * @param {PromiseLike<T> | ((signal: AbortSignal) => PromiseLike<T> | T)} promise A promise, or a function that returns one. The function gets a signal that aborts on timeout.
+ * @param {number | string | false} ms The limit, in ms or like `"5s"`. `Infinity` or `false` means no limit.
+ * @param {string} [message]
+ * @returns {Promise<Awaited<T>>}
+ * @throws {TimeoutError}
+ */
+function timeout(promise, ms, message) {
+  const limit = ms === false ? Infinity : toMs(ms, "timeout");
+  const controller = typeof promise === "function" ? new AbortController() : undefined;
+  const target = Promise.resolve().then(() => (typeof promise === "function" ? promise(/** @type {AbortController} */ (controller).signal) : promise));
+  if (limit === Infinity) return /** @type {Promise<Awaited<T>>} */ (target);
+  /** @type {() => void} */
+  let cancel = () => {};
+  const expired = new Promise((_, reject) => {
+    cancel = setLongTimeout(() => {
+      const error = new TimeoutError(message ?? `Operation timed out after ${limit}ms`, { timeout: limit });
+      controller?.abort(error);
+      reject(error);
+    }, limit);
+  });
+  return /** @type {Promise<Awaited<T>>} */ (Promise.race([target, expired]).finally(() => cancel()));
 }
 
 /**
@@ -380,15 +578,22 @@ async function filter(items, predicate, options = {}) {
  *
  * @example
  * await async.series([() => migrateUsers(), () => migrateOrders()]);
+ * await async.series(steps, { signal: AbortSignal.timeout(60_000) });
  *
  * @template T
  * @param {Iterable<() => T | PromiseLike<T>>} tasks
+ * @param {SeriesOptions} [options]
  * @returns {Promise<Array<Awaited<T>>>}
+ * @throws The first error, or an `AbortError` if the signal fires.
  */
-async function series(tasks) {
+async function series(tasks, options = {}) {
+  const signal = options.signal;
   /** @type {Array<Awaited<T>>} */
   const out = [];
-  for (const task of tasks) out.push(await task());
+  for (const task of tasks) {
+    if (signal?.aborted) throw new AbortError(undefined, { cause: signal.reason });
+    out.push(await (signal ? abortable(task(), signal) : task()));
+  }
   return out;
 }
 
@@ -462,9 +667,10 @@ function limit(concurrency) {
         next();
       },
     },
-    clearQueue: { value: () => waiting.clear() },
+    clear: { value: () => waiting.clear() },
     onIdle: { value: () => (active === 0 && !waiting.size ? Promise.resolve() : new Promise((resolve) => idleWaiters.push(() => resolve(undefined)))) },
   });
+  deprecate(limiter, "limiter", { clearQueue: { use: "limiter.clear()", value: () => limiter.clear } });
   return limiter;
 }
 
@@ -503,13 +709,39 @@ function rateLimit(max, interval) {
       /** @type {() => void} */ (waiting.shift())();
     }
   };
+  let active = 0;
   /** @type {any} */
   const limiter = (/** @type {() => unknown} */ fn) =>
     new Promise((resolve, reject) => {
-      waiting.push(() => void Promise.resolve().then(fn).then(resolve, reject));
+      waiting.push(() => {
+        active++;
+        Promise.resolve()
+          .then(fn)
+          .then(
+            (value) => {
+              active--;
+              resolve(value);
+            },
+            (error) => {
+              active--;
+              reject(error);
+            },
+          );
+      });
       if (timer === undefined) pump();
     });
-  Object.defineProperty(limiter, "pendingCount", { get: () => waiting.size });
+  Object.defineProperties(limiter, {
+    activeCount: { get: () => active },
+    pendingCount: { get: () => waiting.size },
+    clear: {
+      value: () => {
+        waiting.clear();
+        // Nothing left to start: the timer would only keep the process alive.
+        clearTimeout(timer);
+        timer = undefined;
+      },
+    },
+  });
   return limiter;
 }
 
@@ -531,7 +763,7 @@ function queue(options = {}) {
   let paused = options.autoStart === false;
   let running = 0;
   let order = 0;
-  const taskTimeout = _ms(options.timeout);
+  const taskTimeout = options.timeout === false ? undefined : _ms(options.timeout);
   /** @type {_Heap<{ run: () => void, priority: number, order: number }>} */
   const waiting = new _Heap();
   /** @type {Array<() => void>} */
@@ -558,14 +790,23 @@ function queue(options = {}) {
     check();
   };
 
-  /** @type {Queue} */
-  const self = {
+  // Typed without the deprecated names, which deprecate() adds below.
+  const self = /** @type {Queue} */ (/** @type {_QueueMembers} */ ({
     add(task, addOptions = {}) {
+      const signal = addOptions.signal;
       return new Promise((resolve, reject) => {
+        if (signal?.aborted) return reject(new AbortError(undefined, { cause: signal.reason }));
+        // Aborted while waiting: out of the queue. Once started, the task runs to the end.
+        const onAbort = () => {
+          if (!waiting.remove(entry)) return;
+          reject(new AbortError(undefined, { cause: signal?.reason }));
+          check();
+        };
         const entry = {
           priority: addOptions.priority ?? 0,
           order: order++,
           run: () => {
+            signal?.removeEventListener("abort", onAbort);
             const work = Promise.resolve().then(task);
             (taskTimeout === undefined ? work : timeout(work, taskTimeout, `Queue task timed out after ${taskTimeout}ms`))
               .then(/** @type {any} */ (resolve), reject)
@@ -575,6 +816,7 @@ function queue(options = {}) {
               });
           },
         };
+        signal?.addEventListener("abort", onAbort, { once: true });
         waiting.push(entry);
         pump();
       });
@@ -601,11 +843,11 @@ function queue(options = {}) {
     onEmpty() {
       return !waiting.size ? Promise.resolve() : new Promise((resolve) => empty.push(() => resolve(undefined)));
     },
-    get size() {
-      return waiting.size;
-    },
-    get pending() {
+    get activeCount() {
       return running;
+    },
+    get pendingCount() {
+      return waiting.size;
     },
     get isPaused() {
       return paused;
@@ -617,7 +859,11 @@ function queue(options = {}) {
       concurrency = Math.max(1, value);
       pump();
     },
-  };
+  }));
+  deprecate(self, "queue", {
+    size: { use: "queue.pendingCount", value: () => waiting.size, live: true },
+    pending: { use: "queue.activeCount", value: () => running, live: true },
+  });
   return self;
 }
 
@@ -628,8 +874,8 @@ function queue(options = {}) {
  * @example
  * const lock = async.mutex();
  * await lock.run(async () => {
- *   const data = nc.readJSON("./counter.json", { n: 0 });
- *   nc.writeJSON("./counter.json", { n: data.n + 1 });
+ *   const data = nc.fs.readJSON("./counter.json", { n: 0 });
+ *   nc.fs.writeJSON("./counter.json", { n: data.n + 1 });
  * });
  *
  * @returns {Mutex}
@@ -703,7 +949,7 @@ function deferred() {
  *
  * @example
  * const { fulfilled, rejected } = await async.settle(emails.map(send));
- * nc.info(`${fulfilled.length} sent, ${rejected.length} failed`);
+ * nc.logger.info(`${fulfilled.length} sent, ${rejected.length} failed`);
  *
  * @template T
  * @param {Iterable<T | PromiseLike<T>>} promises
@@ -750,7 +996,7 @@ async function props(object) {
  */
 async function poll(fn, options = {}) {
   const interval = _ms(options.interval) ?? 100;
-  const limitMs = _ms(options.timeout);
+  const limitMs = options.timeout === false ? undefined : _ms(options.timeout);
   const deadline = limitMs === undefined ? Infinity : Date.now() + limitMs;
   /** @type {unknown} */
   let lastError;
@@ -796,6 +1042,127 @@ function abortable(promise, signal) {
   });
 }
 
+/**
+ * Awaits a promise and gives you `[error, value]` instead of throwing, so
+ * you don't need a try/catch.
+ *
+ * @example
+ * const [error, user] = await async.to(db.users.find(id));
+ * if (error) return res.status(500).send(error.message);
+ *
+ * @template T
+ * @template [E=Error]
+ * @param {PromiseLike<T> | (() => PromiseLike<T> | T)} promise A promise, or a function (sync errors are caught too).
+ * @returns {Promise<[E, undefined] | [null, Awaited<T>]>}
+ */
+async function to(promise) {
+  try {
+    const value = await (typeof promise === "function" ? promise() : promise);
+    return [null, /** @type {Awaited<T>} */ (value)];
+  } catch (error) {
+    return [/** @type {E} */ (error), undefined];
+  }
+}
+
+/**
+ * Checks a condition at a regular interval and tells you when it's true.
+ * Call `.start()` once your listeners are in place. If you just want to
+ * await a condition, `poll()` is simpler.
+ *
+ * @example
+ * nc.async.when(() => queue.length > 0, { reason: "jobs waiting" }, { interval: 500, max: 1, timeout: "10s" })
+ *   .on("trigger", (payload) => nc.logger.info(payload.reason))
+ *   .on("timeout", () => nc.logger.warn("Nothing happened in 10s"))
+ *   .start();
+ *
+ * @param {boolean | PromiseLike<boolean> | (() => unknown)} predicate The condition, or a function (sync or async) that returns it.
+ * @param {any} [payload={}] Passed to the `"trigger"` and `"timeout"` listeners.
+ * @param {WhenOptions} [options]
+ * @returns {WhenTask}
+ */
+function when(predicate, payload = {}, options = {}) {
+  const interval = options.interval === undefined ? 50 : toMs(options.interval, "interval");
+  const limit = options.timeout === undefined || options.timeout === null || options.timeout === false ? Infinity : toMs(options.timeout, "timeout");
+  const timeout = limit === Infinity ? null : limit;
+  const max = options.max ?? null;
+  /** @type {Record<"trigger" | "error" | "timeout", Set<Function>>} */
+  const listeners = { trigger: new Set(), error: new Set(), timeout: new Set() };
+  /** @type {NodeJS.Timeout | undefined} */
+  let timer;
+  /** @type {NodeJS.Timeout | undefined} */
+  let timeoutTimer;
+  let stopped = false;
+  let started = false;
+  let count = 0;
+  const signal = options.signal;
+
+  const emit = (/** @type {"trigger" | "error" | "timeout"} */ event, /** @type {unknown} */ value) => {
+    for (const fn of listeners[event]) {
+      try {
+        fn(value);
+      } catch {
+        // A failing listener must not stop the task.
+      }
+    }
+  };
+  const halt = () => {
+    stopped = true;
+    clearTimeout(timer);
+    clearTimeout(timeoutTimer);
+    signal?.removeEventListener("abort", halt);
+  };
+  if (signal?.aborted) stopped = true;
+  else signal?.addEventListener("abort", halt, { once: true });
+  const tick = async () => {
+    if (stopped) return;
+    try {
+      const ok = typeof predicate === "function" ? await predicate() : await predicate;
+      if (stopped) return;
+      if (ok) {
+        count++;
+        emit("trigger", payload);
+        if (max !== null && count >= max) return halt();
+      }
+    } catch (error) {
+      emit("error", error);
+    }
+    if (!stopped) timer = setTimeout(tick, interval);
+  };
+
+  /** @type {WhenTask} */
+  const task = {
+    start() {
+      if (stopped || started) return task;
+      started = true;
+      timer = setTimeout(tick, 0);
+      if (timeout !== null) {
+        timeoutTimer = setTimeout(() => {
+          if (stopped) return;
+          emit("timeout", payload);
+          halt();
+        }, timeout);
+      }
+      return task;
+    },
+    stop() {
+      halt();
+      return task;
+    },
+    on(event, handler) {
+      listeners[event]?.add(handler);
+      return task;
+    },
+    off(event, handler) {
+      listeners[event]?.delete(handler);
+      return task;
+    },
+    [Symbol.dispose]() {
+      halt();
+    },
+  };
+  return task;
+}
+
 module.exports = {
   sleep,
   map,
@@ -814,4 +1181,6 @@ module.exports = {
   abortable,
   retry,
   timeout,
+  to,
+  when,
 };

@@ -15,6 +15,7 @@
 
 /** @type {typeof import("node:crypto") | undefined} */
 let _nodeCrypto;
+const { deprecate } = require("./internal/deprecate.js");
 const _crypto = () => (_nodeCrypto ??= require("node:crypto"));
 
 /**
@@ -586,7 +587,7 @@ function seq(prefix = "") {
 /**
  * Hashes a value.
  *
- * @deprecated Use `nc.crypto.hash()`. This alias goes away in 3.0.
+ * @deprecated Use `nc.crypto.hash()`. It will be removed in 4.0.
  * @param {string | Buffer | Uint8Array} value
  * @param {import("./Crypto").HashOptions} [options]
  * @returns {string}
@@ -598,7 +599,7 @@ function hash(value, options) {
 /**
  * Signs a value with HMAC.
  *
- * @deprecated Use `nc.crypto.hmac()`. This alias goes away in 3.0.
+ * @deprecated Use `nc.crypto.hmac()`. It will be removed in 4.0.
  * @param {string | Buffer | Uint8Array} value
  * @param {string | Buffer | Uint8Array} secret
  * @param {import("./Crypto").HashOptions} [options]
@@ -611,7 +612,7 @@ function hmac(value, secret, options) {
 /**
  * Compares two secrets in constant time.
  *
- * @deprecated Use `nc.crypto.safeEqual()`. This alias goes away in 3.0.
+ * @deprecated Use `nc.crypto.safeEqual()`. It will be removed in 4.0.
  * @param {string | Buffer | Uint8Array} a
  * @param {string | Buffer | Uint8Array} b
  * @returns {boolean}
@@ -639,3 +640,9 @@ module.exports = {
   hmac,
   safeEqual,
 };
+
+deprecate(module.exports, "nc.id", {
+  hash: { use: "nc.crypto.hash()" },
+  hmac: { use: "nc.crypto.hmac()" },
+  safeEqual: { use: "nc.crypto.safeEqual()" },
+});

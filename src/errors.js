@@ -29,6 +29,16 @@
  * Base class of every node-comfort error. `name` is the class name and
  * `code` a stable identifier.
  *
+ * Thrown as is, with these codes:
+ * - `ERR_ENV_FILE_MISSING`: `env.load(file, { required: true })` found no file.
+ * - `ERR_NOT_FOUND`: `sys.open()` got a path that doesn't exist.
+ *
+ * The subclasses have their own default codes (`ETIMEDOUT`, `ABORT_ERR`,
+ * `ERR_HTTP`...). Two more: a `cli` prompt whose input ends before the
+ * answer rejects with an `AbortError` coded `ERR_INPUT_CLOSED`, and
+ * `cli.args()` throws a plain `TypeError` coded `ERR_CLI_ARGS` for a
+ * mistake on the command line (its message is ready to show).
+ *
  * @example
  * if (error instanceof nc.errors.NodeComfortError) logger.warn(error.code);
  */
@@ -81,7 +91,7 @@ class NodeComfortError extends Error {
 }
 
 /**
- * Thrown by `nc.assert()` and `nc.assertType()`.
+ * Thrown by `nc.assert()` and `nc.assert.type()`.
  *
  * @example
  * nc.assert(user, "User is required");
@@ -122,6 +132,8 @@ class TimeoutError extends NodeComfortError {
 /**
  * Thrown when an operation is cancelled with an `AbortSignal`. Its name is
  * `"AbortError"`, like native abort errors, so existing checks keep working.
+ * Its code is `ABORT_ERR`, or `ERR_INPUT_CLOSED` when a `cli` prompt's
+ * input ends before the answer (a pipe that runs dry, Ctrl+D).
  */
 class AbortError extends NodeComfortError {
   /**
@@ -363,7 +375,7 @@ class ProcessError extends NodeComfortError {
 }
 
 /**
- * Thrown by `nc.SQLite` when a statement fails. Check `sqliteCode` to handle
+ * Thrown by `nc.sqlite.SQLite` when a statement fails. Check `sqliteCode` to handle
  * specific cases like a duplicate value.
  *
  * @example

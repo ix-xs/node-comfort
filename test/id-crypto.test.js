@@ -8,9 +8,9 @@ const { id, crypto } = nc;
 
 describe("id", () => {
   it("uuid and uuidv7", () => {
-    assert.equal(nc.isUUID(id.uuid(), { version: 4 }), true);
+    assert.equal(nc.is.uuid(id.uuid(), { version: 4 }), true);
     const ids = Array.from({ length: 500 }, () => id.uuidv7());
-    assert.ok(ids.every((u) => nc.isUUID(u, { version: 7 })));
+    assert.ok(ids.every((u) => nc.is.uuid(u, { version: 7 })));
     assert.deepEqual([...ids].sort(), ids, "uuidv7 values are strictly increasing");
     assert.equal(new Set(ids).size, ids.length);
     assert.ok(Math.abs(id.timestamp(ids[0]).getTime() - Date.now()) < 5000);
@@ -62,6 +62,7 @@ describe("id", () => {
     assert.equal(id.seq("t"), "t-1");
     assert.equal(id.seq("t"), "t-2");
     assert.equal(id.seq("u"), "u-1");
+    // tests the deprecated alias on purpose
     assert.equal(id.hash("hello"), crypto.hash("hello"));
     assert.equal(id.safeEqual("a", "a"), true);
   });

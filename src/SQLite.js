@@ -8,7 +8,7 @@
  * and names are checked, so there's no SQL injection through them.
  *
  * @example
- * const db = new nc.SQLite("data/app.sqlite");
+ * const db = nc.sqlite.open("data/app.sqlite");
  * db.createTable({
  *   name: "users",
  *   columns: {
@@ -21,14 +21,15 @@
  * db.getAll("users", { email: { like: "%@example.com" } }, { orderBy: "email", limit: 20 });
  *
  * // Values from a request can't turn into operators:
- * const safe = new nc.SQLite("data/app.sqlite", { operators: "tagged" });
- * safe.getAll("users", { age: nc.SQLite.op.gte(18), role: nc.SQLite.op.in(["admin", "editor"]) });
+ * const safe = nc.sqlite.open("data/app.sqlite", { operators: "tagged" });
+ * safe.getAll("users", { age: nc.sqlite.op.gte(18), role: nc.sqlite.op.in(["admin", "editor"]) });
  */
 
 const nodePath = require("node:path");
 const fs = require("node:fs");
 const { SQLiteError } = require("./errors.js");
 const { toMs } = require("./internal/shared.js");
+const { warn } = require("./internal/deprecate.js");
 
 /**
  * A column type. `JSON` and `BOOLEAN` columns give you back objects and
@@ -78,7 +79,7 @@ const { toMs } = require("./internal/shared.js");
  * @typedef {object} TableDefinition
  * @property {string} name
  * @property {Record<string, ColumnDefinition>} [columns]
- * @property {Record<string, ColumnDefinition>} [options] Old name for `columns`, still accepted.
+ * @property {Record<string, ColumnDefinition>} [options] Old name for `columns`, still accepted. Deprecated: it warns once, and goes away in 4.0.
  * @property {TableConstraint[]} [constraints]
  * @property {IndexDefinition[]} [indexes]
  */
@@ -120,7 +121,7 @@ const { toMs } = require("./internal/shared.js");
  * { status: "active", age: { gte: 18, lt: 65 }, role: ["admin", "editor"], deleted_at: null }
  * { $or: [{ email: { like: "%@acme.com" } }, { vip: true }] }
  * { "settings.theme": "dark", "settings.beta": true }
- * { age: nc.SQLite.op.gte(18), role: nc.SQLite.op.in(["admin", "editor"]) }
+ * { age: nc.sqlite.op.gte(18), role: nc.sqlite.op.in(["admin", "editor"]) }
  *
  * @template [R=Record<string, any>] Row type; its keys are suggested as columns.
  * @typedef {{ [K in keyof R]?: WhereValue } & { [path: `${string}.${string}`]: WhereValue } & { $or?: Where<R>[], $and?: Where<R>[] }} Where
@@ -494,8 +495,8 @@ class SQLite {
    * taken from a request stays a value.
    *
    * @example
-   * const { op } = nc.SQLite;
-   * const db = new nc.SQLite("data/app.sqlite", { operators: "tagged" });
+   * const { op } = nc.sqlite;
+   * const db = nc.sqlite.open("data/app.sqlite", { operators: "tagged" });
    * db.getAll("users", { age: op.between(18, 65), role: op.in(["admin", "editor"]), deleted_at: op.isNull() });
    * // { "ne": "" } in the body is compared as text, not run, and a missing token throws
    * db.get("users", { email, token: body.token });
@@ -503,6 +504,24 @@ class SQLite {
    * @type {OperatorHelpers}
    */
   static op = OP;
+
+  /**
+   * Opens a database, creating the file and its folders if needed. Same as
+   * `new SQLite(path, options)`, and as `nc.sqlite.open()`.
+   *
+   * @example
+   * const SQLite = require("@ix-xs/node-comfort/sqlite");
+   * const db = SQLite.open("data/app.sqlite");
+   *
+   * @template [Row=Record<string, any>]
+   * @param {string} [path="db.sqlite"] Relative to the working directory. `":memory:"` for a throwaway database.
+   * @param {SQLiteOptions} [options]
+   * @returns {SQLite<Row>}
+   * @throws {SQLiteError} If the file can't be opened.
+   */
+  static open(path, options) {
+    return new SQLite(path, options);
+  }
 
   /** @type {import("node:sqlite").DatabaseSync} */
   #db;
@@ -527,9 +546,9 @@ class SQLite {
    * `":memory:"` for a throwaway in-memory database.
    *
    * @example
-   * const db = new nc.SQLite();                                  // ./db.sqlite
-   * const app = new nc.SQLite("data/app.sqlite", { dates: true });
-   * const mem = new nc.SQLite(":memory:");
+   * const db = new nc.sqlite.SQLite();                                 // ./db.sqlite
+   * const app = new nc.sqlite.SQLite("data/app.sqlite", { dates: true });
+   * const mem = new nc.sqlite.SQLite(":memory:");
    *
    * @param {string} [path="db.sqlite"] Relative to the working directory.
    * @param {SQLiteOptions} [options]
@@ -975,6 +994,7 @@ class SQLite {
    * @throws {SQLiteError} If the definition is invalid.
    */
   createTable(table) {
+    if (table?.columns === undefined && table?.options !== undefined) warn("TableDefinition.options", "TableDefinition.columns", table.options);
     const columns = table?.columns ?? table?.options;
     const name = _id(table?.name, "table name");
     if (!_isPlain(columns) || !Object.keys(columns).length) throw new SQLiteError(`Table "${table.name}" needs at least one column in "columns"`);
@@ -1390,6 +1410,7 @@ class SQLite {
    * Updates the row matching `where` (or `{ id: data.id }`), or inserts it.
    * Kept from 1.x; `upsert()` does the same in one atomic statement.
    *
+   * @deprecated Use `db.upsert(table, data, conflict)` (it needs a unique column as the conflict target), or `db.get()` then `db.update()` or `db.insert()`. It will be removed in 4.0.
    * @param {string} tableName
    * @param {Partial<R> & Record<string, unknown>} data
    * @param {Where<R> | null} [where]
@@ -1397,6 +1418,7 @@ class SQLite {
    * @throws {SQLiteError}
    */
   set(tableName, data, where = null) {
+    warn("db.set", "db.upsert(table, data, conflict) (it needs a unique column as the conflict target), or db.get() then db.update() or db.insert()", this.set);
     /** @type {Record<string, unknown>} */
     const record = data;
     const lookup = where ?? (record.id !== undefined && record.id !== null ? { id: record.id } : null);

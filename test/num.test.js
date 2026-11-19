@@ -2,7 +2,7 @@
 
 const { describe, it } = require("node:test");
 const assert = require("node:assert/strict");
-const { num } = require("..");
+const { num, config } = require("..");
 
 describe("num: bounds and rounding", () => {
   it("clamp, inRange, wrap", () => {
@@ -166,18 +166,18 @@ describe("num: parsing and formatting", () => {
     assert.equal(num.ordinal(4, { suffixes: { other: "°" } }), "4°");
   });
 
-  it("setLocale changes the default language of every formatter", () => {
+  it("config.set({ locale }) changes the default language of every formatter", () => {
     const nbsp = (text) => text.replace(/\s/g, " ");
     try {
-      assert.equal(num.getLocale(), "en");
-      assert.equal(num.setLocale("fr"), num, "calls chain");
+      assert.equal(config.get().locale, "en");
+      assert.deepEqual(config.set({ locale: "fr" }), { locale: "fr", timeZone: undefined }, "returns the settings");
       assert.equal(nbsp(num.currency(1234.5, "EUR")), "1 234,50 €");
       assert.equal(nbsp(num.format(1234567.891)), "1 234 567,891");
       assert.equal(nbsp(num.formatBytes(1536)), "1,5 KB");
       assert.equal(num.ordinal(1), "1er");
       assert.equal(num.currency(1234.5, "USD", { locale: "en-US" }), "$1,234.50", "a call still wins");
     } finally {
-      num.setLocale("en");
+      config.set({ locale: "en" });
     }
     assert.equal(num.formatBytes(1536), "1.5 KB");
   });

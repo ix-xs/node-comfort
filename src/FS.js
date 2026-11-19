@@ -9,13 +9,18 @@
  * wherever it's run from. Other relative paths start from the working
  * directory, like Node's `fs`.
  *
- * Everyday failures don't throw: you get `undefined` when something doesn't
- * exist and `false` when an operation fails.
+ * Everyday failures don't throw. `write`, `writeJSON`, `append`, `touch`,
+ * `copy`, `move` and `remove` return `true` when done and `false` when not.
+ * `read`, `readLines`, `stat`, `size`, `hash`, `list`, `find` and `findUp`
+ * return `undefined` when the path doesn't exist or can't be read, and
+ * `readJSON` its fallback. Only `ensureFile`, `ensureFolder` and `temp`
+ * throw, when they can't create what you asked for: you can rely on the path
+ * they return.
  *
  * @example
- * nc.writeJSON("./data/settings.json", { theme: "dark" });
- * const settings = nc.readJSON("./data/settings.json", {});
- * const sources = nc.glob("src/**\/*.{js,ts}");
+ * nc.fs.writeJSON("./data/settings.json", { theme: "dark" });
+ * const settings = nc.fs.readJSON("./data/settings.json", {});
+ * const sources = nc.fs.glob("src/**\/*.{js,ts}");
  */
 
 const fs = require("node:fs");
@@ -24,12 +29,14 @@ const nodePath = require("node:path");
 const util = require("node:util");
 const { fileURLToPath } = require("node:url");
 const { sleepSync, toMs } = require("./internal/shared.js");
+const { deprecate } = require("./internal/deprecate.js");
+const { stripJSONComments: _stripJSONComments } = require("./internal/json.js");
 
 /**
- * Options for `copyFoldersIn()` and `moveFoldersIn()`.
+ * Options for `copyFoldersIn()` and `moveFoldersIn()` (deprecated).
  * @typedef {object} CopyFoldersOptions
  * @property {string} dest Destination folder.
- * @property {string} [path] Source folder. Defaults to the working directory.
+ * @property {string} path Source folder. Since 3.0, an empty one is refused (nothing is done) instead of meaning the working directory.
  * @property {boolean} [recursive] Include nested folders. Defaults to `true`.
  * @property {boolean} [withFiles] Copy the files in each folder too.
  * @property {boolean} [force] Delete an existing destination folder first.
@@ -37,27 +44,27 @@ const { sleepSync, toMs } = require("./internal/shared.js");
  */
 
 /**
- * Options for `copyFolder()` and `moveFolder()`.
+ * Options for `copyFolder()` and `moveFolder()` (deprecated).
  * @typedef {object} CopyFolderOptions
  * @property {string} dest Destination folder.
- * @property {string} [path] Source folder. Defaults to the working directory.
+ * @property {string} path Source folder. Since 3.0, an empty one is refused (nothing is done) instead of meaning the working directory.
  * @property {boolean} [recursive] Copy nested folders too.
  * @property {boolean} [withFiles] Copy files too. `copy()` does all of this in one call.
  * @property {boolean} [force] Delete an existing destination first.
  */
 
 /**
- * Options for `copyFilesIn()` and `moveFilesIn()`.
+ * Options for `copyFilesIn()` and `moveFilesIn()` (deprecated).
  * @typedef {object} CopyFilesOptions
  * @property {string} dest Destination folder.
- * @property {string} [path] Source folder. Defaults to the working directory.
+ * @property {string} path Source folder. Since 3.0, an empty one is refused (nothing is done) instead of meaning the working directory.
  * @property {boolean} [recursive] Include files from nested folders, keeping the tree. Defaults to `true`.
  * @property {boolean} [force] Delete existing destination files first.
  * @property {(file: string) => boolean} [filter] Keep a file when it returns `true`. Gets absolute paths.
  */
 
 /**
- * Options for `copyFile()` and `moveFile()`.
+ * Options for `copyFile()` and `moveFile()` (deprecated).
  * @typedef {object} CopyFileOptions
  * @property {string} path Source file.
  * @property {string} dest Destination file, or a folder if it ends with `/`.
@@ -68,12 +75,26 @@ const { sleepSync, toMs } = require("./internal/shared.js");
  * Options for `copy()`.
  * @typedef {object} CopyOptions
  * @property {boolean} [overwrite] Replace existing files. Defaults to `true`.
- * @property {(source: string, destination: string) => boolean} [filter] Return `false` to skip a file or folder.
+ * @property {(source: string, destination: string) => boolean} [filter] Return `false` to skip a file or folder (a skipped folder is skipped with all it holds). Gets absolute paths, the source itself included.
  * @property {boolean} [preserveTimestamps] Keep modification times.
  */
 
 /**
- * Options for `writeFile()`.
+ * Options for `move()`.
+ * @typedef {object} MoveOptions
+ * @property {boolean} [overwrite] Replace an existing destination. Defaults to `true`.
+ * @property {(source: string, destination: string) => boolean} [filter] Return `false` to leave a file or folder where it is (a folder left out stays with all it holds). Gets absolute paths, the source itself included.
+ */
+
+/**
+ * Options for `remove()`.
+ * @typedef {object} RemoveOptions
+ * @property {boolean} [contents] Delete what's inside a folder and keep the folder itself.
+ * @property {(path: string) => boolean} [filter] Delete only what's inside the folder that passes the test, at any depth: a folder that passes goes with all it holds. Gets absolute paths. Implies `contents`.
+ */
+
+/**
+ * Options for `write()`.
  * @typedef {object} WriteFileOptions
  * @property {boolean} [atomic] Write to a temporary file and rename it, so nobody reads a half-written file and a crash can't corrupt it. Defaults to `true`.
  * @property {BufferEncoding} [encoding] Defaults to `"utf8"`.
@@ -100,11 +121,15 @@ const { sleepSync, toMs } = require("./internal/shared.js");
  */
 
 /**
- * Options for `getFilesIn()` and `getFoldersIn()`.
+ * Options for `list()`. The deprecated `getFilesIn()` and `getFoldersIn()`
+ * take the same ones, without `type`, `dot` and `filter`.
  * @typedef {object} ListOptions
+ * @property {"files" | "folders" | "all"} [type] What to list. Defaults to `"files"`.
  * @property {boolean} [recursive] Go into nested folders. Defaults to `true`.
  * @property {boolean} [hidden] Include names starting with a dot. Defaults to `true`.
- * @property {string[]} [ignore] Folder names to skip. Defaults to `["node_modules"]`.
+ * @property {boolean} [dot] The same as `hidden`, under the name `glob()` uses. Defaults to `true` here.
+ * @property {string[]} [ignore] Folder names to skip, with all they hold. Defaults to `["node_modules"]`.
+ * @property {(path: string) => boolean} [filter] Keep a path when it returns `true`. Gets absolute paths. It only picks results: a folder left out is still searched.
  */
 
 /**
@@ -121,14 +146,14 @@ const { sleepSync, toMs } = require("./internal/shared.js");
  * Options for `find()`.
  * @typedef {object} FindOptions
  * @property {string} [cwd] Where to start. Defaults to the working directory.
- * @property {"file" | "folder" | "any"} [type] Defaults to `"file"`.
+ * @property {"files" | "folders" | "all" | "file" | "folder" | "any"} [type] What to look for: `"files"`, `"folders"` or `"all"` (both), like `list()` and `glob()`. The singular forms mean the same. Defaults to `"files"`.
  * @property {string[]} [ignore] Folder names to skip. Defaults to `node_modules` and `.git`.
  */
 
 /**
  * Options for `watch()`.
  * @typedef {object} WatchOptions
- * @property {string} [path] What to watch. Defaults to the working directory.
+ * @property {string} [path] What to watch. Defaults to the working directory. `watch(path, options)` gives it first instead.
  * @property {boolean} [recursive] Watch nested folders too.
  * @property {(event: "rename" | "change", file: string) => boolean} [filter] Return `false` to ignore an event.
  * @property {number | string} [debounce] Merge events on the same file within this long, in ms or like `"100ms"`. Editors often save in several steps.
@@ -142,7 +167,8 @@ const { sleepSync, toMs } = require("./internal/shared.js");
 /**
  * @typedef {object} _WatcherMethods
  * @property {<E extends "change" | "rename" | "all" | "error">(event: E, callback: E extends "all" ? (event: "change" | "rename", file: string) => void : E extends "error" ? (error: Error) => void : (file: string) => void) => Watcher} on Listens for changes. `"all"` also gets the event name. `"error"` tells you the watch broke, for instance because the folder was deleted.
- * @property {() => void} stop Stops watching.
+ * @property {() => Watcher} stop Stops watching. Returns the watcher.
+ * @property {(event: "change" | "rename" | "all" | "error", callback: Function) => Watcher} off Removes a listener added with `on()`.
  * @property {() => Watcher} pause Ignores events until `resume()`.
  * @property {() => Watcher} resume
  */
@@ -198,9 +224,13 @@ const _existing = (input, type) => {
 };
 
 /**
+ * @typedef {{ recursive: boolean, hidden: boolean, ignore: string[] }} _WalkOptions
+ */
+
+/**
  * @param {string} root
- * @param {"file" | "folder"} type
- * @param {Required<ListOptions>} options
+ * @param {"file" | "folder" | "all"} type
+ * @param {_WalkOptions} options
  * @returns {string[]}
  */
 const _walk = (root, type, options) => {
@@ -212,8 +242,8 @@ const _walk = (root, type, options) => {
 
 /**
  * @param {string} dir
- * @param {"file" | "folder"} type
- * @param {Required<ListOptions>} options
+ * @param {"file" | "folder" | "all"} type
+ * @param {_WalkOptions} options
  * @param {Set<string>} ignore
  * @param {string[]} out Filled in place: no array is built and thrown away at each level.
  */
@@ -230,9 +260,9 @@ const _walkInto = (dir, type, options, ignore, out) => {
     const full = nodePath.join(dir, entry.name);
     if (entry.isDirectory()) {
       if (ignore.has(entry.name)) continue;
-      if (type === "folder") out.push(full);
+      if (type !== "file") out.push(full);
       if (options.recursive) _walkInto(full, type, options, ignore, out);
-    } else if (type === "file" && (entry.isFile() || entry.isSymbolicLink())) {
+    } else if (type !== "folder" && (entry.isFile() || entry.isSymbolicLink())) {
       out.push(full);
     }
   }
@@ -241,7 +271,7 @@ const _walkInto = (dir, type, options, ignore, out) => {
 /**
  * @param {boolean | ListOptions | undefined} recursiveOrOptions
  * @param {boolean} defaultRecursive
- * @returns {Required<ListOptions>}
+ * @returns {_WalkOptions}
  */
 const _listOptions = (recursiveOrOptions, defaultRecursive) => {
   const opts = typeof recursiveOrOptions === "object" ? recursiveOrOptions : { recursive: recursiveOrOptions };
@@ -495,40 +525,6 @@ const _copyTree = (src, dest, options = {}) => {
 };
 
 /**
- * Removes comments and trailing commas from JSONC.
- * @param {string} text
- * @returns {string}
- */
-const _stripJSONComments = (text) => {
-  let out = "";
-  let inString = false;
-  for (let i = 0; i < text.length; i++) {
-    const char = text[i];
-    const next = text[i + 1];
-    if (inString) {
-      out += char;
-      if (char === "\\") out += text[++i] ?? "";
-      else if (char === '"') inString = false;
-      continue;
-    }
-    if (char === '"') {
-      inString = true;
-      out += char;
-    } else if (char === "/" && next === "/") {
-      while (i < text.length && text[i] !== "\n") i++;
-      out += "\n";
-    } else if (char === "/" && next === "*") {
-      i += 2;
-      while (i < text.length && !(text[i] === "*" && text[i + 1] === "/")) i++;
-      i++;
-    } else {
-      out += char;
-    }
-  }
-  return out.replace(/,(\s*[}\]])/g, "$1");
-};
-
-/**
  * @param {string} pattern
  * @param {boolean} dot
  * @returns {RegExp}
@@ -653,88 +649,323 @@ const _globRoot = (pattern) => {
   return joined === "" || /^[A-Za-z]:$/.test(joined) ? `${joined}/` : joined;
 };
 
+// Reading
+
 /**
- * Reads an environment variable. For typed and checked values, see `nc.env`.
+ * Reads a file as text, or as a Buffer with `"buffer"`.
  *
  * @example
- * nc.getEnv("REGION", "eu-west-1");
+ * const text = nc.fs.read("./README.md");
+ * const bytes = nc.fs.read("./logo.png", "buffer");
  *
- * @param {string} name
- * @param {string} [fallback]
- * @returns {string | undefined}
+ * @overload
+ * @param {string} path
+ * @param {"buffer"} encoding
+ * @returns {Buffer | undefined} `undefined` if it can't be read.
  */
-function getEnv(name, fallback) {
-  return process.env[name] ?? fallback;
+/**
+ * Reads a file as text.
+ *
+ * @overload
+ * @param {string} path
+ * @param {BufferEncoding} [encoding="utf8"]
+ * @returns {string | undefined} `undefined` if it can't be read.
+ */
+/**
+ * @param {string} path
+ * @param {BufferEncoding | "buffer"} [encoding="utf8"]
+ * @returns {string | Buffer | undefined}
+ */
+function read(path, encoding = "utf8") {
+  if (!path) return undefined;
+  try {
+    return encoding === "buffer" ? fs.readFileSync(_abs(path)) : fs.readFileSync(_abs(path), encoding);
+  } catch {
+    // missing, a folder, or unreadable
+    return undefined;
+  }
 }
 
 /**
- * The absolute version of a path, whether it exists or not.
+ * Reads a JSON file. If it's missing or invalid you get `fallback`, never
+ * an error.
  *
  * @example
- * nc.createPath("./config/app.json"); // next to the calling file
- * nc.createPath("logs/app.log");      // from the working directory
+ * const settings = nc.fs.readJSON("./settings.json", { theme: "light" });
+ * const tsconfig = nc.fs.readJSON("./tsconfig.json", {}, { comments: true });
  *
- * @param {string} [path] Defaults to the working directory.
- * @returns {string}
+ * @template [T=any]
+ * @param {string} path
+ * @param {T} [fallback]
+ * @param {ReadJSONOptions} [options]
+ * @returns {T}
  */
-function createPath(path) {
-  return _abs(path);
+function readJSON(path, fallback, options = {}) {
+  const text = read(path);
+  if (text === undefined) return /** @type {T} */ (fallback);
+  try {
+    const clean = text.replace(/^﻿/, "");
+    return JSON.parse(options.comments ? _stripJSONComments(clean) : clean, options.reviver);
+  } catch {
+    return /** @type {T} */ (fallback);
+  }
 }
 
 /**
- * The absolute path of a folder, or `undefined` if it doesn't exist.
+ * Reads a text file as lines. A final newline doesn't add an empty line.
  *
  * @example
- * if (!nc.getFolder("./uploads")) nc.createFolder("./uploads");
- *
- * @param {string} [path] Defaults to the working directory.
- * @returns {string | undefined}
- */
-function getFolder(path) {
-  return _existing(path, "folder");
-}
-
-/**
- * The absolute path of a file, or `undefined` if it doesn't exist.
+ * for (const url of nc.fs.readLines("./urls.txt") ?? []) await check(url);
  *
  * @param {string} path
- * @returns {string | undefined}
+ * @returns {string[] | undefined} `undefined` if it can't be read.
  */
-function getFile(path) {
-  return path ? _existing(path, "file") : undefined;
+function readLines(path) {
+  const text = read(path);
+  if (text === undefined) return undefined;
+  if (text === "") return [];
+  return text.replace(/(\r\n|\r|\n)$/, "").split(/\r\n|\r|\n/);
+}
+
+// Writing
+
+/**
+ * Writes a file atomically, creating its folders. Objects are written as
+ * JSON.
+ *
+ * @example
+ * nc.fs.write("./dist/index.html", html);
+ * nc.fs.write("./.secrets/token", token, { mode: 0o600 });
+ *
+ * @param {string} path
+ * @param {string | Buffer | Uint8Array | object} data
+ * @param {WriteFileOptions} [options]
+ * @returns {boolean} `false` if it failed.
+ */
+function write(path, data, options = {}) {
+  try {
+    _write(_abs(path), _content(data, options.spaces ?? 2), options);
+    return true;
+  } catch {
+    return false;
+  }
 }
 
 /**
- * The folders inside a folder, nested ones included by default.
- * `node_modules` is skipped.
+ * Writes a value as JSON, atomically, creating folders.
  *
  * @example
- * nc.getFoldersIn("./src");        // everything
- * nc.getFoldersIn("./src", false); // direct children only
+ * nc.fs.writeJSON("./data/users.json", users);
  *
- * @param {string} [path] Defaults to the working directory.
- * @param {boolean | ListOptions} [recursive=true]
- * @returns {string[] | undefined} Absolute paths, or `undefined` if the folder doesn't exist.
+ * @param {string} path
+ * @param {unknown} data
+ * @param {WriteJSONOptions} [options]
+ * @returns {boolean} `false` if it failed, for example on a circular structure.
  */
-function getFoldersIn(path, recursive = true) {
-  const root = _existing(path, "folder");
-  return root ? _walk(root, "folder", _listOptions(recursive, true)) : undefined;
+function writeJSON(path, data, options = {}) {
+  try {
+    const text = JSON.stringify(data, /** @type {any} */ (options.replacer), options.spaces ?? 2);
+    if (text === undefined) return false;
+    _write(_abs(path), `${text}\n`, { atomic: options.atomic, mode: options.mode, fsync: options.fsync });
+    return true;
+  } catch {
+    return false;
+  }
 }
 
 /**
- * The files inside a folder, nested ones included by default.
- * `node_modules` is skipped.
+ * Appends to a file, creating it and its folders if needed.
  *
  * @example
- * nc.getFilesIn("./src").filter((file) => file.endsWith(".js"));
+ * nc.fs.append("./logs/audit.log", `${new Date().toISOString()} login ${user}\n`);
  *
- * @param {string} [path] Defaults to the working directory.
- * @param {boolean | ListOptions} [recursive=true]
+ * @param {string} path
+ * @param {string | Buffer} data
+ * @returns {boolean} `false` if it failed.
+ */
+function append(path, data) {
+  try {
+    const target = _abs(path);
+    const content = Buffer.isBuffer(data) ? data : String(data);
+    try {
+      fs.appendFileSync(target, content);
+    } catch (error) {
+      if (/** @type {NodeJS.ErrnoException} */ (error).code !== "ENOENT") throw error;
+      fs.mkdirSync(nodePath.dirname(target), { recursive: true });
+      fs.appendFileSync(target, content);
+    }
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+// Checking
+
+/**
+ * Does a file or folder exist at this path?
+ *
+ * @example
+ * if (!nc.fs.exists("./config.json")) nc.fs.writeJSON("./config.json", defaults);
+ *
+ * @param {string} path
+ * @returns {boolean}
+ */
+function exists(path) {
+  return path ? fs.existsSync(_abs(path)) : false;
+}
+
+/**
+ * Is it an existing file?
+ *
+ * @example
+ * nc.fs.isFile("./package.json"); // true
+ *
+ * @param {string} path
+ * @returns {boolean}
+ */
+function isFile(path) {
+  return _existing(path, "file") !== undefined;
+}
+
+/**
+ * Is it an existing folder?
+ *
+ * @example
+ * if (!nc.fs.isFolder("./uploads")) nc.fs.ensureFolder("./uploads");
+ *
+ * @param {string} path
+ * @returns {boolean}
+ */
+function isFolder(path) {
+  return _existing(path, "folder") !== undefined;
+}
+
+/**
+ * Size, dates and type of a path.
+ *
+ * @example
+ * nc.fs.stat("./video.mp4")?.mtime;
+ *
+ * @param {string} path
+ * @returns {fs.Stats | undefined} `undefined` if it doesn't exist.
+ */
+function stat(path) {
+  try {
+    return fs.statSync(_abs(path));
+  } catch {
+    return undefined;
+  }
+}
+
+/**
+ * The total size of the files in a folder, links counted as links, never
+ * followed.
+ * @param {string} root Absolute, an existing folder.
+ * @returns {number}
+ */
+const _folderSize = (root) => {
+  let total = 0;
+  for (const file of _walk(root, "file", { recursive: true, hidden: true, ignore: [] })) {
+    try {
+      total += fs.lstatSync(file).size;
+    } catch {
+      // file removed in the meantime
+    }
+  }
+  return total;
+};
+
+/**
+ * The size of a file in bytes, or the total size of every file in a folder
+ * (nested ones included, links not followed).
+ *
+ * @example
+ * nc.num.formatBytes(nc.fs.size("./backup.zip") ?? 0); // "1.2 GB"
+ * nc.fs.size("./node_modules");                        // everything inside
+ *
+ * @param {string} path
+ * @returns {number | undefined} `undefined` if it doesn't exist.
+ */
+function size(path) {
+  if (!path) return undefined;
+  const target = _abs(path);
+  try {
+    const stats = fs.statSync(target);
+    if (stats.isFile()) return stats.size;
+    return stats.isDirectory() ? _folderSize(target) : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+/**
+ * Hashes a file in chunks, so huge files are fine.
+ *
+ * @example
+ * nc.fs.hash("./release.zip");                     // sha256, hex
+ * nc.fs.hash("./release.zip", { algorithm: "md5" });
+ *
+ * @param {string} path
+ * @param {{ algorithm?: string, encoding?: "hex" | "base64" | "base64url" }} [options] The algorithm and how the hash is written. Defaults to sha256 in hex.
+ * @returns {string | undefined} `undefined` if it can't be read.
+ */
+function hash(path, options = {}) {
+  const target = _existing(path, "file");
+  if (!target) return undefined;
+  let fd;
+  try {
+    const hasher = require("node:crypto").createHash(options.algorithm ?? "sha256");
+    fd = fs.openSync(target, "r");
+    const buffer = Buffer.allocUnsafe(1 << 20);
+    let bytes;
+    while ((bytes = fs.readSync(fd, buffer, 0, buffer.length, null)) > 0) hasher.update(buffer.subarray(0, bytes));
+    return hasher.digest(options.encoding ?? "hex");
+  } catch {
+    return undefined;
+  } finally {
+    if (fd !== undefined) fs.closeSync(fd);
+  }
+}
+
+// Listing and searching
+
+/**
+ * `find()` and `findUp()` take `"files"`, `"folders"` and `"all"` like
+ * `list()`, and the older `"file"`, `"folder"` and `"any"`.
+ * @param {string | undefined} type
+ * @param {"file" | "folder" | "any"} fallback
+ * @returns {"file" | "folder" | "any"}
+ */
+const _findType = (type, fallback) => {
+  if (type === "files" || type === "file") return "file";
+  if (type === "folders" || type === "folder") return "folder";
+  if (type === "all" || type === "any") return "any";
+  return fallback;
+};
+
+/**
+ * The files, the folders, or both, inside a folder. Nested ones are
+ * included by default, names starting with a dot too, and `node_modules`
+ * is skipped. Links are listed as files, never followed.
+ *
+ * @example
+ * nc.fs.list("./src");                                             // every file
+ * nc.fs.list("./src", { recursive: false });                       // direct children only
+ * nc.fs.list("./packages", { type: "folders", recursive: false });
+ * nc.fs.list("./src", { filter: (file) => file.endsWith(".js") });
+ *
+ * @param {string} [folder] Defaults to the working directory.
+ * @param {ListOptions} [options]
  * @returns {string[] | undefined} Absolute paths, or `undefined` if the folder doesn't exist.
  */
-function getFilesIn(path, recursive = true) {
-  const root = _existing(path, "folder");
-  return root ? _walk(root, "file", _listOptions(recursive, true)) : undefined;
+function list(folder, options = {}) {
+  const root = _existing(folder, "folder");
+  if (!root) return undefined;
+  const type = options.type === "folders" ? "folder" : options.type === "all" ? "all" : "file";
+  const found = _walk(root, type, _listOptions({ ...options, hidden: options.hidden ?? options.dot }, true));
+  const filter = options.filter;
+  return typeof filter === "function" ? found.filter((path) => filter(path)) : found;
 }
 
 /**
@@ -745,10 +976,10 @@ function getFilesIn(path, recursive = true) {
  * results are absolute.
  *
  * @example
- * nc.glob("src/**\/*.js");                           // ["src/index.js", "src/lib/a.js"]
- * nc.glob("**\/*.{png,jpg}", { cwd: "./assets", absolute: true });
- * nc.glob("packages/*", { type: "folders" });
- * nc.glob(`${folder}/**\/*.json`);                   // absolute pattern, absolute results
+ * nc.fs.glob("src/**\/*.js");                           // ["src/index.js", "src/lib/a.js"]
+ * nc.fs.glob("**\/*.{png,jpg}", { cwd: "./assets", absolute: true });
+ * nc.fs.glob("packages/*", { type: "folders" });
+ * nc.fs.glob(`${folder}/**\/*.json`);                   // absolute pattern, absolute results
  *
  * @param {string | string[]} pattern One or more patterns.
  * @param {GlobOptions} [options]
@@ -831,15 +1062,15 @@ const _globIn = (cwd, patterns, options, absolute) => {
  * closest first.
  *
  * @example
- * nc.find("config.json");
- * nc.find("fixtures", { type: "folder", cwd: "./test" });
+ * nc.fs.find("config.json");
+ * nc.fs.find("fixtures", { type: "folders", cwd: "./test" });
  *
  * @param {string} name
  * @param {FindOptions} [options]
  * @returns {string | undefined} The absolute path.
  */
 function find(name, options = {}) {
-  const type = options.type ?? "file";
+  const type = _findType(options.type, "file");
   const ignore = new Set(options.ignore ?? ["node_modules", ".git"]);
   const queue = [_abs(options.cwd)];
   for (let next = 0; next < queue.length; next++) {
@@ -873,17 +1104,17 @@ const _outside = (rel) => rel === ".." || rel.startsWith(`..${nodePath.sep}`) ||
  * belongs to.
  *
  * @example
- * nc.findUp("package.json");                         // the closest one above the working directory
- * nc.findUp(".git", { type: "folder", cwd: __dirname });
- * nc.findUp(["pnpm-lock.yaml", "yarn.lock", "package-lock.json"]);
+ * nc.fs.findUp("package.json");                         // the closest one above the working directory
+ * nc.fs.findUp(".git", { type: "folders", cwd: __dirname });
+ * nc.fs.findUp(["pnpm-lock.yaml", "yarn.lock", "package-lock.json"]);
  *
  * @param {string | string[]} name One name, or several to try in each folder, in this order.
- * @param {{ cwd?: string, type?: "file" | "folder" | "any", stopAt?: string }} [options] Where to start (the working directory by default), what to look for (`"any"` by default), and a folder not to go above: the search ends there, or as soon as it's outside of it.
+ * @param {{ cwd?: string, type?: "files" | "folders" | "all" | "file" | "folder" | "any", stopAt?: string }} [options] Where to start (the working directory by default), what to look for (`"files"`, `"folders"` or `"all"`, which is the default; the singular forms mean the same), and a folder not to go above: the search ends there, or as soon as it's outside of it.
  * @returns {string | undefined} The absolute path.
  */
 function findUp(name, options = {}) {
   const names = Array.isArray(name) ? name : [name];
-  const type = options.type ?? "any";
+  const type = _findType(options.type, "any");
   // resolve() drops a trailing separator; relative() ignores letter case on Windows
   const stopAt = options.stopAt === undefined ? undefined : nodePath.resolve(_abs(options.stopAt));
   // a link, a junction or /var vs /private/var can lead to stopAt another way
@@ -907,222 +1138,14 @@ function findUp(name, options = {}) {
   }
 }
 
-/**
- * Reads a file as text, or as a Buffer with `"buffer"`.
- *
- * @example
- * const text = nc.readFile("./README.md");
- * const bytes = nc.readFile("./logo.png", "buffer");
- *
- * @overload
- * @param {string} path
- * @param {"buffer"} encoding
- * @returns {Buffer | undefined} `undefined` if it can't be read.
- */
-/**
- * Reads a file as text.
- *
- * @overload
- * @param {string} path
- * @param {BufferEncoding} [encoding="utf8"]
- * @returns {string | undefined} `undefined` if it can't be read.
- */
-/**
- * @param {string} path
- * @param {BufferEncoding | "buffer"} [encoding="utf8"]
- * @returns {string | Buffer | undefined}
- */
-function readFile(path, encoding = "utf8") {
-  if (!path) return undefined;
-  try {
-    return encoding === "buffer" ? fs.readFileSync(_abs(path)) : fs.readFileSync(_abs(path), encoding);
-  } catch {
-    // missing, a folder, or unreadable
-    return undefined;
-  }
-}
-
-/**
- * Reads a text file as lines. A final newline doesn't add an empty line.
- *
- * @example
- * for (const url of nc.readLines("./urls.txt") ?? []) await check(url);
- *
- * @param {string} path
- * @returns {string[] | undefined} `undefined` if it can't be read.
- */
-function readLines(path) {
-  const text = readFile(path);
-  if (text === undefined) return undefined;
-  if (text === "") return [];
-  return text.replace(/(\r\n|\r|\n)$/, "").split(/\r\n|\r|\n/);
-}
-
-/**
- * Reads a JSON file. If it's missing or invalid you get `fallback`, never
- * an error.
- *
- * @example
- * const settings = nc.readJSON("./settings.json", { theme: "light" });
- * const tsconfig = nc.readJSON("./tsconfig.json", {}, { comments: true });
- *
- * @template [T=any]
- * @param {string} path
- * @param {T} [fallback]
- * @param {ReadJSONOptions} [options]
- * @returns {T}
- */
-function readJSON(path, fallback, options = {}) {
-  const text = readFile(path);
-  if (text === undefined) return /** @type {T} */ (fallback);
-  try {
-    const clean = text.replace(/^\uFEFF/, "");
-    return JSON.parse(options.comments ? _stripJSONComments(clean) : clean, options.reviver);
-  } catch {
-    return /** @type {T} */ (fallback);
-  }
-}
-
-/**
- * Writes a file atomically, creating its folders. Objects are written as
- * JSON.
- *
- * @example
- * nc.writeFile("./dist/index.html", html);
- * nc.writeFile("./.secrets/token", token, { mode: 0o600 });
- *
- * @param {string} path
- * @param {string | Buffer | Uint8Array | object} data
- * @param {WriteFileOptions} [options]
- * @returns {boolean} `false` if it failed.
- */
-function writeFile(path, data, options = {}) {
-  try {
-    _write(_abs(path), _content(data, options.spaces ?? 2), options);
-    return true;
-  } catch {
-    return false;
-  }
-}
-
-/**
- * Writes a value as JSON, atomically, creating folders.
- *
- * @example
- * nc.writeJSON("./data/users.json", users);
- *
- * @param {string} path
- * @param {unknown} data
- * @param {WriteJSONOptions} [options]
- * @returns {boolean} `false` if it failed, for example on a circular structure.
- */
-function writeJSON(path, data, options = {}) {
-  try {
-    const text = JSON.stringify(data, /** @type {any} */ (options.replacer), options.spaces ?? 2);
-    if (text === undefined) return false;
-    _write(_abs(path), `${text}\n`, { atomic: options.atomic, mode: options.mode, fsync: options.fsync });
-    return true;
-  } catch {
-    return false;
-  }
-}
-
-/**
- * Appends to a file, creating it and its folders if needed.
- *
- * @example
- * nc.appendFile("./logs/audit.log", `${new Date().toISOString()} login ${user}\n`);
- *
- * @param {string} path
- * @param {string | Buffer} data
- * @returns {boolean}
- */
-function appendFile(path, data) {
-  try {
-    const target = _abs(path);
-    const content = Buffer.isBuffer(data) ? data : String(data);
-    try {
-      fs.appendFileSync(target, content);
-    } catch (error) {
-      if (/** @type {NodeJS.ErrnoException} */ (error).code !== "ENOENT") throw error;
-      fs.mkdirSync(nodePath.dirname(target), { recursive: true });
-      fs.appendFileSync(target, content);
-    }
-    return true;
-  } catch {
-    return false;
-  }
-}
-
-/**
- * Creates a file and its folders.
- *
- * @example
- * nc.createFile("./notes.txt", false, "hello");    // only if it doesn't exist
- * nc.createFile("./data.json", true, { ok: true }); // replace it
- *
- * @param {string} path
- * @param {boolean} [force=false] Replace the file if it exists.
- * @param {string | Buffer | object | null} [data] Objects are written as JSON.
- * @returns {boolean | undefined} `false` if it already existed or failed.
- */
-function createFile(path, force = false, data) {
-  if (!path) return undefined;
-  const target = _abs(path);
-  if (!force && fs.existsSync(target)) return false;
-  try {
-    _write(target, _content(data, 2), { atomic: false });
-    return true;
-  } catch {
-    return false;
-  }
-}
-
-/**
- * Creates a folder and its parents.
- *
- * @example
- * nc.createFolder("./uploads");
- * nc.createFolder("./cache", true); // start from an empty folder
- *
- * @param {string} path
- * @param {boolean} [force=false] Delete and recreate it if it exists.
- * @returns {boolean | undefined} `false` if it already existed or failed.
- */
-function createFolder(path, force = false) {
-  if (!path) return undefined;
-  const target = _abs(path);
-  try {
-    if (fs.existsSync(target)) {
-      if (!force) return false;
-      fs.rmSync(target, { recursive: true, force: true });
-    }
-    fs.mkdirSync(target, { recursive: true });
-    return true;
-  } catch {
-    return false;
-  }
-}
-
-/**
- * Makes sure a folder exists and returns its absolute path.
- *
- * @example
- * const dir = nc.ensureFolder("./storage/uploads");
- *
- * @param {string} path
- * @returns {string}
- * @throws {Error} If it can't be created.
- */
-function ensureFolder(path) {
-  const target = _abs(path);
-  fs.mkdirSync(target, { recursive: true });
-  return target;
-}
+// Creating
 
 /**
  * Makes sure a file exists (an empty one if needed) and returns its
- * absolute path. An existing file is left as is.
+ * absolute path. An existing file is left as it is.
+ *
+ * @example
+ * const log = nc.fs.ensureFile("./logs/app.log");
  *
  * @param {string} path
  * @returns {string}
@@ -1138,11 +1161,31 @@ function ensureFile(path) {
 }
 
 /**
+ * Makes sure a folder exists, its parents too, and returns its absolute
+ * path.
+ *
+ * @example
+ * const dir = nc.fs.ensureFolder("./storage/uploads");
+ *
+ * @param {string} path
+ * @returns {string}
+ * @throws {Error} If it can't be created.
+ */
+function ensureFolder(path) {
+  const target = _abs(path);
+  fs.mkdirSync(target, { recursive: true });
+  return target;
+}
+
+/**
  * Updates a file's modification time, creating the file if needed, like
  * the Unix `touch` command.
  *
+ * @example
+ * nc.fs.touch("./.last-run");
+ *
  * @param {string} path
- * @returns {boolean}
+ * @returns {boolean} `false` if it failed.
  */
 function touch(path) {
   try {
@@ -1155,151 +1198,71 @@ function touch(path) {
   }
 }
 
-/**
- * Deletes a folder and everything in it.
- *
- * @param {string} path
- * @returns {boolean | undefined} `undefined` if it doesn't exist.
- */
-function deleteFolder(path) {
-  const target = path ? _existing(path, "folder") : undefined;
-  if (!target) return undefined;
-  try {
-    fs.rmSync(target, { recursive: true, force: true });
-    return true;
-  } catch {
-    return false;
-  }
-}
+// Copying, moving, removing
 
 /**
- * Deletes a file.
- *
- * @param {string} path
- * @returns {boolean | undefined} `undefined` if it doesn't exist.
+ * Is a path missing, empty or only spaces? Resolved, it would be the working
+ * directory: functions that delete, copy or move refuse it.
+ * @param {unknown} path
+ * @returns {boolean}
  */
-function deleteFile(path) {
-  const target = path ? _existing(path, "file") : undefined;
-  if (!target) return undefined;
-  try {
-    fs.unlinkSync(target);
-    return true;
-  } catch {
-    return false;
-  }
-}
+const _blank = (path) => path === undefined || path === null || String(path).trim() === "";
 
 /**
- * Deletes a file or a folder, whichever it is. Nothing happens if the path
- * doesn't exist.
- *
- * @example
- * nc.remove("./dist");
- *
- * @param {string} path
- * @returns {boolean} `true` if something was deleted.
+ * Where `copy()` and `move()` put things. A folder goes to `dest` itself,
+ * as in 2.2. A file goes into `dest` under its own name when `dest` ends
+ * with a separator (`/`, or `\` on Windows) or is an existing folder, like
+ * `copyFile()` did; else to `dest` itself.
+ * @param {string} src Absolute, exists.
+ * @param {string} dest As given.
+ * @returns {string}
  */
-function remove(path) {
-  const target = _existing(path, "any");
-  if (!target) return false;
-  try {
-    fs.rmSync(target, { recursive: true, force: true });
-    return true;
-  } catch {
-    return false;
-  }
-}
-
-/**
- * Deletes the folders inside a folder that pass a test.
- *
- * @example
- * nc.deleteFoldersIn("./packages", (folder) => folder.endsWith("dist"));
- *
- * @param {string} [path] Defaults to the working directory.
- * @param {(folder: string) => boolean} [filter] Gets absolute paths. Defaults to every folder.
- * @returns {number | undefined} How many were deleted.
- */
-function deleteFoldersIn(path, filter = () => true) {
-  const folders = getFoldersIn(path);
-  if (!folders) return undefined;
-  let deleted = 0;
-  for (const folder of folders) {
-    if (!fs.existsSync(folder) || !filter(folder)) continue;
-    fs.rmSync(folder, { recursive: true, force: true });
-    deleted++;
-  }
-  return deleted;
-}
-
-/**
- * Deletes the files inside a folder that pass a test.
- *
- * @example
- * nc.deleteFilesIn("./logs", false, (file) => file.endsWith(".log"));
- *
- * @param {string} [path] Defaults to the working directory.
- * @param {boolean} [recursive=false]
- * @param {(file: string) => boolean} [filter] Gets absolute paths. Defaults to every file.
- * @returns {number | undefined} How many were deleted.
- */
-function deleteFilesIn(path, recursive = false, filter = () => true) {
-  const files = getFilesIn(path, recursive);
-  if (!files) return undefined;
-  let deleted = 0;
-  for (const file of files) {
-    if (!filter(file)) continue;
+const _target = (src, dest) => {
+  const abs = _abs(dest);
+  if (fs.statSync(src).isDirectory()) return abs;
+  let into = process.platform === "win32" ? /[\\/]$/.test(String(dest)) : String(dest).endsWith("/");
+  if (!into) {
     try {
-      fs.unlinkSync(file);
-      deleted++;
+      into = fs.statSync(abs).isDirectory();
     } catch {
-      // keep going
+      // nothing there yet
     }
   }
-  return deleted;
-}
+  return into ? nodePath.join(abs, nodePath.basename(src)) : abs;
+};
 
 /**
- * Deletes everything inside a folder, keeping the folder. A link to a folder
- * (a junction on Windows) is refused: what it points to is left alone.
+ * Copies a file or a whole folder, like `cp -r`.
  *
- * @param {string} path
- * @returns {boolean | undefined} `undefined` if it doesn't exist, `false` if it's a link or something couldn't be deleted.
- */
-function emptyFolder(path) {
-  const target = _existing(path, "folder");
-  if (!target) return undefined;
-  try {
-    if (fs.lstatSync(target).isSymbolicLink()) return false;
-    for (const entry of fs.readdirSync(target)) fs.rmSync(nodePath.join(target, entry), { recursive: true, force: true });
-    return true;
-  } catch {
-    return false;
-  }
-}
-
-/**
- * Copies a file or a whole folder, like `cp -r`. Links inside the folder
- * are copied as links (junctions on Windows), never followed: files outside
- * the folder are never brought along.
+ * A file copied to a folder (an existing one, or a path ending with `/`,
+ * or `\` on Windows) goes inside it, under the same name. A folder is
+ * copied to `dest` itself, merged with what's already there: to put it
+ * inside another folder, write the full path, like
+ * `copy("templates", "dist/templates")`.
+ *
+ * Links inside the folder are copied as links (junctions on Windows), never
+ * followed: files outside the folder are never brought along.
  *
  * @example
- * nc.copy("./templates", "./dist/templates");
- * nc.copy("./.env.example", "./.env", { overwrite: false });
+ * nc.fs.copy("./templates", "./dist/templates");
+ * nc.fs.copy("./logo.png", "./dist/");                  // ./dist/logo.png
+ * nc.fs.copy("./.env.example", "./.env", { overwrite: false });
+ * nc.fs.copy("./src", "./dist", { filter: (source) => !source.endsWith(".test.js") });
  *
- * @param {string} source
- * @param {string} destination
+ * @param {string} source A file or a folder.
+ * @param {string} dest
  * @param {CopyOptions} [options]
- * @returns {boolean} `false` if the source is missing, if the destination is the source or inside it, or if the copy failed.
+ * @returns {boolean} `false` if the source is missing, if `source` or `dest` is empty, if the destination is the source or inside it, or if the copy failed.
  */
-function copy(source, destination, options = {}) {
+function copy(source, dest, options = {}) {
+  if (_blank(source) || _blank(dest)) return false;
   const src = _existing(source, "any");
   if (!src) return false;
   try {
-    const dest = _abs(destination);
-    if (_within(dest, src)) return false;
-    fs.mkdirSync(nodePath.dirname(dest), { recursive: true });
-    _copyTree(src, dest, { force: options.overwrite ?? true, preserveTimestamps: options.preserveTimestamps, filter: options.filter });
+    const target = _target(src, dest);
+    if (_within(target, src)) return false;
+    fs.mkdirSync(nodePath.dirname(target), { recursive: true });
+    _copyTree(src, target, { force: options.overwrite ?? true, preserveTimestamps: options.preserveTimestamps, filter: options.filter });
     return true;
   } catch {
     return false;
@@ -1310,55 +1273,108 @@ function copy(source, destination, options = {}) {
 const _IN_THE_WAY = new Set(["EEXIST", "ENOTEMPTY", "EISDIR", "ENOTDIR"]);
 
 /**
- * Moves or renames a file or folder, across drives too. A destination in the
- * way is put aside first, and put back if the move fails.
+ * Moves what passes `filter`: copies it, then deletes each source whose
+ * copy is there. What's left out, or kept by `overwrite: false`, stays.
+ * Folders emptied this way are removed.
+ * @param {string} src Absolute.
+ * @param {string} dest Absolute.
+ * @param {boolean} overwrite
+ * @param {(source: string, destination: string) => boolean} filter
+ */
+const _moveSome = (src, dest, overwrite, filter) => {
+  /** @type {Array<[source: string, destination: string, folder: boolean]>} */
+  const done = [];
+  _copyTree(src, dest, {
+    force: overwrite,
+    preserveTimestamps: true,
+    filter: (s, d) => {
+      if (!filter(s, d)) return false;
+      const folder = fs.lstatSync(s).isDirectory();
+      // a file kept at the destination by overwrite: false must stay at the source too
+      if (folder || overwrite || !_lexists(d)) done.push([s, d, folder]);
+      return true;
+    },
+  });
+  // children first, so their folders are empty when it's their turn
+  for (const [s, d, folder] of done.reverse()) {
+    if (!folder) {
+      if (_lexists(d)) fs.rmSync(s, { force: true });
+      continue;
+    }
+    try {
+      fs.rmdirSync(s);
+    } catch {
+      // something stayed inside
+    }
+  }
+};
+
+/**
+ * Moves or renames a file or folder, across drives too.
+ *
+ * A file moved to a folder (an existing one, or a path ending with `/`,
+ * or `\` on Windows) goes inside it, under the same name. A folder is
+ * moved to `dest` itself, and replaces what's there: to put it inside
+ * another folder, write the full path, like `move("inbox", "archive/inbox")`.
+ *
+ * A destination in the way is put aside first, and put back if the move
+ * fails.
  *
  * @example
- * nc.move("./report.pdf", "./archive/2024/report.pdf");
+ * nc.fs.move("./report.pdf", "./archive/2024/report.pdf");
+ * nc.fs.move("./report.pdf", "./archive/");            // ./archive/report.pdf
+ * nc.fs.move("./inbox", "./archive/inbox");
+ * nc.fs.move("./inbox", "./done", { filter: (source) => !source.endsWith(".lock") });
  *
- * @param {string} source
- * @param {string} destination
- * @param {{ overwrite?: boolean }} [options] `overwrite` replaces an existing destination. Defaults to `true`.
- * @returns {boolean} `false` if the source is missing, if the destination is inside it, if the source is a link to the destination, or if the move failed.
+ * @param {string} source A file or a folder.
+ * @param {string} dest
+ * @param {MoveOptions} [options]
+ * @returns {boolean} `false` if the source is missing, if `source` or `dest` is empty, if the destination is inside the source, if the source is a link to the destination, or if the move failed.
  */
-function move(source, destination, options = {}) {
+function move(source, dest, options = {}) {
+  if (_blank(source) || _blank(dest)) return false;
   const src = _existing(source, "any");
   if (!src) return false;
-  const dest = _abs(destination);
   try {
+    const target = _target(src, dest);
     // the link would take the place of the file it leads to
-    if (_linkOnto(src, dest)) return false;
-    if (_sameEntry(src, dest)) {
+    if (_linkOnto(src, target)) return false;
+    if (_sameEntry(src, target)) {
       // the same file: only its name can change, like its letter case on Windows
-      fs.renameSync(src, dest);
+      fs.renameSync(src, target);
       return true;
     }
-    if (_within(dest, src)) return false;
-    if (options.overwrite === false && _lexists(dest)) return false;
-    fs.mkdirSync(nodePath.dirname(dest), { recursive: true });
+    if (_within(target, src)) return false;
+    if (typeof options.filter === "function") {
+      fs.mkdirSync(nodePath.dirname(target), { recursive: true });
+      _moveSome(src, target, options.overwrite ?? true, options.filter);
+      return true;
+    }
+    if (options.overwrite === false && _lexists(target)) return false;
+    fs.mkdirSync(nodePath.dirname(target), { recursive: true });
     let crossDevice = false;
     try {
       // A rename replaces a file in one step: the destination is never missing, not even for an instant.
-      fs.renameSync(src, dest);
+      fs.renameSync(src, target);
       return true;
     } catch (error) {
       const code = /** @type {NodeJS.ErrnoException} */ (error).code ?? "";
       crossDevice = code === "EXDEV";
       // Windows says EPERM or EACCES for a folder in the way
       const inTheWay = _IN_THE_WAY.has(code) || (process.platform === "win32" && (code === "EPERM" || code === "EACCES"));
-      if (!crossDevice && !(inTheWay && _lexists(dest))) throw error;
+      if (!crossDevice && !(inTheWay && _lexists(target))) throw error;
     }
     // Put what's in the way aside, and back if the move fails.
-    const backup = _lexists(dest) ? `${dest}.${require("node:crypto").randomBytes(6).toString("hex")}.bak` : undefined;
-    if (backup) _rename(dest, backup);
+    const backup = _lexists(target) ? `${target}.${require("node:crypto").randomBytes(6).toString("hex")}.bak` : undefined;
+    if (backup) _rename(target, backup);
     try {
       // another drive: copy, and delete the source once the copy is complete
-      if (crossDevice) _copyTree(src, dest);
-      else _rename(src, dest);
+      if (crossDevice) _copyTree(src, target);
+      else _rename(src, target);
     } catch (error) {
       // a half-made copy is ours to remove, nothing else is
-      if (crossDevice) fs.rmSync(dest, { recursive: true, force: true });
-      if (backup) _rename(backup, dest);
+      if (crossDevice) fs.rmSync(target, { recursive: true, force: true });
+      if (backup) _rename(backup, target);
       throw error;
     }
     if (backup) {
@@ -1376,361 +1392,91 @@ function move(source, destination, options = {}) {
 }
 
 /**
- * Copies the folders inside a folder into another one. `copy()` is simpler
- * for most cases.
- *
- * @param {CopyFoldersOptions} options
- * @returns {number | undefined} How many were copied: `0` when `dest` is the source folder or inside it.
+ * Deletes what passes `filter` inside a folder, at any depth. Links are
+ * deleted or kept, never followed.
+ * @param {string} dir
+ * @param {(path: string) => boolean} filter
  */
-function copyFoldersIn(options) {
-  const root = _existing(options.path, "folder");
-  if (!root || !options.dest) return undefined;
-  const dest = _abs(options.dest);
-  if (_within(dest, root)) return 0;
-  const recursive = options.recursive ?? true;
-  const filter = typeof options.filter === "function" ? options.filter : () => true;
-  let copied = 0;
-  for (const folder of getFoldersIn(root, recursive) ?? []) {
-    if (!filter(folder)) continue;
-    const target = nodePath.join(dest, nodePath.relative(root, folder));
-    if (options.force && fs.existsSync(target)) fs.rmSync(target, { recursive: true, force: true });
-    fs.mkdirSync(target, { recursive: true });
-    copied++;
-    if (options.withFiles) {
-      for (const file of getFilesIn(folder, false) ?? []) fs.copyFileSync(file, nodePath.join(target, nodePath.basename(file)));
-    }
+const _removeIn = (dir, filter) => {
+  for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
+    const full = nodePath.join(dir, entry.name);
+    if (filter(full)) fs.rmSync(full, { recursive: true, force: true });
+    else if (entry.isDirectory()) _removeIn(full, filter);
   }
-  return copied;
-}
-
-/**
- * Copies a folder. Without `recursive` or `withFiles`, only the empty
- * folder is created; `copy()` copies everything in one call.
- *
- * @param {CopyFolderOptions} options
- * @returns {boolean | undefined} `false` when `dest` is the source folder or inside it.
- */
-function copyFolder(options) {
-  const root = _existing(options.path, "folder");
-  if (!root || !options.dest) return undefined;
-  const dest = _abs(options.dest);
-  if (_within(dest, root)) return false;
-  try {
-    if (options.force && fs.existsSync(dest)) fs.rmSync(dest, { recursive: true, force: true });
-    fs.mkdirSync(dest, { recursive: true });
-    const folders = options.recursive ? [root, ...(getFoldersIn(root, true) ?? [])] : [root];
-    for (const folder of folders) {
-      const target = nodePath.join(dest, nodePath.relative(root, folder));
-      fs.mkdirSync(target, { recursive: true });
-      if (options.withFiles) {
-        for (const file of getFilesIn(folder, false) ?? []) fs.copyFileSync(file, nodePath.join(target, nodePath.basename(file)));
-      }
-    }
-    return true;
-  } catch {
-    return false;
-  }
-}
-
-/**
- * Copies the files inside a folder into another one, keeping the tree.
- *
- * @example
- * nc.copyFilesIn({ path: "./src", dest: "./dist", filter: (file) => file.endsWith(".css") });
- *
- * @param {CopyFilesOptions} options
- * @returns {number | undefined} How many were copied: `0` when `dest` is the source folder, or inside it with `recursive`.
- */
-function copyFilesIn(options) {
-  const root = _existing(options.path, "folder");
-  if (!root || !options.dest) return undefined;
-  const dest = _abs(options.dest);
-  const recursive = options.recursive ?? true;
-  if (_filesInItself(root, dest, recursive)) return 0;
-  const filter = typeof options.filter === "function" ? options.filter : () => true;
-  let copied = 0;
-  for (const file of getFilesIn(root, recursive) ?? []) {
-    if (!filter(file)) continue;
-    const target = nodePath.join(dest, recursive ? nodePath.relative(root, file) : nodePath.basename(file));
-    if (options.force && fs.existsSync(target)) fs.rmSync(target, { force: true });
-    fs.mkdirSync(nodePath.dirname(target), { recursive: true });
-    fs.copyFileSync(file, target);
-    copied++;
-  }
-  return copied;
-}
-
-/**
- * Where a file goes: into `dest` under its own name if `dest` ends with `/`
- * or is a folder, else `dest` itself.
- * @param {string} src
- * @param {string} dest
- * @returns {string}
- */
-const _fileDest = (src, dest) => {
-  const abs = _abs(dest);
-  let intoFolder = /[\\/]$/.test(dest);
-  if (!intoFolder) {
-    try {
-      intoFolder = fs.statSync(abs).isDirectory();
-    } catch {
-      // nothing there yet
-    }
-  }
-  return intoFolder ? nodePath.join(abs, nodePath.basename(src)) : abs;
 };
 
 /**
- * Copies one file. If `dest` ends with `/`, the file keeps its name inside
- * that folder.
+ * Deletes a file or a folder, whichever it is. With `contents`, a folder
+ * is emptied and kept; with `filter`, only what passes it is deleted. A
+ * link to a folder (a junction on Windows) is never emptied: what it points
+ * to is left alone.
  *
  * @example
- * nc.copyFile({ path: "./src/index.js", dest: "./dist/" });
+ * nc.fs.remove("./dist");
+ * nc.fs.remove("./cache", { contents: true });         // ./cache stays, empty
+ * nc.fs.remove("./logs", { filter: (file) => file.endsWith(".log") });
  *
- * @param {CopyFileOptions} options
- * @returns {boolean | undefined} `false` when `dest` is the file itself.
+ * @param {string} path An empty path is refused, never taken as the working directory: write `"."` for that.
+ * @param {RemoveOptions} [options]
+ * @returns {boolean} `true` if it was done, `false` if the path is empty or doesn't exist (or isn't a folder, with `contents` or `filter`), if it's a link to a folder with `contents` or `filter`, or if something couldn't be deleted.
  */
-function copyFile(options) {
-  const src = _existing(options.path, "file");
-  if (!src || !options.dest) return undefined;
-  const dest = _fileDest(src, options.dest);
-  // with force, the copy would delete its own source
-  if (_sameEntry(src, dest)) return false;
-  try {
-    if (options.force && fs.existsSync(dest)) fs.rmSync(dest, { force: true });
-    fs.mkdirSync(nodePath.dirname(dest), { recursive: true });
-    fs.copyFileSync(src, dest);
-    return true;
-  } catch {
-    return false;
-  }
-}
-
-/**
- * Moves the folders inside a folder.
- *
- * @param {CopyFoldersOptions} options
- * @returns {number | undefined} How many were moved: `0` when `dest` is the source folder or inside it.
- */
-function moveFoldersIn(options) {
-  const root = _existing(options.path, "folder");
-  // the folders are deleted after the copy: they must not hold it
-  if (root && options.dest && _within(_abs(options.dest), root)) return 0;
-  const copied = copyFoldersIn(options);
-  if (copied === undefined || !root) return copied;
-  const filter = typeof options.filter === "function" ? options.filter : () => true;
-  for (const folder of getFoldersIn(root, options.recursive ?? true) ?? []) {
-    if (fs.existsSync(folder) && filter(folder)) fs.rmSync(folder, { recursive: true, force: true });
-  }
-  return copied;
-}
-
-/**
- * Moves a folder.
- *
- * @param {CopyFolderOptions & { path: string }} options
- * @returns {boolean | undefined} `false` when `dest` is the source folder or inside it.
- */
-function moveFolder(options) {
-  const root = _existing(options.path, "folder");
-  const copied = copyFolder(options);
-  if (copied && root) fs.rmSync(root, { recursive: true, force: true });
-  return copied;
-}
-
-/**
- * Moves the files inside a folder. A file that can't be copied stays where
- * it is, and isn't counted.
- *
- * @param {CopyFilesOptions} options
- * @returns {number | undefined} How many were moved: `0` when `dest` is the source folder, or inside it with `recursive`.
- */
-function moveFilesIn(options) {
-  const root = _existing(options.path, "folder");
-  if (!root || !options.dest) return undefined;
-  const dest = _abs(options.dest);
-  const recursive = options.recursive ?? true;
-  // the files are deleted after the copy: they must not be the copy
-  if (_filesInItself(root, dest, recursive)) return 0;
-  const filter = typeof options.filter === "function" ? options.filter : () => true;
-  let moved = 0;
-  for (const file of getFilesIn(root, recursive) ?? []) {
-    if (!filter(file)) continue;
-    const target = nodePath.join(dest, recursive ? nodePath.relative(root, file) : nodePath.basename(file));
+function remove(path, options = {}) {
+  if (_blank(path)) return false;
+  const filter = typeof options.filter === "function" ? options.filter : undefined;
+  if (!options.contents && !filter) {
+    const target = _existing(path, "any");
+    if (!target) return false;
     try {
-      if (options.force && fs.existsSync(target)) fs.rmSync(target, { force: true });
-      fs.mkdirSync(nodePath.dirname(target), { recursive: true });
-      fs.copyFileSync(file, target);
-    } catch {
-      // not copied: the source stays where it is
-      continue;
-    }
-    try {
-      fs.rmSync(file, { force: true });
-      moved++;
-    } catch {
-      // copied but still there: not moved
-    }
-  }
-  return moved;
-}
-
-/**
- * Moves one file.
- *
- * @example
- * nc.moveFile({ path: "./logs/app.log", dest: "./logs/archive/" });
- *
- * @param {CopyFileOptions} options
- * @returns {boolean | undefined} `false` when `dest` is the file itself under the same name, or when the file is a link to `dest`.
- */
-function moveFile(options) {
-  const src = _existing(options.path, "file");
-  if (!src || !options.dest) return undefined;
-  const dest = _fileDest(src, options.dest);
-  // the link would take the place of the file it leads to
-  if (_linkOnto(src, dest)) return false;
-  if (_sameEntry(src, dest)) {
-    // the same file: only its name can change, like its letter case on Windows
-    if (nodePath.basename(src) === nodePath.basename(dest)) return false;
-    try {
-      fs.renameSync(src, dest);
+      fs.rmSync(target, { recursive: true, force: true });
       return true;
     } catch {
       return false;
     }
   }
-  const moved = copyFile(options);
-  if (moved) fs.rmSync(src, { force: true });
-  return moved;
+  const target = _existing(path, "folder");
+  if (!target) return false;
+  try {
+    if (fs.lstatSync(target).isSymbolicLink()) return false;
+    if (filter) _removeIn(target, filter);
+    else for (const entry of fs.readdirSync(target)) fs.rmSync(nodePath.join(target, entry), { recursive: true, force: true });
+    return true;
+  } catch {
+    return false;
+  }
 }
 
-/**
- * Does a file or folder exist at this path?
- *
- * @param {string} path
- * @returns {boolean}
- */
-function exists(path) {
-  return path ? fs.existsSync(_abs(path)) : false;
-}
+// Others
 
 /**
- * Is it an existing file?
- *
- * @param {string} path
- * @returns {boolean}
- */
-function isFile(path) {
-  return _existing(path, "file") !== undefined;
-}
-
-/**
- * Is it an existing folder?
- *
- * @param {string} path
- * @returns {boolean}
- */
-function isFolder(path) {
-  return _existing(path, "folder") !== undefined;
-}
-
-/**
- * Size, dates and type of a path.
+ * The absolute version of a path, whether it exists or not, resolved the
+ * way every function of `nc.fs` does it: `./` and `../` start from the
+ * file that calls it, anything else relative starts from the working
+ * directory, and an absolute path stays as it is. Unlike Node's
+ * `path.resolve()`, `./` doesn't depend on where the script is run from.
  *
  * @example
- * nc.stat("./video.mp4")?.mtime;
+ * nc.fs.resolve("./config/app.json"); // next to the calling file
+ * nc.fs.resolve("logs/app.log");      // from the working directory
+ * nc.fs.resolve();                    // the working directory
  *
- * @param {string} path
- * @returns {fs.Stats | undefined} `undefined` if it doesn't exist.
+ * @param {string} [path] Defaults to the working directory.
+ * @returns {string}
  */
-function stat(path) {
-  try {
-    return fs.statSync(_abs(path));
-  } catch {
-    return undefined;
-  }
-}
-
-/**
- * A file's size in bytes.
- *
- * @example
- * nc.num.formatBytes(nc.fileSize("./backup.zip") ?? 0); // "1.2 GB"
- *
- * @param {string} path
- * @returns {number | undefined} `undefined` if it doesn't exist.
- */
-function fileSize(path) {
-  if (!path) return undefined;
-  try {
-    const stats = fs.statSync(_abs(path));
-    return stats.isFile() ? stats.size : undefined;
-  } catch {
-    return undefined;
-  }
-}
-
-/**
- * The total size of every file in a folder.
- *
- * @param {string} path
- * @returns {number | undefined} `undefined` if it doesn't exist.
- */
-function folderSize(path) {
-  const root = _existing(path, "folder");
-  if (!root) return undefined;
-  let total = 0;
-  for (const file of _walk(root, "file", { recursive: true, hidden: true, ignore: [] })) {
-    try {
-      total += fs.lstatSync(file).size;
-    } catch {
-      // file removed in the meantime
-    }
-  }
-  return total;
-}
-
-/**
- * Hashes a file in chunks, so huge files are fine.
- *
- * @example
- * nc.hashFile("./release.zip");                     // sha256, hex
- * nc.hashFile("./release.zip", { algorithm: "md5" });
- *
- * @param {string} path
- * @param {{ algorithm?: string, encoding?: "hex" | "base64" | "base64url" }} [options] The algorithm and how the hash is written. Defaults to sha256 in hex.
- * @returns {string | undefined} `undefined` if it can't be read.
- */
-function hashFile(path, options = {}) {
-  const target = _existing(path, "file");
-  if (!target) return undefined;
-  let fd;
-  try {
-    const hash = require("node:crypto").createHash(options.algorithm ?? "sha256");
-    fd = fs.openSync(target, "r");
-    const buffer = Buffer.allocUnsafe(1 << 20);
-    let read;
-    while ((read = fs.readSync(fd, buffer, 0, buffer.length, null)) > 0) hash.update(buffer.subarray(0, read));
-    return hash.digest(options.encoding ?? "hex");
-  } catch {
-    return undefined;
-  } finally {
-    if (fd !== undefined) fs.closeSync(fd);
-  }
+function resolve(path) {
+  return _abs(path);
 }
 
 /**
  * Creates a new, unique folder in the system's temp directory.
  *
  * @example
- * const dir = nc.tempFolder("export-");
- * try { await exportTo(dir); } finally { nc.remove(dir); }
+ * const dir = nc.fs.temp("export-");
+ * try { await exportTo(dir); } finally { nc.fs.remove(dir); }
  *
  * @param {string} [prefix="nc-"]
- * @returns {string}
+ * @returns {string} Its absolute path.
  */
-function tempFolder(prefix = "nc-") {
+function temp(prefix = "nc-") {
   return fs.mkdtempSync(nodePath.join(os.tmpdir(), prefix));
 }
 
@@ -1754,8 +1500,8 @@ const _trimEnd = (text, chars) => {
  * `COM¹` are prefixed, and the length is capped.
  *
  * @example
- * nc.sanitizeFilename('Report: Q1/Q2 "final"?.pdf'); // "Report_ Q1_Q2 _final__.pdf"
- * nc.sanitizeFilename("CON.txt");                    // "_CON.txt"
+ * nc.fs.sanitizeFilename('Report: Q1/Q2 "final"?.pdf'); // "Report_ Q1_Q2 _final__.pdf"
+ * nc.fs.sanitizeFilename("CON.txt");                    // "_CON.txt"
  *
  * @param {string} name
  * @param {{ replacement?: string }} [options] `replacement` takes the place of each character that is removed. Defaults to `"_"`.
@@ -1791,15 +1537,34 @@ function sanitizeFilename(name, options = {}) {
  * Watches a file or folder for changes.
  *
  * @example
- * const watcher = nc.watch({ path: "./src", recursive: true, debounce: 100 })
- *   .on("change", (file) => nc.info(`Changed: ${file}`))
- *   .on("rename", (file) => nc.info(`Added or removed: ${file}`));
+ * const watcher = nc.fs.watch("./src", { recursive: true, debounce: 100 })
+ *   .on("change", (file) => nc.logger.info(`Changed: ${file}`))
+ *   .on("rename", (file) => nc.logger.info(`Added or removed: ${file}`));
  * watcher.stop();
  *
+ * @overload
+ * @param {string} path What to watch.
+ * @param {Omit<WatchOptions, "path">} [options]
+ * @returns {Watcher | undefined} `undefined` if the path doesn't exist.
+ */
+/**
+ * Watches a file or folder for changes, the path given in the options.
+ *
+ * @example
+ * const watcher = nc.fs.watch({ path: "./src", recursive: true });
+ *
+ * @overload
  * @param {WatchOptions} [options]
  * @returns {Watcher | undefined} `undefined` if the path doesn't exist.
  */
-function watch(options = {}) {
+/**
+ * @param {string | WatchOptions} [pathOrOptions]
+ * @param {Omit<WatchOptions, "path">} [moreOptions]
+ * @returns {Watcher | undefined}
+ */
+function watch(pathOrOptions, moreOptions) {
+  /** @type {WatchOptions} */
+  const options = typeof pathOrOptions === "string" ? { ...moreOptions, path: pathOrOptions } : (pathOrOptions ?? {});
   const target = _existing(options.path, "any");
   if (!target) return undefined;
   let paused = false;
@@ -1862,6 +1627,12 @@ function watch(options = {}) {
       (listeners[event] ??= []).push(callback);
       return controller;
     },
+    off(event, callback) {
+      const list = listeners[event];
+      const at = list ? list.indexOf(callback) : -1;
+      if (at !== -1) list.splice(at, 1);
+      return controller;
+    },
     stop() {
       for (const timer of pending.values()) clearTimeout(timer);
       pending.clear();
@@ -1870,6 +1641,7 @@ function watch(options = {}) {
       } catch {
         // already closed
       }
+      return controller;
     },
     pause() {
       paused = true;
@@ -1886,35 +1658,691 @@ function watch(options = {}) {
   return controller;
 }
 
+// Deprecated in 3.0, removed in 4.0. Each one keeps its 2.2 behaviour.
+
+/**
+ * Reads an environment variable. For typed and checked values, see `nc.env`.
+ *
+ * @deprecated Use nc.env.get() instead.
+ *
+ * @example
+ * nc.getEnv("REGION", "eu-west-1");
+ *
+ * @param {string} name
+ * @param {string} [fallback]
+ * @returns {string | undefined}
+ */
+function getEnv(name, fallback) {
+  return process.env[name] ?? fallback;
+}
+
+/**
+ * The absolute version of a path, whether it exists or not.
+ *
+ * @deprecated Use nc.fs.resolve() instead.
+ *
+ * @example
+ * nc.createPath("./config/app.json"); // next to the calling file
+ * nc.createPath("logs/app.log");      // from the working directory
+ *
+ * @param {string} [path] Defaults to the working directory.
+ * @returns {string}
+ */
+function createPath(path) {
+  return _abs(path);
+}
+
+/**
+ * The absolute path of a folder, or `undefined` if it doesn't exist.
+ *
+ * @deprecated Use `nc.fs.isFolder(path) ? nc.fs.resolve(path) : undefined` instead.
+ *
+ * @example
+ * if (!nc.getFolder("./uploads")) nc.createFolder("./uploads");
+ *
+ * @param {string} [path] Defaults to the working directory.
+ * @returns {string | undefined}
+ */
+function getFolder(path) {
+  return _existing(path, "folder");
+}
+
+/**
+ * The absolute path of a file, or `undefined` if it doesn't exist.
+ *
+ * @deprecated Use `nc.fs.isFile(path) ? nc.fs.resolve(path) : undefined` instead.
+ *
+ * @param {string} path
+ * @returns {string | undefined}
+ */
+function getFile(path) {
+  return path ? _existing(path, "file") : undefined;
+}
+
+/**
+ * The folders inside a folder, nested ones included by default.
+ * `node_modules` is skipped.
+ *
+ * @deprecated Use nc.fs.list() instead, with `{ type: "folders" }`.
+ *
+ * @example
+ * nc.getFoldersIn("./src");        // everything
+ * nc.getFoldersIn("./src", false); // direct children only
+ *
+ * @param {string} [path] Defaults to the working directory.
+ * @param {boolean | Omit<ListOptions, "type" | "dot" | "filter">} [recursive=true]
+ * @returns {string[] | undefined} Absolute paths, or `undefined` if the folder doesn't exist.
+ */
+function getFoldersIn(path, recursive = true) {
+  const root = _existing(path, "folder");
+  return root ? _walk(root, "folder", _listOptions(recursive, true)) : undefined;
+}
+
+/**
+ * The files inside a folder, nested ones included by default.
+ * `node_modules` is skipped.
+ *
+ * @deprecated Use nc.fs.list() instead.
+ *
+ * @example
+ * nc.getFilesIn("./src").filter((file) => file.endsWith(".js"));
+ *
+ * @param {string} [path] Defaults to the working directory.
+ * @param {boolean | Omit<ListOptions, "type" | "dot" | "filter">} [recursive=true]
+ * @returns {string[] | undefined} Absolute paths, or `undefined` if the folder doesn't exist.
+ */
+function getFilesIn(path, recursive = true) {
+  const root = _existing(path, "folder");
+  return root ? _walk(root, "file", _listOptions(recursive, true)) : undefined;
+}
+
+/**
+ * Reads a file as text, or as a Buffer with `"buffer"`.
+ *
+ * @deprecated Use nc.fs.read() instead.
+ *
+ * @overload
+ * @param {string} path
+ * @param {"buffer"} encoding
+ * @returns {Buffer | undefined} `undefined` if it can't be read.
+ */
+/**
+ * Reads a file as text.
+ *
+ * @deprecated Use nc.fs.read() instead.
+ *
+ * @overload
+ * @param {string} path
+ * @param {BufferEncoding} [encoding="utf8"]
+ * @returns {string | undefined} `undefined` if it can't be read.
+ */
+/**
+ * @param {string} path
+ * @param {BufferEncoding | "buffer"} [encoding="utf8"]
+ * @returns {string | Buffer | undefined}
+ */
+function readFile(path, encoding = "utf8") {
+  return read(path, /** @type {BufferEncoding} */ (encoding));
+}
+
+/**
+ * Writes a file atomically, creating its folders. Objects are written as
+ * JSON.
+ *
+ * @deprecated Use nc.fs.write() instead.
+ *
+ * @param {string} path
+ * @param {string | Buffer | Uint8Array | object} data
+ * @param {WriteFileOptions} [options]
+ * @returns {boolean} `false` if it failed.
+ */
+function writeFile(path, data, options = {}) {
+  return write(path, data, options);
+}
+
+/**
+ * Appends to a file, creating it and its folders if needed.
+ *
+ * @deprecated Use nc.fs.append() instead.
+ *
+ * @param {string} path
+ * @param {string | Buffer} data
+ * @returns {boolean}
+ */
+function appendFile(path, data) {
+  return append(path, data);
+}
+
+/**
+ * Creates a file and its folders.
+ *
+ * @deprecated Use nc.fs.ensureFile() instead, or nc.fs.write() to give it content. `ensureFile()` throws when it can't create the file, where this one returned `false`, and leaves an existing file as it is.
+ *
+ * @example
+ * nc.createFile("./notes.txt", false, "hello");    // only if it doesn't exist
+ * nc.createFile("./data.json", true, { ok: true }); // replace it
+ *
+ * @param {string} path
+ * @param {boolean} [force=false] Replace the file if it exists.
+ * @param {string | Buffer | object | null} [data] Objects are written as JSON.
+ * @returns {boolean | undefined} `false` if it already existed or failed.
+ */
+function createFile(path, force = false, data) {
+  if (!path) return undefined;
+  const target = _abs(path);
+  if (!force && fs.existsSync(target)) return false;
+  try {
+    _write(target, _content(data, 2), { atomic: false });
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Creates a folder and its parents.
+ *
+ * @deprecated Use nc.fs.ensureFolder() instead. It throws when it can't create the folder, where this one returned `false`, and returns the absolute path.
+ *
+ * @example
+ * nc.createFolder("./uploads");
+ * nc.createFolder("./cache", true); // start from an empty folder
+ *
+ * @param {string} path
+ * @param {boolean} [force=false] Delete and recreate it if it exists.
+ * @returns {boolean | undefined} `false` if it already existed or failed.
+ */
+function createFolder(path, force = false) {
+  if (!path) return undefined;
+  const target = _abs(path);
+  try {
+    if (fs.existsSync(target)) {
+      if (!force) return false;
+      fs.rmSync(target, { recursive: true, force: true });
+    }
+    fs.mkdirSync(target, { recursive: true });
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Deletes a folder and everything in it.
+ *
+ * @deprecated Use nc.fs.remove() instead.
+ *
+ * @param {string} path
+ * @returns {boolean | undefined} `undefined` if it doesn't exist.
+ */
+function deleteFolder(path) {
+  const target = _blank(path) ? undefined : _existing(path, "folder");
+  if (!target) return undefined;
+  try {
+    fs.rmSync(target, { recursive: true, force: true });
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Deletes a file.
+ *
+ * @deprecated Use nc.fs.remove() instead.
+ *
+ * @param {string} path
+ * @returns {boolean | undefined} `undefined` if it doesn't exist.
+ */
+function deleteFile(path) {
+  const target = _blank(path) ? undefined : _existing(path, "file");
+  if (!target) return undefined;
+  try {
+    fs.unlinkSync(target);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Deletes the folders inside a folder that pass a test.
+ *
+ * @deprecated Use nc.fs.remove() instead, with a `filter`.
+ *
+ * @example
+ * nc.deleteFoldersIn("./packages", (folder) => folder.endsWith("dist"));
+ *
+ * @param {string} path Since 3.0, an empty one is refused (nothing is done) instead of meaning the working directory.
+ * @param {(folder: string) => boolean} [filter] Gets absolute paths. Defaults to every folder.
+ * @returns {number | undefined} How many were deleted.
+ */
+function deleteFoldersIn(path, filter = () => true) {
+  if (_blank(path)) return undefined;
+  const folders = getFoldersIn(path);
+  if (!folders) return undefined;
+  let deleted = 0;
+  for (const folder of folders) {
+    if (!fs.existsSync(folder) || !filter(folder)) continue;
+    fs.rmSync(folder, { recursive: true, force: true });
+    deleted++;
+  }
+  return deleted;
+}
+
+/**
+ * Deletes the files inside a folder that pass a test.
+ *
+ * @deprecated Use nc.fs.remove() instead, with a `filter`.
+ *
+ * @example
+ * nc.deleteFilesIn("./logs", false, (file) => file.endsWith(".log"));
+ *
+ * @param {string} path Since 3.0, an empty one is refused (nothing is done) instead of meaning the working directory.
+ * @param {boolean} [recursive=false]
+ * @param {(file: string) => boolean} [filter] Gets absolute paths. Defaults to every file.
+ * @returns {number | undefined} How many were deleted.
+ */
+function deleteFilesIn(path, recursive = false, filter = () => true) {
+  if (_blank(path)) return undefined;
+  const files = getFilesIn(path, recursive);
+  if (!files) return undefined;
+  let deleted = 0;
+  for (const file of files) {
+    if (!filter(file)) continue;
+    try {
+      fs.unlinkSync(file);
+      deleted++;
+    } catch {
+      // keep going
+    }
+  }
+  return deleted;
+}
+
+/**
+ * Deletes everything inside a folder, keeping the folder. A link to a folder
+ * (a junction on Windows) is refused: what it points to is left alone.
+ *
+ * @deprecated Use nc.fs.remove() instead, with `{ contents: true }`.
+ *
+ * @param {string} path
+ * @returns {boolean | undefined} `undefined` if it doesn't exist, `false` if it's a link or something couldn't be deleted.
+ */
+function emptyFolder(path) {
+  if (_blank(path)) return undefined;
+  const target = _existing(path, "folder");
+  if (!target) return undefined;
+  try {
+    if (fs.lstatSync(target).isSymbolicLink()) return false;
+    for (const entry of fs.readdirSync(target)) fs.rmSync(nodePath.join(target, entry), { recursive: true, force: true });
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Copies the folders inside a folder into another one.
+ *
+ * @deprecated Use nc.fs.copy() instead.
+ *
+ * @param {CopyFoldersOptions} options
+ * @returns {number | undefined} How many were copied: `0` when `dest` is the source folder or inside it.
+ */
+function copyFoldersIn(options) {
+  if (_blank(options.path) || _blank(options.dest)) return undefined;
+  const root = _existing(options.path, "folder");
+  if (!root || !options.dest) return undefined;
+  const dest = _abs(options.dest);
+  if (_within(dest, root)) return 0;
+  const recursive = options.recursive ?? true;
+  const filter = typeof options.filter === "function" ? options.filter : () => true;
+  let copied = 0;
+  for (const folder of getFoldersIn(root, recursive) ?? []) {
+    if (!filter(folder)) continue;
+    const target = nodePath.join(dest, nodePath.relative(root, folder));
+    if (options.force && fs.existsSync(target)) fs.rmSync(target, { recursive: true, force: true });
+    fs.mkdirSync(target, { recursive: true });
+    copied++;
+    if (options.withFiles) {
+      for (const file of getFilesIn(folder, false) ?? []) fs.copyFileSync(file, nodePath.join(target, nodePath.basename(file)));
+    }
+  }
+  return copied;
+}
+
+/**
+ * Copies a folder. Without `recursive` or `withFiles`, only the empty
+ * folder is created.
+ *
+ * @deprecated Use nc.fs.copy() instead.
+ *
+ * @param {CopyFolderOptions} options
+ * @returns {boolean | undefined} `false` when `dest` is the source folder or inside it.
+ */
+function copyFolder(options) {
+  if (_blank(options.path) || _blank(options.dest)) return undefined;
+  const root = _existing(options.path, "folder");
+  if (!root || !options.dest) return undefined;
+  const dest = _abs(options.dest);
+  if (_within(dest, root)) return false;
+  try {
+    if (options.force && fs.existsSync(dest)) fs.rmSync(dest, { recursive: true, force: true });
+    fs.mkdirSync(dest, { recursive: true });
+    const folders = options.recursive ? [root, ...(getFoldersIn(root, true) ?? [])] : [root];
+    for (const folder of folders) {
+      const target = nodePath.join(dest, nodePath.relative(root, folder));
+      fs.mkdirSync(target, { recursive: true });
+      if (options.withFiles) {
+        for (const file of getFilesIn(folder, false) ?? []) fs.copyFileSync(file, nodePath.join(target, nodePath.basename(file)));
+      }
+    }
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Copies the files inside a folder into another one, keeping the tree.
+ *
+ * @deprecated Use nc.fs.copy() instead.
+ *
+ * @example
+ * nc.copyFilesIn({ path: "./src", dest: "./dist", filter: (file) => file.endsWith(".css") });
+ *
+ * @param {CopyFilesOptions} options
+ * @returns {number | undefined} How many were copied: `0` when `dest` is the source folder, or inside it with `recursive`.
+ */
+function copyFilesIn(options) {
+  if (_blank(options.path) || _blank(options.dest)) return undefined;
+  const root = _existing(options.path, "folder");
+  if (!root || !options.dest) return undefined;
+  const dest = _abs(options.dest);
+  const recursive = options.recursive ?? true;
+  if (_filesInItself(root, dest, recursive)) return 0;
+  const filter = typeof options.filter === "function" ? options.filter : () => true;
+  let copied = 0;
+  for (const file of getFilesIn(root, recursive) ?? []) {
+    if (!filter(file)) continue;
+    const target = nodePath.join(dest, recursive ? nodePath.relative(root, file) : nodePath.basename(file));
+    if (options.force && fs.existsSync(target)) fs.rmSync(target, { force: true });
+    fs.mkdirSync(nodePath.dirname(target), { recursive: true });
+    fs.copyFileSync(file, target);
+    copied++;
+  }
+  return copied;
+}
+
+/**
+ * Where a file goes: into `dest` under its own name if `dest` ends with `/`
+ * or is a folder, else `dest` itself.
+ * @param {string} src
+ * @param {string} dest
+ * @returns {string}
+ */
+const _fileDest = (src, dest) => {
+  const abs = _abs(dest);
+  let intoFolder = /[\\/]$/.test(dest);
+  if (!intoFolder) {
+    try {
+      intoFolder = fs.statSync(abs).isDirectory();
+    } catch {
+      // nothing there yet
+    }
+  }
+  return intoFolder ? nodePath.join(abs, nodePath.basename(src)) : abs;
+};
+
+/**
+ * Copies one file. If `dest` ends with `/` or is a folder, the file keeps
+ * its name inside that folder.
+ *
+ * @deprecated Use nc.fs.copy() instead.
+ *
+ * @example
+ * nc.copyFile({ path: "./src/index.js", dest: "./dist/" });
+ *
+ * @param {CopyFileOptions} options
+ * @returns {boolean | undefined} `false` when `dest` is the file itself.
+ */
+function copyFile(options) {
+  if (_blank(options.path) || _blank(options.dest)) return undefined;
+  const src = _existing(options.path, "file");
+  if (!src || !options.dest) return undefined;
+  const dest = _fileDest(src, options.dest);
+  // with force, the copy would delete its own source
+  if (_sameEntry(src, dest)) return false;
+  try {
+    if (options.force && fs.existsSync(dest)) fs.rmSync(dest, { force: true });
+    fs.mkdirSync(nodePath.dirname(dest), { recursive: true });
+    fs.copyFileSync(src, dest);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Moves the folders inside a folder.
+ *
+ * @deprecated Use nc.fs.move() instead.
+ *
+ * @param {CopyFoldersOptions} options
+ * @returns {number | undefined} How many were moved: `0` when `dest` is the source folder or inside it.
+ */
+function moveFoldersIn(options) {
+  if (_blank(options.path) || _blank(options.dest)) return undefined;
+  const root = _existing(options.path, "folder");
+  // the folders are deleted after the copy: they must not hold it
+  if (root && options.dest && _within(_abs(options.dest), root)) return 0;
+  const copied = copyFoldersIn(options);
+  if (copied === undefined || !root) return copied;
+  const filter = typeof options.filter === "function" ? options.filter : () => true;
+  for (const folder of getFoldersIn(root, options.recursive ?? true) ?? []) {
+    if (fs.existsSync(folder) && filter(folder)) fs.rmSync(folder, { recursive: true, force: true });
+  }
+  return copied;
+}
+
+/**
+ * Moves a folder.
+ *
+ * @deprecated Use nc.fs.move() instead.
+ *
+ * @param {CopyFolderOptions & { path: string }} options
+ * @returns {boolean | undefined} `false` when `dest` is the source folder or inside it.
+ */
+function moveFolder(options) {
+  if (_blank(options.path) || _blank(options.dest)) return undefined;
+  const root = _existing(options.path, "folder");
+  const copied = copyFolder(options);
+  if (copied && root) fs.rmSync(root, { recursive: true, force: true });
+  return copied;
+}
+
+/**
+ * Moves the files inside a folder. A file that can't be copied stays where
+ * it is, and isn't counted.
+ *
+ * @deprecated Use nc.fs.move() instead.
+ *
+ * @param {CopyFilesOptions} options
+ * @returns {number | undefined} How many were moved: `0` when `dest` is the source folder, or inside it with `recursive`.
+ */
+function moveFilesIn(options) {
+  if (_blank(options.path) || _blank(options.dest)) return undefined;
+  const root = _existing(options.path, "folder");
+  if (!root || !options.dest) return undefined;
+  const dest = _abs(options.dest);
+  const recursive = options.recursive ?? true;
+  // the files are deleted after the copy: they must not be the copy
+  if (_filesInItself(root, dest, recursive)) return 0;
+  const filter = typeof options.filter === "function" ? options.filter : () => true;
+  let moved = 0;
+  for (const file of getFilesIn(root, recursive) ?? []) {
+    if (!filter(file)) continue;
+    const target = nodePath.join(dest, recursive ? nodePath.relative(root, file) : nodePath.basename(file));
+    try {
+      if (options.force && fs.existsSync(target)) fs.rmSync(target, { force: true });
+      fs.mkdirSync(nodePath.dirname(target), { recursive: true });
+      fs.copyFileSync(file, target);
+    } catch {
+      // not copied: the source stays where it is
+      continue;
+    }
+    try {
+      fs.rmSync(file, { force: true });
+      moved++;
+    } catch {
+      // copied but still there: not moved
+    }
+  }
+  return moved;
+}
+
+/**
+ * Moves one file. If `dest` ends with `/` or is a folder, the file keeps
+ * its name inside that folder.
+ *
+ * @deprecated Use nc.fs.move() instead.
+ *
+ * @example
+ * nc.moveFile({ path: "./logs/app.log", dest: "./logs/archive/" });
+ *
+ * @param {CopyFileOptions} options
+ * @returns {boolean | undefined} `false` when `dest` is the file itself under the same name, or when the file is a link to `dest`.
+ */
+function moveFile(options) {
+  if (_blank(options.path) || _blank(options.dest)) return undefined;
+  const src = _existing(options.path, "file");
+  if (!src || !options.dest) return undefined;
+  const dest = _fileDest(src, options.dest);
+  // the link would take the place of the file it leads to
+  if (_linkOnto(src, dest)) return false;
+  if (_sameEntry(src, dest)) {
+    // the same file: only its name can change, like its letter case on Windows
+    if (nodePath.basename(src) === nodePath.basename(dest)) return false;
+    try {
+      fs.renameSync(src, dest);
+      return true;
+    } catch {
+      return false;
+    }
+  }
+  const moved = copyFile(options);
+  if (moved) fs.rmSync(src, { force: true });
+  return moved;
+}
+
+/**
+ * A file's size in bytes.
+ *
+ * @deprecated Use nc.fs.size() instead.
+ *
+ * @param {string} path
+ * @returns {number | undefined} `undefined` if it doesn't exist or isn't a file.
+ */
+function fileSize(path) {
+  if (!path) return undefined;
+  try {
+    const stats = fs.statSync(_abs(path));
+    return stats.isFile() ? stats.size : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+/**
+ * The total size of every file in a folder.
+ *
+ * @deprecated Use nc.fs.size() instead.
+ *
+ * @param {string} path
+ * @returns {number | undefined} `undefined` if it doesn't exist or isn't a folder.
+ */
+function folderSize(path) {
+  const root = _existing(path, "folder");
+  return root ? _folderSize(root) : undefined;
+}
+
+/**
+ * Hashes a file in chunks, so huge files are fine.
+ *
+ * @deprecated Use nc.fs.hash() instead.
+ *
+ * @param {string} path
+ * @param {{ algorithm?: string, encoding?: "hex" | "base64" | "base64url" }} [options] The algorithm and how the hash is written. Defaults to sha256 in hex.
+ * @returns {string | undefined} `undefined` if it can't be read.
+ */
+function hashFile(path, options = {}) {
+  return hash(path, options);
+}
+
+/**
+ * Creates a new, unique folder in the system's temp directory.
+ *
+ * @deprecated Use nc.fs.temp() instead.
+ *
+ * @param {string} [prefix="nc-"]
+ * @returns {string}
+ */
+function tempFolder(prefix = "nc-") {
+  return temp(prefix);
+}
+
 module.exports = {
+  // reading
+  read,
+  readJSON,
+  readLines,
+  // writing
+  write,
+  writeJSON,
+  append,
+  // checking
+  exists,
+  isFile,
+  isFolder,
+  stat,
+  size,
+  hash,
+  // listing and searching
+  list,
+  glob,
+  find,
+  findUp,
+  // creating
+  ensureFile,
+  ensureFolder,
+  touch,
+  // copying, moving, removing
+  copy,
+  move,
+  remove,
+  // others
+  resolve,
+  temp,
+  sanitizeFilename,
+  watch,
+  // deprecated: hidden from listings, they warn once when read (see below)
   getEnv,
   createPath,
   getFolder,
   getFile,
   getFoldersIn,
   getFilesIn,
-  glob,
-  find,
-  findUp,
   readFile,
-  readLines,
-  readJSON,
   writeFile,
-  writeJSON,
   appendFile,
   createFile,
   createFolder,
-  ensureFolder,
-  ensureFile,
-  touch,
   deleteFolder,
   deleteFile,
-  remove,
   deleteFoldersIn,
   deleteFilesIn,
   emptyFolder,
-  copy,
-  move,
   copyFoldersIn,
   copyFolder,
   copyFilesIn,
@@ -1923,14 +2351,42 @@ module.exports = {
   moveFolder,
   moveFilesIn,
   moveFile,
-  exists,
-  isFile,
-  isFolder,
-  stat,
   fileSize,
   folderSize,
   hashFile,
   tempFolder,
-  sanitizeFilename,
-  watch,
 };
+
+/** Each deprecated name, and what to use instead. */
+const DEPRECATED = {
+  getEnv: "nc.env.get()",
+  createPath: "nc.fs.resolve()",
+  getFolder: "nc.fs.isFolder(p) ? nc.fs.resolve(p) : undefined",
+  getFile: "nc.fs.isFile(p) ? nc.fs.resolve(p) : undefined",
+  getFoldersIn: "nc.fs.list()",
+  getFilesIn: "nc.fs.list()",
+  readFile: "nc.fs.read()",
+  writeFile: "nc.fs.write()",
+  appendFile: "nc.fs.append()",
+  createFile: "nc.fs.ensureFile() or nc.fs.write()",
+  createFolder: "nc.fs.ensureFolder()",
+  deleteFolder: "nc.fs.remove()",
+  deleteFile: "nc.fs.remove()",
+  deleteFoldersIn: "nc.fs.remove()",
+  deleteFilesIn: "nc.fs.remove()",
+  emptyFolder: "nc.fs.remove()",
+  copyFoldersIn: "nc.fs.copy()",
+  copyFolder: "nc.fs.copy()",
+  copyFilesIn: "nc.fs.copy()",
+  copyFile: "nc.fs.copy()",
+  moveFoldersIn: "nc.fs.move()",
+  moveFolder: "nc.fs.move()",
+  moveFilesIn: "nc.fs.move()",
+  moveFile: "nc.fs.move()",
+  fileSize: "nc.fs.size()",
+  folderSize: "nc.fs.size()",
+  hashFile: "nc.fs.hash()",
+  tempFolder: "nc.fs.temp()",
+};
+
+deprecate(module.exports, "nc.fs", Object.fromEntries(Object.entries(DEPRECATED).map(([name, use]) => [name, { use }])));

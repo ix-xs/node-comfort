@@ -177,8 +177,8 @@ describe("schema: coercion and helpers", () => {
   it("instanceOf, custom, any, unknown, is", () => {
     assert.equal(s.instanceOf(URL).is(new URL("https://x.io")), true);
     assert.deepEqual(issues(s.instanceOf(URL), "https://x.io"), ["(root): Expected an instance of URL"]);
-    assert.equal(s.custom(nc.isHexColor, "Expected a hex color").is("#fff"), true);
-    assert.deepEqual(issues(s.custom(nc.isHexColor, "Expected a hex color"), "red"), ["(root): Expected a hex color"]);
+    assert.equal(s.custom(nc.is.hexColor, "Expected a hex color").is("#fff"), true);
+    assert.deepEqual(issues(s.custom(nc.is.hexColor, "Expected a hex color"), "red"), ["(root): Expected a hex color"]);
     assert.equal(s.any().parse(Symbol.for("x")), Symbol.for("x"));
     assert.equal(s.unknown().is(undefined), true);
   });

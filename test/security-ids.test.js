@@ -53,7 +53,7 @@ describe("security: ids in a new process", () => {
       const child = processPart();
       assert.notEqual(child, parent, "objectId draws new process bytes");
       assert.equal(processPart(), child);
-      assert.ok(nc.isUUID(id.uuidv7(), { version: 7 }));
+      assert.ok(nc.is.uuid(id.uuidv7(), { version: 7 }));
       assert.match(id.ulid(), /^[0-9A-HJKMNP-TV-Z]{26}$/);
     });
     const ids = Array.from({ length: 50 }, () => id.uuidv7());

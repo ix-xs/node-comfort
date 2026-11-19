@@ -2,7 +2,8 @@
 
 /**
  * Processes and the system: run commands and get their output, find
- * executables, shut down cleanly, open URLs, and learn about the machine.
+ * executables, shut down cleanly, keep running after an uncaught error,
+ * open URLs, and learn about the machine.
  * Behaves the same on Windows, macOS and Linux; on Windows,
  * `run("npm", [...])` finds `npm.cmd` and escapes arguments safely.
  *
@@ -17,7 +18,7 @@
 const fs = require("node:fs");
 const os = require("node:os");
 const nodePath = require("node:path");
-const { ProcessError, AbortError } = require("./errors.js");
+const { ProcessError, AbortError, NodeComfortError } = require("./errors.js");
 const { toMs, disposable } = require("./internal/shared.js");
 
 // Loaded on first use: most programs never start another one.
@@ -37,13 +38,29 @@ const _comspec = () => {
 };
 
 /**
+ * Events you can customize on `dontCrash()`.
+ * @typedef {"error" | "exit" | "sig" | "beforeExit"} DontCrashEvent
+ */
+
+/**
+ * Returned by `dontCrash()`. With `using`, what it installed goes at the end of the block.
+ * @typedef {_DontCrashMethods & Disposable} DontCrashController
+ */
+
+/**
+ * @typedef {object} _DontCrashMethods
+ * @property {<E extends DontCrashEvent>(event: E, handler?: E extends "error" ? (error: unknown) => void : E extends "sig" ? (signal: NodeJS.Signals) => void : (code: number) => void) => DontCrashController} on Replaces the handler for an event. Call it without a handler to restore the default one.
+ * @property {() => void} dispose Removes everything `dontCrash()` installed.
+ */
+
+/**
  * Options for `run()` and `exec()`.
  * @typedef {object} RunOptions
  * @property {string} [cwd] Where to run the command.
  * @property {Record<string, string | undefined>} [env] Extra environment variables, added to `process.env`. `undefined` removes one.
  * @property {boolean} [extendEnv] Set to `false` to pass only `env`, without `process.env`. Without `env`, the command then gets an empty environment.
  * @property {string | Buffer} [input] Written to the command's stdin.
- * @property {number | string} [timeout] Kill the command after this long, like `"30s"`. On Windows, what it started is stopped with it.
+ * @property {number | string | false} [timeout] Kill the command after this long, like `"30s"`. On Windows, what it started is stopped with it. `false` or `Infinity` means no limit, the default.
  * @property {AbortSignal} [signal] Kills the command when aborted. On Windows, what it started is stopped with it.
  * @property {"pipe" | "inherit"} [stdio] `"inherit"` shows the output live instead of capturing it. Defaults to `"pipe"`.
  * @property {(line: string) => void} [onStdout] Called for each line of stdout.
@@ -210,7 +227,7 @@ const _spawn = (file, args, shell, display, options) =>
     const started = Date.now();
     const inherit = options.stdio === "inherit";
     const prepared = shell ? { file, args, verbatim: false } : _prepare(file, args, options.cwd, display);
-    const timeoutMs = options.timeout === undefined ? undefined : toMs(options.timeout, "timeout");
+    const timeoutMs = options.timeout === undefined || options.timeout === false ? undefined : toMs(options.timeout, "timeout");
     if (options.signal?.aborted) return reject(new AbortError(`Command aborted: ${display}`, { cause: options.signal.reason }));
 
     const child = _cp().spawn(prepared.file, prepared.args, {
@@ -427,7 +444,7 @@ const _openPath = (target, options) => {
   try {
     fs.statSync(full);
   } catch (error) {
-    throw new Error(`open(): no file or folder at ${full}`, { cause: error });
+    throw new NodeComfortError(`open(): no file or folder at ${full}`, { code: "ERR_NOT_FOUND", cause: error });
   }
   return full;
 };
@@ -447,7 +464,7 @@ const _openPath = (target, options) => {
  * @param {OpenOptions} [options]
  * @returns {boolean} `true` if the opener started.
  * @throws {TypeError} If the URL's scheme isn't allowed, the target holds a control character (or a double quote, on Windows), or it's a network path without `allowUNC`.
- * @throws {Error} If the path doesn't exist.
+ * @throws {NodeComfortError} With the code `ERR_NOT_FOUND`, if the path doesn't exist.
  */
 function open(target, options = {}) {
   if (typeof target !== "string" || !target) throw new TypeError("open(): expected a URL or a path");
@@ -602,7 +619,7 @@ function isLinux() {
  * Azure, Vercel, Netlify and more.
  *
  * @example
- * if (sys.isCI()) nc.setLevel("warn");
+ * if (sys.isCI()) nc.logger.setLevel("warn");
  *
  * @returns {boolean}
  */
@@ -746,6 +763,98 @@ function memory() {
   return { rss: usage.rss, heapTotal: usage.heapTotal, heapUsed: usage.heapUsed, external: usage.external, arrayBuffers: usage.arrayBuffers };
 }
 
+/**
+ * Keeps the process alive when something goes wrong. Uncaught exceptions and
+ * unhandled rejections are logged instead of crashing, and `SIGINT`/`SIGTERM`
+ * are logged before a clean exit. Customize any of it with `.on()`.
+ *
+ * Only its own handlers are ever removed; listeners added by your code or by
+ * other libraries are left alone.
+ *
+ * @example
+ * nc.sys.dontCrash()
+ *   .on("error", (error) => sentry.captureException(error))
+ *   .on("sig", async () => {
+ *     await server.close();
+ *     process.exit(0);
+ *   });
+ *
+ * @returns {DontCrashController}
+ */
+function dontCrash() {
+  _dontCrashDispose?.();
+  const logger = require("./Logger.js");
+  /** @type {Array<[string, (...args: any[]) => void]>} */
+  let installed = [];
+
+  const defaults = {
+    error: (/** @type {unknown} */ error) => logger.error("[@ix-xs/node-comfort] Uncaught error:", error),
+    exit: (/** @type {number} */ code) => logger.log(`<% gray [@ix-xs/node-comfort] Process exit with code ${code} %>`),
+    sig: (/** @type {NodeJS.Signals} */ signal) => {
+      logger.warn(`[@ix-xs/node-comfort] Received ${signal}, exiting`);
+      process.exit(0);
+    },
+    beforeExit: () => {},
+  };
+
+  /**
+   * @param {string} event
+   * @param {(...args: any[]) => void} handler
+   */
+  const listen = (event, handler) => {
+    try {
+      process.on(/** @type {any} */ (event), handler);
+      installed.push([event, handler]);
+    } catch {
+      // Signal not supported on this platform (for example SIGQUIT on Windows).
+    }
+  };
+  /** @param {string[]} events */
+  const unlisten = (events) => {
+    installed = installed.filter(([event, handler]) => {
+      if (!events.includes(event)) return true;
+      process.off(/** @type {any} */ (event), handler);
+      return false;
+    });
+  };
+
+  /** @type {DontCrashController} */
+  const controller = {
+    on(event, handler) {
+      if (event === "error") {
+        unlisten(["uncaughtException", "unhandledRejection"]);
+        const fn = /** @type {(error: unknown) => void} */ (handler ?? defaults.error);
+        listen("uncaughtException", fn);
+        listen("unhandledRejection", fn);
+      } else if (event === "exit") {
+        unlisten(["exit"]);
+        listen("exit", /** @type {(code: number) => void} */ (handler ?? defaults.exit));
+      } else if (event === "sig") {
+        const signals = ["SIGINT", "SIGTERM", "SIGQUIT"];
+        unlisten(signals);
+        for (const signal of signals) listen(signal, /** @type {(signal: NodeJS.Signals) => void} */ (handler ?? defaults.sig));
+      } else if (event === "beforeExit") {
+        unlisten(["beforeExit"]);
+        listen("beforeExit", /** @type {(code: number) => void} */ (handler ?? defaults.beforeExit));
+      }
+      return controller;
+    },
+    dispose() {
+      unlisten(installed.map(([event]) => event));
+      if (_dontCrashDispose === controller.dispose) _dontCrashDispose = undefined;
+    },
+    [Symbol.dispose]() {
+      controller.dispose();
+    },
+  };
+  _dontCrashDispose = controller.dispose;
+  controller.on("error").on("exit").on("sig");
+  return controller;
+}
+
+/** @type {(() => void) | undefined} */
+let _dontCrashDispose;
+
 module.exports = {
   run,
   exec,
@@ -763,4 +872,5 @@ module.exports = {
   isWSL,
   info,
   memory,
+  dontCrash,
 };

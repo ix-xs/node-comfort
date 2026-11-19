@@ -79,8 +79,8 @@ describe("env: typed getters", () => {
     assert.equal(env.string("S", opt), "hello");
     assert.equal(env.number("N", opt), 42);
     assert.equal(env.number("F", opt), 3.5);
-    assert.equal(env.bool("B", opt), true);
-    assert.equal(env.bool("B2", opt), false);
+    assert.equal(env.boolean("B", opt), true);
+    assert.equal(env.boolean("B2", opt), false);
     assert.equal(env.port("P", opt), 8080);
     assert.equal(env.url("U", opt), "https://api.example.com");
     assert.equal(env.duration("D", opt), 300_000);
@@ -97,7 +97,7 @@ describe("env: typed getters", () => {
     assert.throws(() => env.number("BAD", opt), /must be a number/);
     assert.throws(() => env.number("N", { ...opt, max: 10 }), /must be <= 10/);
     assert.throws(() => env.number("F", { ...opt, integer: true }), /integer/);
-    assert.throws(() => env.bool("BAD", opt), /boolean/);
+    assert.throws(() => env.boolean("BAD", opt), /boolean/);
     assert.throws(() => env.port("BAD", opt), /port/);
     assert.throws(() => env.url("BAD", opt), /valid URL/);
     assert.throws(() => env.url("U", { ...opt, protocols: ["postgres"] }), /protocols/);

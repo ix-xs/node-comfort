@@ -4,7 +4,8 @@ const { describe, it } = require("node:test");
 const assert = require("node:assert/strict");
 const nc = require("..");
 
-const { Cache, Emitter } = nc;
+const { Cache } = nc.cache;
+const { Emitter } = nc.emitter;
 
 describe("Cache", () => {
   it("get, set, has, delete, peek", () => {
@@ -36,19 +37,19 @@ describe("Cache", () => {
     cache.set("forever", 2, { ttl: 0 });
     assert.ok(cache.ttl("a") <= 30);
     assert.equal(cache.ttl("forever"), Infinity);
-    await nc.wait(50);
+    await nc.async.sleep(50);
     assert.equal(cache.get("a"), undefined);
     assert.equal(cache.get("forever"), 2);
     assert.equal(cache.stats.expirations, 1);
     const sliding = new Cache({ ttl: "400ms", updateAgeOnGet: true });
     sliding.set("k", 1);
-    await nc.wait(250);
+    await nc.async.sleep(250);
     assert.equal(sliding.get("k"), 1);
-    await nc.wait(250);
+    await nc.async.sleep(250);
     assert.equal(sliding.get("k"), 1, "reading restarted the ttl");
     const pruned = new Cache({ ttl: 5 });
     pruned.set("x", 1).set("y", 2);
-    await nc.wait(20);
+    await nc.async.sleep(20);
     assert.equal(pruned.prune(), 2);
   });
 
@@ -57,7 +58,7 @@ describe("Cache", () => {
     let loads = 0;
     const loader = async () => {
       loads++;
-      await nc.wait(10);
+      await nc.async.sleep(10);
       return "value";
     };
     const results = await Promise.all([cache.getOrSet("k", loader), cache.getOrSet("k", loader), cache.getOrSet("k", loader)]);
@@ -114,7 +115,7 @@ describe("Emitter", () => {
     const hooks = new Emitter();
     const order = [];
     hooks.on("save", async (record) => {
-      await nc.wait(10);
+      await nc.async.sleep(10);
       order.push(`first ${record}`);
       return 1;
     });
