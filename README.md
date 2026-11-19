@@ -82,6 +82,8 @@ Node.js 22.23.4, 24.22.1, 26.12.1 or a later version of these lines. Older versi
 | [`async`](https://ix-xs.github.io/node-comfort/flow/async/) | Concurrency limits, queues, mutex, polling, retry with backoff, timeouts | `p-limit`, `p-map`, `p-queue`, `p-retry` |
 | [`cache`](https://ix-xs.github.io/node-comfort/flow/cache/) | LRU cache with TTL, loaders and statistics | `lru-cache` |
 | [`emitter`](https://ix-xs.github.io/node-comfort/flow/emitter/) | Typed events, `waitFor`, async iteration | `mitt`, `emittery` |
+| [`quota`](https://ix-xs.github.io/node-comfort/flow/quota/) | Hits allowed per user, IP or key in a fixed window | `rate-limiter-flexible` |
+| [`circuit`](https://ix-xs.github.io/node-comfort/flow/circuit/) | Circuit breaker: fail fast while a service is down | `opossum` |
 | [`id`](https://ix-xs.github.io/node-comfort/data/id/) | UUID v4, v5 and v7, ULID, nanoid, ObjectId, tokens, Snowflakes | `uuid`, `ulid`, `nanoid` |
 | [`crypto`](https://ix-xs.github.io/node-comfort/system/crypto/) | Passwords, encryption, JWT, TOTP two-factor codes | `bcrypt`, `jsonwebtoken`, `otplib` |
 | [`cli`](https://ix-xs.github.io/node-comfort/system/cli/) | Typed arguments and subcommands, prompts, menus, spinners, progress bars, tables, trees | `commander`, `inquirer`, `ora` |

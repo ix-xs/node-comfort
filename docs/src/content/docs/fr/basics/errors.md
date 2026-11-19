@@ -29,6 +29,7 @@ try {
 | `JWTError` | `ERR_JWT_MALFORMED`, `ERR_JWT_ALGORITHM`, `ERR_JWT_SIGNATURE`, `ERR_JWT_EXPIRED`, `ERR_JWT_NOT_BEFORE`, `ERR_JWT_CLAIM` | `crypto.decodeJWT`, `crypto.verifyJWT` | `expiredAt` |
 | `ProcessError` | `ERR_PROCESS`, `ETIMEDOUT` | `sys.run`, `sys.exec` | `command`, `exitCode`, `signal`, `stdout`, `stderr`, `timedOut` |
 | `SQLiteError` | `ERR_SQLITE` | `sqlite` | `sql`, `sqliteCode` |
+| `CircuitOpenError` | `ERR_CIRCUIT_OPEN` | `execute()` d'un disjoncteur de `circuit.create()`, tant qu'il est ouvert | |
 
 Chaque classe étend `NodeComfortError`, qui étend `Error` : `error instanceof nc.errors.NodeComfortError` attrape toute la famille. `instanceof` fonctionne aussi entre deux copies du paquet dans `node_modules`. `AbortError` s'appelle `"AbortError"`, comme l'erreur native.
 
@@ -50,6 +51,7 @@ Chaque classe étend `NodeComfortError`, qui étend `Error` : `error instanceof 
 | `ERR_NOT_FOUND` | `nc.sys.open()` a reçu un chemin qui n'existe pas |
 | `ERR_DECRYPT` | Le secret est faux, ou le texte n'a pas été produit par `nc.crypto.encrypt()` |
 | `ERR_ARGON2_UNAVAILABLE` | Argon2id demande Node.js 24.7 ou plus |
+| `ERR_CIRCUIT_OPEN` | Le disjoncteur est ouvert : l'appel a été refusé sans s'exécuter. Voir [Disjoncteur](/flow/circuit/) |
 
 ```js
 try {

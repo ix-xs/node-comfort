@@ -1,0 +1,20 @@
+{
+  "A quota per key: at most `limit` hits per `window` for each user, IP or guild, counted in a fixed window that starts at the key's first hit. `consume()` answers at once whether a hit is allowed: nothing waits. Not to be confused with `async.rateLimit()`, which spaces calls out by making them wait, or `async.limit()`, which caps how many run at once.": "Un quota par clé : au plus `limit` passages par `window` pour chaque utilisateur, IP ou serveur, comptés dans une fenêtre fixe qui commence au premier passage de la clé. `consume()` répond tout de suite si un passage est autorisé : rien n'attend. À ne pas confondre avec `async.rateLimit()`, qui espace les appels en les faisant attendre, ni avec `async.limit()`, qui plafonne le nombre d'appels simultanés.",
+  "Creates a quota. Same as `new nc.quota.Quota(options)`.": "Crée un quota. Équivaut à `new nc.quota.Quota(options)`.",
+  "Counts hits per key in a fixed window. Not to be confused with `async.rateLimit()`, which spaces calls out, or `async.limit()`, which caps how many run at once: a quota only says yes or no.": "Compte les passages par clé dans une fenêtre fixe. À ne pas confondre avec `async.rateLimit()`, qui espace les appels, ni avec `async.limit()`, qui plafonne le nombre d'appels simultanés : un quota dit seulement oui ou non.",
+  "If `limit` is not a number of 0 or more, or `window` not a duration longer than 0.": "Si `limit` n'est pas un nombre supérieur ou égal à 0, ou `window` pas une durée supérieure à 0.",
+  "How much this hit uses up. `0` reads the state without using anything.": "Ce que consomme ce passage. `0` lit l'état sans rien consommer.",
+  "If `cost` is not a number of 0 or more.": "Si `cost` n'est pas un nombre supérieur ou égal à 0.",
+  "Records a hit for `key` and says whether it fits in the quota. A refused hit is not counted, so a key that keeps trying is let in again as soon as its window ends.": "Enregistre un passage pour `key` et dit s'il tient dans le quota. Un passage refusé n'est pas compté : une clé qui insiste repasse donc dès la fin de sa fenêtre.",
+  "`true` if the key had a window.": "`true` si la clé avait une fenêtre.",
+  "Forgets a key: its next hit starts a new window.": "Oublie une clé : son prochain passage ouvre une nouvelle fenêtre.",
+  "How many keys have a window, finished ones not dropped yet included.": "Nombre de clés qui ont une fenêtre, y compris les fenêtres terminées pas encore retirées.",
+  "A key that can hold a quota: a user id, an IP address, a guild id...": "Une clé qui peut avoir un quota : un identifiant d'utilisateur, une adresse IP, un identifiant de serveur...",
+  "Options for `nc.quota.create()`.": "Options de `nc.quota.create()`.",
+  "How many hits each key may make per window.": "Nombre de passages autorisés pour chaque clé par fenêtre.",
+  "The length of a window, in ms or like `\"1m\"`. A key's window starts at its first hit.": "La durée d'une fenêtre, en ms ou comme `\"1m\"`. La fenêtre d'une clé commence à son premier passage.",
+  "What `consume()` answers.": "Ce que répond `consume()`.",
+  "Whether this hit fits in the quota. A refused hit is not counted.": "Si ce passage tient dans le quota. Un passage refusé n'est pas compté.",
+  "Hits left in the current window.": "Passages restants dans la fenêtre en cours.",
+  "Milliseconds until the window ends and the key starts again from zero.": "Millisecondes avant la fin de la fenêtre, quand la clé repart de zéro."
+}

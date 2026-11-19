@@ -38,7 +38,7 @@ import { get, set } from "@ix-xs/node-comfort/obj";
 | Point d'entrée | Exporte |
 | --- | --- |
 | `config`, `logger`, `fs`, `env`, `is`, `assert`, `errors`, `json`, `str`, `num`, `arr`, `obj`, `schema`, `time`, `id`, `crypto`, `func`, `async`, `http`, `sys`, `cli`, `color` | Le namespace, comme `nc.<namespace>` |
-| `cache`, `emitter`, `sqlite` | La classe, avec sa fabrique en méthode statique : `Cache.create()`, `Emitter.create()`, `SQLite.open()` et `SQLite.op` |
+| `cache`, `emitter`, `quota`, `circuit`, `sqlite` | La classe, avec sa fabrique en méthode statique : `Cache.create()`, `Emitter.create()`, `Quota.create()`, `Circuit.create()`, `SQLite.open()` et `SQLite.op` |
 | `checker`, `utils` | Les namespaces de la 2.x, dépréciés |
 
 ```js
@@ -46,7 +46,7 @@ const SQLite = require("@ix-xs/node-comfort/sqlite");
 const db = SQLite.open(":memory:");
 ```
 
-En modules ES, ces trois-là s'importent par défaut (`import SQLite from "@ix-xs/node-comfort/sqlite"`) : un import nommé de `open` ou de `op` échoue. Importer la racine depuis un module ES charge tous les namespaces, un point d'entrée ne charge que le sien : voir [Performances](/help/performance/).
+En modules ES, ces cinq-là s'importent par défaut (`import SQLite from "@ix-xs/node-comfort/sqlite"`) : un import nommé de `open` ou de `op` échoue. Importer la racine depuis un module ES charge tous les namespaces, un point d'entrée ne charge que le sien : voir [Performances](/help/performance/).
 
 ## Types
 

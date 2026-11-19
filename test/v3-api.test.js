@@ -14,7 +14,7 @@ const nc = require("..");
 const { peek, aliasesOf, message, code } = require("../src/internal/deprecate.js");
 
 const ROOT = path.join(__dirname, "..");
-const NAMESPACES = ["config", "logger", "fs", "env", "is", "assert", "errors", "json", "str", "num", "arr", "obj", "schema", "time", "id", "crypto", "func", "async", "cache", "emitter", "sqlite", "http", "sys", "cli", "color"];
+const NAMESPACES = ["config", "logger", "fs", "env", "is", "assert", "errors", "json", "str", "num", "arr", "obj", "schema", "time", "id", "crypto", "func", "async", "cache", "emitter", "quota", "circuit", "sqlite", "http", "sys", "cli", "color"];
 
 /**
  * Runs `fn` and returns the warnings it emitted.

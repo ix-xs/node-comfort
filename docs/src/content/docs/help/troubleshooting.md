@@ -64,7 +64,7 @@ A command-line tool that receives a path typed by the user should resolve it fro
 SyntaxError: Named export 'open' not found. The requested module '@ix-xs/node-comfort/sqlite' is a CommonJS module
 ```
 
-`@ix-xs/node-comfort/sqlite`, `/cache` and `/emitter` export a class: import it by default (`import SQLite from "@ix-xs/node-comfort/sqlite"`), or take the namespace from the root (`import { sqlite } from "@ix-xs/node-comfort"`). See [Your editor](/start/editor/).
+`@ix-xs/node-comfort/sqlite`, `/cache`, `/emitter`, `/quota` and `/circuit` export a class: import it by default (`import SQLite from "@ix-xs/node-comfort/sqlite"`), or take the namespace from the root (`import { sqlite } from "@ix-xs/node-comfort"`). See [Your editor](/start/editor/).
 
 ## No colors, or escape codes in a file
 

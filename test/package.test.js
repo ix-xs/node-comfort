@@ -106,9 +106,9 @@ describe("package entry point", () => {
   it("every namespace has an official subpath, in CommonJS and ES modules", async () => {
     const pkg = require("../package.json");
     const subpaths = Object.keys(pkg.exports).filter((key) => key !== "." && key !== "./package.json");
-    // checker and utils are kept for 2.2 code; cache, emitter and sqlite still give the class, as in 2.2
+    // checker and utils are kept for 2.2 code; cache, emitter and sqlite still give the class, as in 2.2, and so do quota and circuit
     assert.deepEqual(subpaths.map((s) => s.slice(2)).sort(), [...Object.keys(nc), "checker", "utils"].sort());
-    const classes = { cache: "Cache", emitter: "Emitter", sqlite: "SQLite" };
+    const classes = { cache: "Cache", emitter: "Emitter", quota: "Quota", circuit: "Circuit", sqlite: "SQLite" };
     for (const subpath of subpaths) {
       const name = subpath.slice(2);
       const expected = Object.hasOwn(classes, name) ? nc[name][classes[name]] : peek(nc, name);

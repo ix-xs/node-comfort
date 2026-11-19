@@ -16,7 +16,7 @@ const FORMAT = ts.TypeFormatFlags.NoTruncation | ts.TypeFormatFlags.UseAliasDefi
  * How class instances are named in examples and headings. These classes are
  * big enough for each of their members to get a page of its own.
  */
-const INSTANCE = /** @type {Record<string, string>} */ ({ SQLite: "db", Cache: "cache", Emitter: "events" });
+const INSTANCE = /** @type {Record<string, string>} */ ({ SQLite: "db", Cache: "cache", Emitter: "events", Quota: "quota", Circuit: "circuit" });
 
 /**
  * @typedef {{ name: string, type: string, optional: boolean, description: string }} Field

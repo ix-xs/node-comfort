@@ -400,7 +400,30 @@ class SQLiteError extends NodeComfortError {
   }
 }
 
-const _classes = [NodeComfortError, AssertionError, TimeoutError, AbortError, ValidationError, HttpError, JWTError, ProcessError, SQLiteError];
+/**
+ * Thrown by `execute()` of a circuit from `nc.circuit.create()` while the
+ * circuit is open: the call was rejected without running. Its code is
+ * `ERR_CIRCUIT_OPEN`.
+ *
+ * @example
+ * try {
+ *   await payments.execute(() => api.charge(card, amount));
+ * } catch (error) {
+ *   if (error instanceof nc.errors.CircuitOpenError) return "Payments are down, try again later";
+ *   throw error;
+ * }
+ */
+class CircuitOpenError extends NodeComfortError {
+  /**
+   * @param {string} [message="The circuit is open: the call was rejected"]
+   * @param {NodeComfortErrorOptions} [options]
+   */
+  constructor(message = "The circuit is open: the call was rejected", options = {}) {
+    super(message, { ...options, code: options.code ?? "ERR_CIRCUIT_OPEN" });
+  }
+}
+
+const _classes = [NodeComfortError, AssertionError, TimeoutError, AbortError, ValidationError, HttpError, JWTError, ProcessError, SQLiteError, CircuitOpenError];
 for (const Class of _classes) {
   Object.defineProperty(Class.prototype, Symbol.for(`@ix-xs/node-comfort/${Class.name}`), { value: true });
 }
@@ -415,4 +438,5 @@ module.exports = {
   JWTError,
   ProcessError,
   SQLiteError,
+  CircuitOpenError,
 };

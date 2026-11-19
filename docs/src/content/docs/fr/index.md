@@ -47,7 +47,7 @@ Tout s'appelle `nc.<namespace>.<membre>` : [Organisation](/basics/organisation/)
 | Configuration | [`config`](/start/configuration/) : langue et fuseau horaire partagés par `num`, `time`, `str.plural` et le logger |
 | Essentiels | [`logger`](/essentials/logger/), [`fs`](/essentials/fs/), [`env`](/essentials/env/), [`is` et `assert`](/essentials/is/), [`errors`](/basics/errors/), [`json`](/essentials/json/) |
 | Données | [`str`](/data/str/), [`num`](/data/num/), [`arr`](/data/arr/), [`obj`](/data/obj/), [`schema`](/data/schema/), [`time`](/data/time/), [`id`](/data/id/) |
-| Fonctions et asynchrone | [`func`](/flow/func/), [`async`](/flow/async/), [`cache`](/flow/cache/), [`emitter`](/flow/emitter/) |
+| Fonctions et asynchrone | [`func`](/flow/func/), [`async`](/flow/async/), [`cache`](/flow/cache/), [`emitter`](/flow/emitter/), [`quota`](/flow/quota/), [`circuit`](/flow/circuit/) |
 | Système et réseau | [`crypto`](/system/crypto/), [`http`](/system/http/), [`sqlite`](/system/sqlite/), [`sys`](/system/sys/), [`cli`](/system/cli/), [`color`](/system/color/) |
 
 [Toutes les fonctions](/modules/) liste chaque membre sur une seule page. La [référence](/reference/) a une page pour chacun, avec sa signature, ses options et ses types.

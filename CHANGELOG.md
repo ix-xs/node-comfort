@@ -4,6 +4,22 @@ All notable changes to this project are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and the project uses
 [Semantic Versioning](https://semver.org/).
 
+## [3.1.0] - Unreleased
+
+### Added
+
+- **Namespaces**: `quota` and `circuit`, each with its entry point (`@ix-xs/node-comfort/quota`,
+  `@ix-xs/node-comfort/circuit`) that exports the class with a static `create`.
+- **quota**: `create({ limit, window })` returns a `Quota` that counts hits per key in a fixed window
+  starting at the key's first hit. `consume(key, cost)` returns `{ allowed, remaining, resetMs }`; a
+  refused hit is not counted; finished windows are dropped every 1000 hits; `reset(key)` and `size`. It
+  answers at once, unlike `async.rateLimit()`, which makes calls wait.
+- **circuit**: `create(options)` returns a `Circuit`, a circuit breaker. `execute(fn)` rejects with a
+  `CircuitOpenError` while the circuit is open; after `resetTimeout` the next call is a trial (half-open).
+  Options `failureThreshold` (5), `resetTimeout` (`"30s"`), `successThreshold` (1), `isFailure`, `onOpen`
+  and `onClose`; `status` is `"closed"`, `"open"` or `"half-open"`.
+- **errors**: `CircuitOpenError`, code `ERR_CIRCUIT_OPEN`.
+
 ## [3.0.0] - 2026-11-19
 
 One way to call everything: `nc.<namespace>.<member>`. The root holds the 25 namespaces and nothing

@@ -47,7 +47,7 @@ Everything is called as `nc.<namespace>.<member>`: [Organisation](/basics/organi
 | Configuration | [`config`](/start/configuration/): language and time zone shared by `num`, `time`, `str.plural` and the logger |
 | Essentials | [`logger`](/essentials/logger/), [`fs`](/essentials/fs/), [`env`](/essentials/env/), [`is` and `assert`](/essentials/is/), [`errors`](/basics/errors/), [`json`](/essentials/json/) |
 | Data | [`str`](/data/str/), [`num`](/data/num/), [`arr`](/data/arr/), [`obj`](/data/obj/), [`schema`](/data/schema/), [`time`](/data/time/), [`id`](/data/id/) |
-| Functions and async | [`func`](/flow/func/), [`async`](/flow/async/), [`cache`](/flow/cache/), [`emitter`](/flow/emitter/) |
+| Functions and async | [`func`](/flow/func/), [`async`](/flow/async/), [`cache`](/flow/cache/), [`emitter`](/flow/emitter/), [`quota`](/flow/quota/), [`circuit`](/flow/circuit/) |
 | System and network | [`crypto`](/system/crypto/), [`http`](/system/http/), [`sqlite`](/system/sqlite/), [`sys`](/system/sys/), [`cli`](/system/cli/), [`color`](/system/color/) |
 
 [All functions](/modules/) lists every member on one page. The [reference](/reference/) has a page for each, with its signature, its options and its types.

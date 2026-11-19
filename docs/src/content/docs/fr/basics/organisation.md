@@ -1,6 +1,6 @@
 ---
 title: "Organisation"
-description: "La forme de l'API : 25 namespaces, une seule façon d'appeler chaque membre, des fabriques pour les objets qui ont un état, et les anciens noms gardés jusqu'à la 4.0."
+description: "La forme de l'API : 27 namespaces, une seule façon d'appeler chaque membre, des fabriques pour les objets qui ont un état, et les anciens noms gardés jusqu'à la 4.0."
 ---
 
 ```js
@@ -13,10 +13,10 @@ nc.is.email("ada@example.com");
 
 ## Une seule forme
 
-Chaque membre s'appelle `nc.<namespace>.<membre>`. La racine contient les 25 namespaces et rien d'autre :
+Chaque membre s'appelle `nc.<namespace>.<membre>`. La racine contient les 27 namespaces et rien d'autre :
 
 ```js
-Object.keys(nc).length; // 25
+Object.keys(nc).length; // 27
 Object.keys(nc.fs);     // ["read", "readJSON", "readLines", "write", ...]
 ```
 
@@ -53,6 +53,8 @@ const { slugify } = require("@ix-xs/node-comfort/str");
 | `async` | Concurrence, files d'attente, relances, délais | [Asynchrone et concurrence](/flow/async/) |
 | `cache` | Cache en mémoire avec TTL et LRU | [Cache](/flow/cache/) |
 | `emitter` | Événements typés | [Événements typés](/flow/emitter/) |
+| `quota` | Passages autorisés par clé dans une fenêtre de temps | [Quota](/flow/quota/) |
+| `circuit` | Disjoncteur pour un service qui peut tomber | [Disjoncteur](/flow/circuit/) |
 | `sqlite` | SQLite sans SQL pour les requêtes courantes | [SQLite](/system/sqlite/) |
 | `http` | Client HTTP avec relances et vérifications | [Client HTTP](/system/http/) |
 | `sys` | Processus, ports, arrêt, la machine | [Processus et système](/system/sys/) |
@@ -68,6 +70,8 @@ Un namespace qui fournit des objets avec leur propre état a une fabrique. La cl
 | `nc.logger.create(options)` | Un logger avec ses propres réglages | |
 | `nc.cache.create(options)` | Un cache | `nc.cache.Cache` |
 | `nc.emitter.create()` | Un émetteur d'événements | `nc.emitter.Emitter` |
+| `nc.quota.create(options)` | Un quota par clé | `nc.quota.Quota` |
+| `nc.circuit.create(options)` | Un disjoncteur | `nc.circuit.Circuit` |
 | `nc.sqlite.open(path, options)` | Une connexion à une base | `nc.sqlite.SQLite` |
 | `nc.http.create(options)` | Un client HTTP avec des valeurs par défaut | |
 | `nc.color.create({ level })` | Des couleurs à un niveau donné | |

@@ -64,7 +64,7 @@ Un outil en ligne de commande qui reçoit un chemin tapé par l'utilisateur doit
 SyntaxError: Named export 'open' not found. The requested module '@ix-xs/node-comfort/sqlite' is a CommonJS module
 ```
 
-`@ix-xs/node-comfort/sqlite`, `/cache` et `/emitter` exportent une classe : importez-la par défaut (`import SQLite from "@ix-xs/node-comfort/sqlite"`), ou prenez le namespace depuis la racine (`import { sqlite } from "@ix-xs/node-comfort"`). Voir [Votre éditeur](/start/editor/).
+`@ix-xs/node-comfort/sqlite`, `/cache`, `/emitter`, `/quota` et `/circuit` exportent une classe : importez-la par défaut (`import SQLite from "@ix-xs/node-comfort/sqlite"`), ou prenez le namespace depuis la racine (`import { sqlite } from "@ix-xs/node-comfort"`). Voir [Votre éditeur](/start/editor/).
 
 ## Pas de couleurs, ou des codes d'échappement dans un fichier
 

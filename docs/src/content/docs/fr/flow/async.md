@@ -59,6 +59,8 @@ const items = await Promise.all(ids.map((id) => throttled(() => api.get(`items/$
 | `concurrency` | Modifiable à la volée | |
 | `onIdle()` | Se résout quand plus rien ne tourne ni n'attend | |
 
+Pour refuser un appel au lieu de le faire attendre, par utilisateur ou par IP, utilisez un [quota](/flow/quota/). Pour cesser d'appeler un service qui échoue sans arrêt, un [disjoncteur](/flow/circuit/).
+
 ## File d'attente
 
 Une file ajoute des priorités, la mise en pause et une limite de temps par tâche. `add()` se résout avec le résultat de la tâche.
