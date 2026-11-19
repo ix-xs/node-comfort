@@ -3,7 +3,6 @@
   "Opens a database, creating the file and its folders if needed. Use `\":memory:\"` for a throwaway in-memory database.": "Ouvre une base de données, en créant le fichier et ses dossiers si nécessaire. Utilisez `\":memory:\"` pour une base en mémoire jetable.",
   "Relative to the working directory.": "Relatif au répertoire de travail.",
   "If the file can't be opened.": "Si le fichier ne peut pas être ouvert.",
-  "Filter operators that only code can make. Plain objects like `{ gte: 18 }` still work, unless the database was opened with `operators: \"tagged\"`: then only these are operators, and a value taken from a request stays a value.": "Des opérateurs de filtre que seul le code peut créer. Les objets simples comme `{ gte: 18 }` fonctionnent toujours, sauf si la base a été ouverte avec `operators: \"tagged\"` : seuls ceux-ci sont alors des opérateurs, et une valeur venue d'une requête HTTP reste une valeur.",
   "Runs SQL that doesn't return rows. Without parameters, you can pass several statements at once.": "Exécute du SQL qui ne renvoie pas de lignes. Sans paramètres, vous pouvez passer plusieurs instructions à la fois.",
   "An array, named parameters like `{ $id: 1 }`, or a single value.": "Un tableau, des paramètres nommés comme `{ $id: 1 }`, ou une seule valeur.",
   "Runs a query and returns the first row. JSON and boolean columns are converted like in `get()`, joins and renamed columns included.": "Exécute une requête et renvoie la première ligne. Les colonnes JSON et booléennes sont converties comme dans `get()`, jointures et colonnes renommées comprises.",
@@ -34,7 +33,6 @@
   "Inserts a row, or updates it in place if it clashes with an existing one on the `conflict` columns.": "Insère une ligne, ou la met à jour sur place si elle entre en conflit avec une ligne existante sur les colonnes `conflict`.",
   "The unique columns that identify the row.": "Les colonnes uniques qui identifient la ligne.",
   "If `conflict` doesn't match a unique constraint.": "Si `conflict` ne correspond pas à une contrainte d'unicité.",
-  "Updates the row matching `where` (or `{ id: data.id }`), or inserts it. Kept from 1.x; `upsert()` does the same in one atomic statement.": "Met à jour la ligne correspondant à `where` (ou `{ id: data.id }`), ou l'insère. Conservée depuis la 1.x ; `upsert()` fait la même chose en une seule instruction atomique.",
   "Deletes the rows that match. The filter is required; `clearTable()` deletes everything on purpose. An `undefined` value in the filter, an empty `$and` or `$or`, or a filter that matches every row throws.": "Supprime les lignes qui correspondent. Le filtre est obligatoire ; `clearTable()` supprime tout, volontairement. Une valeur `undefined` dans le filtre, un `$and` ou un `$or` vide, ou un filtre qui correspond à toutes les lignes lève une erreur.",
   "Adds to number columns in one statement, so two requests at the same moment both count. Reading the value, adding to it and writing it back would lose one of them. Negative numbers subtract; an empty column counts as 0. The filter is checked like the one of `update()`.": "Ajoute aux colonnes numériques en une seule instruction, deux requêtes simultanées comptent donc toutes les deux. Lire la valeur, l'augmenter puis la réécrire ferait perdre l'une des deux. Les nombres négatifs soustraient ; une colonne vide compte pour 0. Le filtre est vérifié comme celui de `update()`.",
   "Column names and how much to add.": "Les noms des colonnes et la quantité à ajouter.",
@@ -106,7 +104,6 @@
   "What makes an object in a filter an operator. `\"plain\"`, the default: any object with an operator key, like `{ gte: 18 }`, and an array means \"one of\". `\"tagged\"`: only the operators made by `SQLite.op`, any other object or array is a value compared as JSON text, so a value taken from a request can never become an operator.": "Ce qui fait d'un objet d'un filtre un opérateur. `\"plain\"`, par défaut : tout objet avec une clé d'opérateur, comme `{ gte: 18 }`, et un tableau signifie « l'une de ». `\"tagged\"` : seulement les opérateurs créés par `SQLite.op`, tout autre objet ou tableau est une valeur comparée sous forme de texte JSON, de sorte qu'une valeur venue d'une requête HTTP ne peut jamais devenir un opérateur.",
   "A constraint on several columns. The `expression` of a `check` is written into the table as is: never build it from user input.": "Une contrainte sur plusieurs colonnes. L'`expression` d'un `check` est écrite telle quelle dans la table : ne la construisez jamais à partir d'une saisie utilisateur.",
   "A table for `createTable()`.": "Une table pour `createTable()`.",
-  "Old name for `columns`, still accepted.": "Ancien nom de `columns`, toujours accepté.",
   "Shortcuts bound to one table, from `table()`.": "Des raccourcis liés à une table, créés par `table()`.",
   "The first matching row.": "La première ligne correspondante.",
   "All matching rows.": "Toutes les lignes correspondantes.",
@@ -141,5 +138,8 @@
   "`IS NOT NULL`.": "`IS NOT NULL`.",
   "`true` for `IS NULL`, `false` for `IS NOT NULL`.": "`true` pour `IS NULL`, `false` pour `IS NOT NULL`.",
   "The condition for one column: a value, `null`, an array, or operators.": "La condition pour une colonne : une valeur, `null`, un tableau, ou des opérateurs.",
-  "On a read, a missing value drops its condition: check required values first (writes, and reads with `operators: \"tagged\"`, throw instead).": "En lecture, une valeur absente fait disparaître sa condition : vérifiez d'abord les valeurs obligatoires (les écritures, et les lectures avec `operators: \"tagged\"`, lèvent une erreur à la place)."
+  "On a read, a missing value drops its condition: check required values first (writes, and reads with `operators: \"tagged\"`, throw instead).": "En lecture, une valeur absente fait disparaître sa condition : vérifiez d'abord les valeurs obligatoires (les écritures, et les lectures avec `operators: \"tagged\"`, lèvent une erreur à la place).",
+  "Opens a database, creating the file and its folders if needed. Same as `new nc.sqlite.SQLite(path, options)`. Use `\":memory:\"` for a throwaway in-memory database.": "Ouvre une base de données, en créant le fichier et ses dossiers si nécessaire. Identique à `new nc.sqlite.SQLite(path, options)`. Utilisez `\":memory:\"` pour une base en mémoire jetable.",
+  "A SQLite database connection.": "Une connexion à une base de données SQLite.",
+  "Filter operators that only code can make, like `op.between(18, 65)`. Same object as `nc.sqlite.SQLite.op`.": "Des opérateurs de filtre que seul le code peut créer, comme `op.between(18, 65)`. Le même objet que `nc.sqlite.SQLite.op`."
 }

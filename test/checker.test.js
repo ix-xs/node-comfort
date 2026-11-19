@@ -187,6 +187,6 @@ describe("checker: assertions", () => {
 
   it("assertType names the guard", () => {
     assert.doesNotThrow(() => nc.assert.type("x", nc.is.string));
-    assert.throws(() => nc.assert.type(1, nc.is.string), /isString/);
+    assert.throws(() => nc.assert.type(1, nc.is.string), /is\.string|isString/);
   });
 });

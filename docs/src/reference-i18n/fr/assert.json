@@ -1,0 +1,9 @@
+{
+  "A message, or a function that builds it.": "Un message, ou une fonction qui le construit.",
+  "Throws an `AssertionError` if `condition` is falsy. Afterwards, TypeScript knows the condition holds.": "Lève une `AssertionError` si `condition` est falsy. Ensuite, TypeScript sait que la condition est vraie.",
+  "Throws an `AssertionError` unless `value` passes `guard`. Afterwards, `value` has the guarded type.": "Lève une `AssertionError` sauf si `value` passe `guard`. Ensuite, `value` a le type vérifié par la garde.",
+  "const user = users.find((u) => u.id === id);\nnc.assert(user, `User ${id} not found`);\nuser.name; // no \"possibly undefined\" here": "const user = users.find((u) => u.id === id);\nnc.assert(user, `User ${id} not found`);\nuser.name; // pas de \"possibly undefined\" ici",
+  "Assertions: they throw an `AssertionError` when something doesn't hold, and tell TypeScript (and your editor, in JavaScript too) what holds after them. `nc.assert(value, message)` checks a condition, `nc.assert.type()` checks a value with a guard like `nc.is.string`.": "Des assertions : elles lèvent une `AssertionError` quand quelque chose n'est pas vrai, et indiquent à TypeScript (et à votre éditeur, en JavaScript aussi) ce qui est vrai après elles. `nc.assert(value, message)` vérifie une condition, `nc.assert.type()` vérifie une valeur avec une garde comme `nc.is.string`.",
+  "A check like `nc.is.string`.": "Une vérification comme `nc.is.string`.",
+  "A message, or a function that builds it. Defaults to one that names the guard.": "Un message, ou une fonction qui le construit. Par défaut, un message qui nomme la garde."
+}

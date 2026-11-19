@@ -1,154 +1,151 @@
 ---
 title: "Dates et heures"
-description: "`nc.time` met en forme et analyse des dates dans toutes les langues et tous les fuseaux horaires, fait des calculs de calendrier, lit des durées et planifie des tâches. Il s'appuie sur `Intl`, que Node.js fournit avec toutes les langues."
-sidebar:
-  order: 5
+description: "`nc.time` : mise en forme et lecture dans toutes les langues et tous les fuseaux, calculs de calendrier, durées, mesures et tâches planifiées. Repose sur `Intl`, et sur `Temporal` là où Node.js l'a."
 ---
 
 ```js
 const { time } = require("@ix-xs/node-comfort");
-
-time.format(new Date(), "dddd D MMMM YYYY"); // "Monday 15 January 2024"
-time.relative(Date.now() - 3_600_000);       // "1 hour ago"
-time.add(new Date(2024, 0, 31), 1, "month"); // 2024-02-29
 ```
+
+Les résultats ci-dessous sont calculés en UTC (`nc.config.set({ timeZone: "UTC" })`), avec `date = new Date("2024-01-15T14:30:05Z")`.
 
 ## Langue et fuseau horaire
 
-La sortie est en anglais par défaut : les résultats sont ainsi les mêmes sur toutes les machines. Changez les valeurs par défaut une fois pour toutes :
+La sortie est en anglais et dans le fuseau du système tant que vous ne les changez pas, une fois, pour `time`, `num` et le logger ([Configuration](/start/configuration/)) :
 
 ```js
-time.setLocale("fr").setTimezone("Europe/Paris");
+nc.config.set({ locale: "fr", timeZone: "Europe/Paris" });
 
-time.relative(Date.now() - 3_600_000);         // "il y a 1 heure"
-time.format(new Date(), "dddd D MMMM YYYY");   // "lundi 15 janvier 2024"
+time.relative(Date.now() - 3_600_000);                 // "il y a 1 heure"
+time.format(date, "dddd D MMMM YYYY HH:mm");           // "lundi 15 janvier 2024 15:30"
 ```
 
-Le fuseau par défaut sert à tout ce qui lit un calendrier : `format`, `parse`, `startOf`, `add` avec des mois, `isToday`, `cron` et les autres. Sans fuseau par défaut, c'est celui du système qui est utilisé.
-
-La suite de cette page utilise la langue par défaut, l'anglais.
-
-Vous pouvez aussi choisir appel par appel, avec `{ locale }` et `{ timeZone }` :
+Chaque appel accepte aussi `{ locale }` et `{ timeZone }` :
 
 ```js
-time.format(Date.now(), "HH:mm Z", { timeZone: "Asia/Tokyo" }); // "22:30 +09:00"
-time.relative(date, undefined, { locale: "de" });               // "vor 3 Stunden"
+time.format(date, "HH:mm Z", { timeZone: "Asia/Tokyo" });  // "23:30 +09:00"
+time.relative(threeHoursAgo, undefined, { locale: "de" }); // "vor 3 Stunden"
 ```
 
-`time.timezones()` liste tous les fuseaux, et `time.offset("Europe/Paris")` donne le décalage actuel en minutes, heure d'été comprise.
+| Fonction | Renvoie |
+| --- | --- |
+| `timeZones()` | Tous les noms de fuseaux que connaît `Intl` |
+| `offset(timeZone?, date?)` | Le décalage en minutes, heure d'été comprise : `offset("Europe/Paris", "2024-07-01")` vaut `120` |
 
-## Temporal
+Le fuseau sert à tout ce qui lit un calendrier : `format`, `parse`, `startOf`, `add` en jours ou en mois, `isToday`, `cron`.
 
-Partout où une fonction accepte une date, elle accepte aussi un instant venant de `Temporal` : un `Temporal.Instant` ou un `Temporal.ZonedDateTime`, en plus d'une `Date`, d'un timestamp en millisecondes et d'une chaîne ISO. Les résultats restent des objets `Date`.
+## Dates acceptées
+
+Partout où une date est attendue : une `Date`, un horodatage en millisecondes, une chaîne ISO, un `Temporal.Instant` ou un `Temporal.ZonedDateTime`. Les résultats sont des objets `Date`.
 
 ```js
-time.format(Temporal.Now.instant(), "YYYY-MM-DD HH:mm");
+time.format(Temporal.Instant.from("2024-01-15T14:30:00Z"), "YYYY-MM-DD HH:mm"); // "2024-01-15 14:30"
 time.isWeekend(Temporal.ZonedDateTime.from("2026-03-29T09:00[Europe/Paris]")); // true
 ```
 
-Seul l'instant est lu : le fuseau d'un `ZonedDateTime` n'est pas utilisé, passez donc `{ timeZone }` si vous en avez besoin.
+Seul l'instant est lu : le fuseau d'un `ZonedDateTime` est ignoré, passez `{ timeZone }`. Sous Node.js 26, les fuseaux passent par `Temporal`, plus de deux fois plus vite ; les résultats sont les mêmes sous 22 et 24.
 
-Sur Node.js 26, qui intègre `Temporal`, les fuseaux horaires passent par lui plutôt que par `Intl`. Les appels qui travaillent dans un fuseau, comme `time.add()` ou `time.startOf()` avec un `timeZone`, y sont plus de deux fois plus rapides. Les résultats sont les mêmes sur Node.js 22 et 24.
-
-## Mise en forme
+## Mettre en forme
 
 ```js
-time.format(date);                          // "2024-01-15 14:30:05"
-time.format(date, "DD/MM/YYYY");            // "15/01/2024"
-time.format(date, "h:mm A");                // "2:30 PM"
-time.format(date, "MMMM Do, YYYY");         // "January 15th, 2024"
-time.format(date, "[Week] W, YYYY");        // "Week 3, 2024"
-time.toISODate(date);                       // "2024-01-15"
+time.format(date);                   // "2024-01-15 14:30:05"
+time.format(date, "DD/MM/YYYY");     // "15/01/2024"
+time.format(date, "h:mm A");         // "2:30 PM"
+time.format(date, "MMMM Do, YYYY");  // "January 15th, 2024"
+time.format(date, "[Week] W, YYYY"); // "Week 3, 2024"
+time.toISODate(date);                // "2024-01-15"
 ```
 
-| Token | Résultat | Token | Résultat |
+| Jeton | Sortie | Jeton | Sortie |
 | --- | --- | --- | --- |
 | `YYYY` `YY` | 2024, 24 | `HH` `H` | 09, 9 (24 h) |
 | `MMMM` `MMM` | January, Jan | `hh` `h` | 09, 9 (12 h) |
 | `MM` `M` | 01, 1 | `mm` `m` | 05, 5 |
 | `DD` `D` | 05, 5 | `ss` `s` | 07, 7 |
-| `Do` | 5th | `SSS` | millisecondes |
+| `Do` | 5th (`1er` en français) | `SSS` | millisecondes |
 | `dddd` `ddd` | Monday, Mon | `A` `a` | PM, pm |
 | `d` | jour de la semaine, 0 pour dimanche | `Z` `ZZ` | +02:00, +0200 |
-| `Q` | trimestre | `z` | nom du fuseau, comme EST |
+| `Q` | trimestre | `z` | nom du fuseau, comme EST ou UTC+1 |
 | `W` `WW` | semaine ISO | `X` `x` | secondes Unix, ms |
 
-Le texte entre crochets est conservé tel quel. `Do` suit la langue (`1er` en français). `z` est le nom court que `Intl` donne au fuseau dans cette langue, qui peut être un décalage comme `GMT+1`.
+Le texte entre `[crochets]` est gardé tel quel.
 
-## Analyse
+## Lire une date
 
-`parse()` est l'inverse de `format()`, avec les mêmes tokens :
-
-```js
-time.parse("15/01/2024 14:30", "DD/MM/YYYY HH:mm");             // une Date
-time.parse("15 janvier 2024", "D MMMM YYYY", { locale: "fr" });
-time.parse("2024-01-15 09:00", "YYYY-MM-DD HH:mm", { timeZone: "Asia/Tokyo" });
-// 2024-01-15T00:00:00.000Z, 9:00 à Tokyo
-time.parse("31/02/2024", "DD/MM/YYYY");                         // undefined, ce jour n'existe pas
-```
-
-Le texte est lu dans le fuseau par défaut, ou dans celui que vous passez, sauf s'il porte son propre décalage (le token `Z`). Vous obtenez `undefined` quand le texte ne correspond pas au motif ou n'est pas une vraie date. Un motif sans date désigne aujourd'hui, et un motif sans heure désigne minuit. Les tokens de semaine, de trimestre, de numéro du jour et de nom de fuseau (`W`, `Q`, `d`, `z`) ne peuvent pas être relus : un motif qui en contient un lève une `TypeError`.
-
-Pour les horodatages Unix en secondes, comme on en trouve dans les JWT et dans de nombreuses API :
+`parse(text, pattern, options?)` utilise les mêmes jetons :
 
 ```js
-time.fromUnix(1705329000); // 2024-01-15T14:30:00.000Z
-time.unix();               // l'horodatage actuel
+time.parse("15/01/2024 14:30", "DD/MM/YYYY HH:mm");               // 2024-01-15T14:30:00.000Z
+time.parse("15 janvier 2024", "D MMMM YYYY", { locale: "fr" });   // 2024-01-15T00:00:00.000Z
+time.parse("2024-01-15 09:00", "YYYY-MM-DD HH:mm", { timeZone: "Asia/Tokyo" }); // 2024-01-15T00:00:00.000Z
+time.parse("31/02/2024", "DD/MM/YYYY");                           // undefined
+time.fromUnix(1705329000);                                        // 2024-01-15T14:30:00.000Z
 ```
 
-## Dates relatives et dates de calendrier
+| Cas | Résultat |
+| --- | --- |
+| Un texte qui ne correspond pas, ou un jour qui n'existe pas | `undefined` |
+| Pas de date dans le motif | Aujourd'hui |
+| Pas d'heure dans le motif | Minuit |
+| Un décalage dans le texte (`Z`) | L'emporte sur le fuseau |
+| `W`, `Q`, `d` ou `z` dans le motif | `TypeError` : ils ne peuvent pas être relus |
+
+`unix()` donne l'heure actuelle en secondes Unix, `fromUnix(seconds)` fait l'inverse.
+
+## Dates relatives et calendrier
 
 ```js
-time.relative(Date.now() + 2 * 86_400_000);                           // "in 2 days"
-time.relative(Date.now() - 86_400_000, undefined, { numeric: "auto" }); // "yesterday"
-time.calendar(message.sentAt); // "Today at 2:30 PM", "Yesterday at 9:05 AM", "Monday at 10:00 AM"...
+time.relative("2024-01-17T14:30:05Z", date);                         // "in 2 days"
+time.relative("2024-01-14T14:30:05Z", date, { numeric: "auto" });    // "yesterday"
+time.calendar("2024-01-14T09:05:00Z", { now: date });                // "Yesterday at 9:05 AM"
 ```
+
+| Option de `relative` | Par défaut |
+| --- | --- |
+| `locale` | `nc.config.get().locale` |
+| `numeric` | `"always"` ; `"auto"` dit « hier » |
+| `style` | `"long"` ; `"short"`, `"narrow"` |
 
 ## Durées
 
-Partout dans node-comfort, une durée peut être un nombre de millisecondes ou une chaîne :
+Une durée est un nombre de millisecondes ou un texte, partout dans la bibliothèque :
 
 ```js
-time.parseDuration("1h30m");   // 5400000
-time.parseDuration("2 days");  // 172800000
+time.parseDuration("1h30m");    // 5400000
+time.parseDuration("2 days");   // 172800000
 time.parseDuration("01:30:00"); // 5400000
-time.parseDuration("PT1H30M"); // 5400000
+time.parseDuration("PT1H30M");  // 5400000
+time.parseDuration("soon");     // null
 
-time.formatDuration(5_400_000);                               // "1h 30m"
-time.formatDuration("90m");                                   // "1h 30m"
-time.formatDuration(90_000, { long: true, locale: "fr" });    // "1 minute 30 secondes"
-time.formatDuration(93_784_000, { units: 2 });                // "1d 2h"
-time.formatDuration(5_405_000, { clock: true });              // "01:30:05"
+time.formatDuration(5_400_000);                            // "1h 30m"
+time.formatDuration(90_000, { long: true, locale: "fr" }); // "1 minute 30 secondes"
+time.formatDuration(93_784_000, { units: 2 });             // "1d 2h"
+time.formatDuration(5_405_000, { clock: true });           // "01:30:05"
 ```
 
-Les mois et les années ne sont pas acceptés dans les durées, car leur longueur varie ; pour ceux-là, utilisez `add()`.
+| Option de `formatDuration` | Rôle |
+| --- | --- |
+| `long` | Mots complets, traduits |
+| `units` | Au plus ce nombre d'unités, de la plus grande à la plus petite |
+| `clock` | `"01:30:05"` |
+| `milliseconds` | Affiche les millisecondes ; `true` par défaut |
+| `locale` | Langue de `long` |
+
+Les mois et les années ne sont pas des durées, leur longueur varie : utilisez `add()`.
 
 ## Calculs de calendrier
 
 ```js
-time.add(date, 3, "days");
-time.add(date, "2h30m");
-time.add(date, "1 month");                       // les mois et les années marchent aussi en texte
+time.add("2024-01-31", 1, "month");              // 2024-02-29T00:00:00.000Z
+time.add(date, "2h30m");                         // 2024-01-15T17:00:05.000Z
 time.subtract(date, 1, "year");
 time.diff("2024-03-15", "2024-01-20", "months"); // 1
-time.startOf(date, "week");                      // lundi 00:00
-time.startOf(date, "week", { weekStartsOn: 0 }); // dimanche 00:00
-time.endOf(date, "month");                       // dernier jour, 23:59:59.999
+time.startOf(date, "week");                      // 2024-01-15T00:00:00.000Z, un lundi
+time.startOf(date, "week", { weekStartsOn: 0 }); // 2024-01-14T00:00:00.000Z
+time.endOf(date, "month");                       // 2024-01-31T23:59:59.999Z
 ```
 
-Ajouter des mois garde le jour dans les limites : le 31 janvier plus un mois donne le dernier jour de février. Une quantité en texte qui ne peut pas être lue, comme `"soon"`, lève une `TypeError`.
-
-Les jours, semaines, mois et années entiers, tout comme `startOf()` et `endOf()`, suivent le calendrier du fuseau par défaut, ou de celui que vous passez :
-
-```js
-time.startOf("2024-01-15T03:00:00Z", "day", { timeZone: "America/New_York" });
-// 2024-01-14T05:00:00.000Z, minuit à New York
-
-time.add("2024-02-15T12:00:00-05:00", 1, "month", { timeZone: "America/New_York" });
-// 2024-03-15T16:00:00.000Z, toujours midi à New York après le changement d'heure
-```
-
-Un jour plus tard, c'est la même heure le lendemain, même la nuit du changement d'heure. Les heures et les unités plus petites sont exactes, si bien que `"24h"` ne vaut pas toujours `"1 day"` :
+Les jours, semaines, mois et années suivent le calendrier du fuseau ; les heures et les unités plus petites sont exactes :
 
 ```js
 const paris = { timeZone: "Europe/Paris" };
@@ -156,64 +153,101 @@ time.add("2024-03-30T12:00:00+01:00", 1, "day", paris); // 2024-03-31T10:00:00.0
 time.add("2024-03-30T12:00:00+01:00", "24h", paris);   // 2024-03-31T11:00:00.000Z, 13 h à Paris
 ```
 
-Une unité qui n'existe pas, comme `"bananas"`, lève une `TypeError`.
+| Fonction | Unités |
+| --- | --- |
+| `add`, `subtract`, `diff` | `ms`, `s`, `m`, `h`, `d`, `w`, `M` (mois), `y`, et leurs noms longs |
+| `startOf`, `endOf`, `isSame` | `year`, `quarter`, `month`, `week`, `isoWeek`, `day`, `hour`, `minute`, `second` |
+| `range(start, end, unit, { step })` | Toutes les dates de `start` à `end`, bornes comprises |
 
-`range()` liste toutes les dates d'un début à une fin, bornes incluses :
-
-```js
-time.range("2024-01-01", "2024-01-07", "day");                         // 7 dates
-time.range("2024-01-31", "2024-04-30", "month", { timeZone: "UTC" });  // 31 janv., 29 févr., 31 mars, 30 avr.
-time.range(start, end, "minute", { step: 15 });                        // tous les quarts d'heure
-```
-
-## Questions sur les dates
+Ajouter des mois garde le jour dans le mois : le 31 janvier plus un mois donne le dernier jour de février. Une unité inconnue ou une quantité illisible lève une `TypeError`.
 
 ```js
-time.isToday(date);
-time.isYesterday(date);
-time.isWeekend(date);
-time.isSameDay(a, b, { timeZone: "Asia/Tokyo" });
-time.isSame(a, b, "month");                         // même mois de la même année
-time.isSame(a, b, "week", { weekStartsOn: 0 });
-time.isBetween(order.createdAt, start, end);
-time.isLeapYear(2024);
-time.isValid("2024-02-30");  // false
-time.daysInMonth(2024, 2);   // 29
-time.weekOfYear(date);       // semaine ISO
+time.range("2024-01-31", "2024-04-30", "month"); // 31 janv., 29 févr., 31 mars, 30 avr.
+time.range(start, end, "minute", { step: 15 });  // tous les quarts d'heure
 ```
 
-`isSame()` accepte les mêmes unités que `startOf()`. `isToday()`, `isYesterday()` et `isTomorrow()` comparent des jours de calendrier, et non des périodes de 24 heures : elles restent donc justes les jours de changement d'heure.
+## Comparer
 
-## Mesure
+| Fonction | Exemple | Résultat |
+| --- | --- | --- |
+| `isBefore`, `isAfter` | `time.isBefore("2024-01-01", "2024-01-02")` | `true` |
+| `isBetween` | `time.isBetween("2024-01-10", "2024-01-01", "2024-01-31")` | `true` |
+| `isSame` | `time.isSame("2024-01-02", "2024-01-30", "month")` | `true` |
+| `isSameDay`, `isToday`, `isYesterday`, `isTomorrow` | `time.isToday(date, { timeZone })` | Des jours du calendrier, pas des tranches de 24 heures |
+| `isWeekend` | `time.isWeekend("2024-01-13")` | `true` |
+| `isLeapYear` | `time.isLeapYear(2024)` | `true` |
+| `isValid` | `time.isValid("2024-02-30")` | `false` |
+| `daysInMonth` | `time.daysInMonth(2024, 2)` | `29` |
+| `dayOfYear`, `weekOfYear` | `time.weekOfYear(date)` | `3` (semaine ISO) |
+| `min`, `max` | `time.min(["2024-03-01", "2024-01-01"])` | `2024-01-01T00:00:00.000Z` |
+
+## Mesurer
 
 ```js
 const sw = time.stopwatch();
-await loadConfig(); sw.lap("config");
-await connectDb();  sw.lap("db");
-console.log(sw.stop(true)); // "182.4ms"
+await loadConfig();
+sw.lap("config");
+sw.stop(true); // "182.4ms" ; stop() seul donne le nombre
 
-const { result, duration } = await time.measure(() => db.query(sql));
+const { result, duration } = await time.measure(() => loadUsers());
 ```
 
-## Planification
+| Membre de `stopwatch()` | Rôle |
+| --- | --- |
+| `elapsed()` | Millisecondes depuis le départ |
+| `lap(label?)` | Enregistre un tour, renvoie les millisecondes depuis le précédent |
+| `laps()` | `[{ label, ms, total }]` |
+| `stop(format?)` | Les millisecondes écoulées, ou un texte avec `true` |
+| `reset()` | Repart de zéro |
 
-`every()` exécute une tâche à intervalle régulier. Contrairement à `setInterval`, une exécution lente retarde la suivante au lieu de s'empiler, et le rythme ne dérive pas :
+## Tâches planifiées
+
+`every(interval, task, options?)` lance une tâche à intervalle régulier : une exécution lente retarde la suivante au lieu de s'empiler, et le rythme ne dérive pas. `cron(expression, task, options?)` la lance selon une expression cron, dans un fuseau, à travers les changements d'heure.
 
 ```js
-const job = time.every("5m", syncInventory, { immediate: true, onError: nc.error });
-job.stop();
+const { time, sys, logger } = require("@ix-xs/node-comfort");
+
+const job = time.every("5m", syncInventory, { immediate: true, onError: (error) => logger.error(error) });
+const report = time.cron("0 9 * * mon-fri", sendReport, { timeZone: "Europe/Paris" });
+
+sys.onShutdown(() => {
+  job.stop();
+  report.stop();
+});
 ```
 
-`cron()` exécute une tâche selon une planification cron, dans n'importe quel fuseau horaire, et gère les changements d'heure :
+| Option | `every` | `cron` | Rôle |
+| --- | --- | --- | --- |
+| `immediate` | oui | oui | Lance aussi une exécution tout de suite |
+| `onError` | oui | oui | Reçoit l'erreur d'une exécution ratée ; sans elle, l'erreur n'est pas gérée |
+| `signal` | oui | oui | L'annulation arrête la planification, comme `stop()` |
+| `unref` | oui | oui | Laisse le processus se terminer pendant que la planification est active |
+| `timeZone` | | oui | Fuseau dans lequel l'expression est lue |
+| `overlap` | | oui | Lance une exécution même si la précédente tourne encore ; sautée par défaut |
 
 ```js
-time.cron("0 9 * * mon-fri", sendReport, { timeZone: "Europe/Paris" });
+const controller = new AbortController();
+time.every("30s", poll, { signal: controller.signal });
+controller.abort(); // la planification s'arrête
+```
+
+La tâche renvoyée a `stop()` (renvoie la tâche), `next()` (la prochaine `Date` prévue), `isRunning()` et `runs()`. Déclarée avec `using`, elle s'arrête à la fin de son bloc ([Ressources](/basics/resources/)).
+
+Les expressions ont cinq champs (`minute hour day month weekday`), ou six avec les secondes en tête : listes, plages, pas, noms de mois et de jours, `L` pour le dernier jour du mois, et `@hourly`, `@daily`, `@weekly`, `@monthly`, `@yearly`.
+
+```js
 time.cron("*/15 * * * *", refreshCache);
-time.cron("0 18 L * *", closeMonth);                // le dernier jour de chaque mois à 18:00
-time.cron("@daily", cleanup, { immediate: true });  // chaque jour à minuit, et une fois tout de suite
-time.nextRun("0 0 1 * *"); // le moment de sa prochaine exécution
+time.cron("0 18 L * *", closeMonth);                // le dernier jour de chaque mois à 18 h
+time.nextRun("0 0 1 * *", { from: date });          // 2024-02-01T00:00:00.000Z
 ```
 
-Les expressions ont cinq champs (`minute hour day month weekday`), ou six avec les secondes en premier. Elles acceptent les listes, les intervalles, les pas, les noms de mois et de jours, `L` dans le champ du jour pour le dernier jour du mois, et les raccourcis `@hourly`, `@daily`, `@weekly`, `@monthly` et `@yearly`.
+## Avant la 3.0
 
-Les deux renvoient une tâche dotée de `stop()`, `next()`, `isRunning()` et `runs()`. Avec Node.js 24 ou plus récent, une tâche déclarée avec `using` s'arrête à la fin de son bloc ([en savoir plus sur `using`](/recipes/cli-tool/#cleaning-up-with-using)). Toutes les fonctions sont listées dans la [référence](/reference/time/).
+| 2.2 | 3.0 |
+| --- | --- |
+| `time.setLocale(locale)` | `nc.config.set({ locale })` |
+| `time.setTimezone(timeZone)` | `nc.config.set({ timeZone })` |
+| `time.getConfig()` | `nc.config.get()` |
+| `time.timezones()` | `time.timeZones()` |
+
+La langue définie avec `nc.config.set()` est partagée avec `num`, `str.plural` et `arr.toSentence` : `num.setLocale()` laissait `time` dans sa propre langue.

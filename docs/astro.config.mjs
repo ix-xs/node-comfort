@@ -116,26 +116,20 @@ export default defineConfig({
       },
       tableOfContents: { minHeadingLevel: 2, maxHeadingLevel: 3 },
       lastUpdated: false,
-      // The guide, in reading order: first the setup, then one project built
-      // page by page, then a page per namespace, to read when it is needed.
-      // The reference is a section of its own, from the header.
+      // Installation first, then the configuration and the concepts, then a page
+      // per namespace, then help. The reference is a section of its own, from
+      // the header.
       sidebar: [
-        group("Getting started", "Pour commencer", [{ slug: "index", label: "Introduction" }, "start/installation", "start/editor"], false),
-        group("Your first project", "Votre premier projet", [
-          "project/setup",
-          "project/configuration",
-          "project/input",
-          "project/requests",
-          "project/storage",
-          "project/command-line",
-          "project/production",
+        group("Getting started", "Démarrer", [{ slug: "index", label: "Installation" }, "start/configuration", "start/editor"], false),
+        group("Basics", "Les bases", ["basics/organisation", "basics/conventions", "basics/errors", "basics/resources"], false),
+        group("Modules", "Les modules", [
+          "modules",
+          group("Essentials", "Essentiels", ["essentials/logger", "essentials/fs", "essentials/env", "essentials/is", "essentials/json"], false),
+          group("Data", "Données", ["data/str", "data/num", "data/arr", "data/obj", "data/schema", "data/time", "data/id"], false),
+          group("Functions and async", "Fonctions et asynchrone", ["flow/func", "flow/async", "flow/cache", "flow/emitter"], false),
+          group("System and network", "Système et réseau", ["system/crypto", "system/http", "system/sqlite", "system/sys", "system/cli", "system/color"], false),
         ], false),
-        group("Essentials", "Essentiels", ["essentials/logger", "essentials/fs", "essentials/env", "essentials/checker", "essentials/errors", "essentials/utils"]),
-        group("Data", "Données", ["data/str", "data/num", "data/arr", "data/obj", "data/schema", "data/time", "data/id"]),
-        group("Functions and async", "Fonctions et asynchrone", ["flow/async", "flow/func", "flow/cache", "flow/emitter"]),
-        group("System and network", "Système et réseau", ["system/http", "system/sqlite", "system/crypto", "system/cli", "system/color", "system/sys"]),
-        group("Complete examples", "Exemples complets", ["recipes/api-server", "recipes/cli-tool", "recipes/scheduled-job"]),
-        group("Help", "Aide", ["help/upgrade-2-2", "help/migration", "help/performance", "help/faq"]),
+        group("Help", "Aide", ["help/upgrade-3-0", "help/upgrade-2-2", "help/migration", "help/performance", "help/faq", "help/troubleshooting"]),
       ],
     }),
   ],

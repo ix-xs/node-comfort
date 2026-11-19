@@ -28,8 +28,11 @@ const moved = new Map([
 for (const [section, pages] of Object.entries(SECTIONS)) {
   for (const page of pages) moved.set(`guide/${page}.html`, `/${section}/${page}/`);
 }
+// The namespaces that 3.0 renamed: checker became is, and utils was spread over
+// other namespaces (the upgrade page says where each function went).
+const RENAMED = { checker: "/reference/is/", utils: "/help/upgrade-3-0/" };
 for (const page of [...SECTIONS.essentials, ...SECTIONS.data, ...SECTIONS.flow, ...SECTIONS.system]) {
-  moved.set(`api/${page}.html`, `/reference/${page}/`);
+  moved.set(`api/${page}.html`, RENAMED[page] ?? `/reference/${page}/`);
 }
 
 for (const [file, address] of moved) {

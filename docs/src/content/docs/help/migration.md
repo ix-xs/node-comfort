@@ -1,11 +1,9 @@
 ---
 title: "Migrating from 1.x"
 description: "Version 2 keeps the 1.x API: the top-level helpers, the `fs` functions and the SQLite methods are all still there. A few behaviors changed, and this page lists them with what to do."
-sidebar:
-  order: 5
 ---
 
-Most projects only need the first three sections.
+Most projects only need the first three sections. The code on this page is written for 3.0: the names of 2.x it replaces are in [Upgrading to 3.0](/help/upgrade-3-0/).
 
 ## Node.js 22.13 or newer
 
@@ -18,7 +16,7 @@ Node 20 is at the end of its life, and 1.x already needed `node:sqlite`, which o
 const result = await db.insert("users", data);
 if (result.error) console.error(result.error);
 
-// 2.0
+// 2.0 and later
 try {
   db.insert("users", data);
 } catch (error) {
@@ -31,7 +29,7 @@ Other SQLite changes:
 - **Methods are synchronous.** They return values directly. `await` still works, but remove any `.then()` on their results.
 - **`getAll()` no longer limits to 50 rows or sorts by default.** Add `{ limit: 50 }` and `{ orderBy: "id", direction: "DESC" }` where you relied on that. With `orderBy` and no `direction`, the order is now ascending.
 - **Tables are read from the database file.** In 1.x, only tables created with `createTable()` in the same process were visible. Now any table in the file works, and an unknown table throws.
-- **`BOOLEAN` and `JSON` columns are converted.** You get `true`/`false` instead of `1`/`0`, and parsed objects instead of JSON text. Writing booleans, objects and dates now works too. To keep the old behavior: `new nc.SQLite(path, { booleans: false, json: false })`.
+- **`BOOLEAN` and `JSON` columns are converted.** You get `true`/`false` instead of `1`/`0`, and parsed objects instead of JSON text. Writing booleans, objects and dates now works too. To keep the old behavior: `nc.sqlite.open(path, { booleans: false, json: false })`.
 - **`transaction()` throws the error** after rolling back, instead of returning `{ error }`.
 
 ## No more deep imports
@@ -41,7 +39,7 @@ The package now declares its entry points. Replace imports of internal files:
 ```js
 // 1.x
 const Logger = require("@ix-xs/node-comfort/src/Logger");
-// 2.0
+// 2.0 and later
 const { logger } = require("@ix-xs/node-comfort");
 // or, to load only the logger
 const logger = require("@ix-xs/node-comfort/logger");
@@ -55,7 +53,7 @@ const logger = require("@ix-xs/node-comfort/logger");
 
 ## Files
 
-When a relative path didn't exist, 1.x searched the folder tree for a file with the same name. That could read, overwrite or delete the wrong file, so it's gone. To search on purpose, use `nc.find("config.json")`.
+When a relative path didn't exist, 1.x searched the folder tree for a file with the same name. That could read, overwrite or delete the wrong file, so it's gone. To search on purpose, use `nc.fs.find("config.json")`.
 
 ## Smaller changes
 
@@ -68,7 +66,7 @@ When a relative path didn't exist, 1.x searched the folder tree for a file with 
 
 ## Deprecated
 
-`id.hash()`, `id.hmac()` and `id.safeEqual()` moved to `nc.crypto`, with the same signatures. The old names still work and will be removed in 3.0.
+`id.hash()`, `id.hmac()` and `id.safeEqual()` moved to `nc.crypto`, with the same signatures. The old names still work in 3.0, with a warning, and are removed in 4.0.
 
 ## Security fix
 

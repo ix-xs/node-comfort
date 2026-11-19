@@ -1,9 +1,4 @@
 {
-  "Numbers: clamping, rounding that gets decimals right, statistics, and formatting for humans (sizes, money, ordinals, compact numbers) in any language. Formatting is English by default: change it with `setLocale()` or per call with `{ locale }`.": "Nombres : bornage, arrondi qui traite correctement les décimales, statistiques, et formatage pour les humains (tailles, monnaie, ordinaux, nombres compacts) dans n'importe quelle langue. Le formatage est en anglais par défaut : changez-le avec `setLocale()` ou à chaque appel avec `{ locale }`.",
-  "Sets the default language of `format`, `currency`, `ordinal` and `formatBytes`.": "Définit la langue par défaut de `format`, `currency`, `ordinal` et `formatBytes`.",
-  "Like `\"fr\"`, `\"en-GB\"` or `\"pt-BR\"`.": "Par exemple `\"fr\"`, `\"en-GB\"` ou `\"pt-BR\"`.",
-  "The module, so calls chain.": "Le module, ce qui permet d'enchaîner les appels.",
-  "The current default language.": "La langue par défaut actuelle.",
   "Keeps a number between `min` and `max`.": "Maintient un nombre entre `min` et `max`.",
   "Is the number between `min` and `max`, both included?": "Le nombre est-il entre `min` et `max`, bornes comprises ?",
   "Wraps a number around a range, like an angle or a carousel index. `max` is excluded.": "Ramène un nombre dans un intervalle en bouclant, comme un angle ou l'index d'un carrousel. `max` est exclu.",
@@ -59,7 +54,6 @@
   "Digits wanted before the decimal point.": "Nombre de chiffres voulus avant le séparateur décimal.",
   "Adds the ordinal suffix: 1st, 2nd, 3rd... in several languages.": "Ajoute le suffixe ordinal : 1st, 2nd, 3rd... dans plusieurs langues.",
   "Options for `currency()`.": "Options de `currency()`.",
-  "Language. Defaults to the one set with `setLocale()`, or `\"en\"`.": "Langue. Par défaut : celle définie avec `setLocale()`, ou `\"en\"`.",
   "Defaults to the currency's usual decimals (2 for EUR, 0 for JPY).": "Par défaut : le nombre de décimales habituel de la devise (2 pour EUR, 0 pour JPY).",
   "How the currency is written. For US dollars in Canada: `US$`, `$`, `USD` or `US dollars`. Defaults to `\"symbol\"`.": "La façon d'écrire la devise. Pour des dollars américains au Canada : `US$`, `$`, `USD` ou `US dollars`. Par défaut : `\"symbol\"`.",
   "Show negative amounts in parentheses, like `($5.00)`.": "Affiche les montants négatifs entre parenthèses, comme `($5.00)`.",
@@ -70,7 +64,6 @@
   "Formats the number for a language, like `\"fr\"` for `\"1,5 KB\"`.": "Formate le nombre pour une langue, comme `\"fr\"` pour `\"1,5 KB\"`.",
   "Your own labels from bytes up, like `[\"o\", \"Ko\", \"Mo\", \"Go\", \"To\"]`.": "Vos propres libellés à partir des octets, comme `[\"o\", \"Ko\", \"Mo\", \"Go\", \"To\"]`.",
   "Options for `format()`.": "Options de `format()`.",
-  "Language, like `\"fr\"` or `\"en-US\"`. Defaults to the one set with `setLocale()`, or `\"en\"`.": "Langue, comme `\"fr\"` ou `\"en-US\"`. Par défaut : celle définie avec `setLocale()`, ou `\"en\"`.",
   "Exact number of decimals.": "Nombre exact de décimales.",
   "Minimum decimals.": "Nombre minimal de décimales.",
   "Maximum decimals. Defaults to `3`.": "Nombre maximal de décimales. Par défaut : `3`.",
@@ -81,10 +74,13 @@
   "When to show the sign. `\"exceptZero\"` gives `+5`.": "Quand afficher le signe. `\"exceptZero\"` donne `+5`.",
   "Thousands separators. Defaults to `true`.": "Séparateurs de milliers. Par défaut : `true`.",
   "Options for `ordinal()`.": "Options de `ordinal()`.",
-  "Built in: `en`, `fr`, `es`, `it`, `pt`, `de`, `nl`. Defaults to the one set with `setLocale()`, or `\"en\"`.": "Intégrées : `en`, `fr`, `es`, `it`, `pt`, `de`, `nl`. Par défaut : celle définie avec `setLocale()`, ou `\"en\"`.",
   "Your own suffixes, for other languages.": "Vos propres suffixes, pour d'autres langues.",
   "Options for `parseBytes()`.": "Options de `parseBytes()`.",
   "1 KB is 1024 bytes when `true`, 1000 when `false`. `KiB` units are always 1024. Defaults to `true`.": "1 KB vaut 1024 octets avec `true`, 1000 avec `false`. Les unités `KiB` valent toujours 1024. Par défaut : `true`.",
   "Options for `variance()` and `stdDev()`.": "Options de `variance()` et `stdDev()`.",
-  "Sample statistic (divides by n - 1) instead of population.": "Statistique d'échantillon (division par n - 1) plutôt que de population."
+  "Sample statistic (divides by n - 1) instead of population.": "Statistique d'échantillon (division par n - 1) plutôt que de population.",
+  "Numbers: clamping, rounding that gets decimals right, statistics, and formatting for humans (sizes, money, ordinals, compact numbers) in any language. Formatting is English by default: change it with `nc.config.set({ locale })` or per call with `{ locale }`.": "Nombres : bornage, arrondi qui traite correctement les décimales, statistiques, et formatage pour les humains (tailles, monnaie, ordinaux, nombres compacts) dans n'importe quelle langue. Le formatage est en anglais par défaut : changez-le avec `nc.config.set({ locale })` ou à chaque appel avec `{ locale }`.",
+  "Language. Defaults to the one set with `nc.config.set()`, or `\"en\"`.": "Langue. Par défaut : celle définie avec `nc.config.set()`, ou `\"en\"`.",
+  "Language, like `\"fr\"` or `\"en-US\"`. Defaults to the one set with `nc.config.set()`, or `\"en\"`.": "Langue, comme `\"fr\"` ou `\"en-US\"`. Par défaut : celle définie avec `nc.config.set()`, ou `\"en\"`.",
+  "Built in: `en`, `fr`, `es`, `it`, `pt`, `de`, `nl`. Defaults to the one set with `nc.config.set()`, or `\"en\"`.": "Intégrées : `en`, `fr`, `es`, `it`, `pt`, `de`, `nl`. Par défaut : celle définie avec `nc.config.set()`, ou `\"en\"`."
 }

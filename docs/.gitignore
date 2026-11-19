@@ -2,6 +2,3 @@
 dist/
 .astro/
 node_modules/
-
-# written by scripts/scenes.mjs before each build
-src/scenes/output.json

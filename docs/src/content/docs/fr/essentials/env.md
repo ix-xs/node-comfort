@@ -1,12 +1,16 @@
 ---
 title: "Variables d'environnement"
-description: "`nc.env` charge les fichiers `.env` et transforme les variables d'environnement en valeurs typées et validées. La meilleure façon de s'en servir est de vérifier toute votre configuration une seule fois, au démarrage."
-sidebar:
-  order: 4
+description: "`nc.env` : des variables d'environnement typées et validées, vérifiées une fois au démarrage, et le chargement et l'analyse des fichiers `.env`."
 ---
 
 ```js
-const config = nc.env.validate({
+const { env } = require("@ix-xs/node-comfort");
+```
+
+## Valider au démarrage
+
+```js
+const config = env.validate({
   NODE_ENV: { type: "enum", values: ["development", "production", "test"], default: "development" },
   PORT: { type: "port", default: 3000 },
   DATABASE_URL: { type: "url", protocols: ["postgres"] },
@@ -16,12 +20,12 @@ const config = nc.env.validate({
   SENTRY_DSN: { type: "url", optional: true },
 });
 
-config.PORT;      // number
-config.CACHE_TTL; // 300000 (millisecondes)
-config.ADMINS;    // string[]
+config.PORT;      // 3000, un nombre
+config.CACHE_TTL; // 300000, en millisecondes
+config.ADMINS;    // un string[]
 ```
 
-Au moindre problème, vous recevez une seule erreur qui les liste tous, si bien qu'un déploiement défaillant vous dit tout en une fois :
+`validate(spec, { env })` renvoie un objet figé et typé (`enum` donne l'union de ses `values`). Quand quelque chose ne va pas, une seule `ValidationError` liste tous les problèmes :
 
 ```text
 ValidationError: Validation failed with 2 issues:
@@ -29,28 +33,50 @@ ValidationError: Validation failed with 2 issues:
   • JWT_SECRET: must contain at least 32 characters
 ```
 
-L'objet renvoyé est gelé et entièrement typé, y compris les valeurs littérales de `enum`.
+Une variable est obligatoire sauf si elle a un `default` ou `optional: true`. Une variable vide compte comme absente.
 
-## Types de variables
+## Types
 
-| `type` | Résultat | Accepte |
-| --- | --- | --- |
-| `string` | `string` | n'importe quoi ; `pattern` et `minLength` ajoutent des règles |
-| `number` | `number` | des nombres ; `min`, `max`, `integer` |
-| `boolean` | `boolean` | `true`/`false`, `1`/`0`, `yes`/`no`, `on`/`off` |
-| `port` | `number` | de 0 à 65535 |
-| `url` | `string` | des URL absolues ; `protocols` les restreint |
-| `email` | `string` | des adresses e-mail |
-| `duration` | `number` (ms) | `"30s"`, `"5m"`, `"1h30m"`, `"PT1H"` ou des millisecondes |
-| `list` | `string[]` | des valeurs séparées par des virgules ; `separator` change la virgule |
-| `json` | `any` | du texte JSON |
-| `enum` | union de `values` | l'une des `values` |
+| `type` | Résultat | Accepte | Options |
+| --- | --- | --- | --- |
+| `string` | `string` | Tout | `pattern`, `minLength` |
+| `number` | `number` | Des nombres | `min`, `max`, `integer` |
+| `boolean` | `boolean` | `true`/`false`, `1`/`0`, `yes`/`no`, `on`/`off` | |
+| `port` | `number` | De 0 à 65535 | |
+| `url` | `string` | Des URL absolues | `protocols` |
+| `email` | `string` | Des adresses e-mail | |
+| `duration` | `number`, en ms | `"30s"`, `"5m"`, `"1h30m"`, `"PT1H"`, des millisecondes | |
+| `list` | `string[]` | Des valeurs séparées par des virgules | `separator` |
+| `json` | `any` | Du texte JSON | |
+| `enum` | Une des `values` | Une des `values` | `values` (obligatoire) |
 
-Une variable est obligatoire, sauf si elle a un `default` ou `optional: true`. Une variable vide compte comme absente. Toute variable peut porter une `description` : elle est ajoutée au message « is required », et c'est ce que `env.example()` écrit au-dessus de la variable.
+Chaque type accepte aussi `default`, `optional` et `description`.
 
-## Un .env.example à partir de la même spécification
+## Une seule variable
 
-Gardez la spécification dans une variable, et `env.example()` la transforme en texte d'un fichier `.env.example` : une entrée par variable, avec sa description, son type et sa valeur par défaut.
+```js
+env.port("PORT", { default: 3000 });
+env.number("WORKERS", { default: 4, min: 1, integer: true });
+env.boolean("FEATURE_BETA", { default: false });
+env.url("API_URL");                                          // lève une erreur si absente ou invalide
+env.oneOf("LOG_LEVEL", ["debug", "info", "warn"], { default: "info" });
+env.duration("CACHE_TTL", { default: "5m" });                // 300000
+env.list("ADMINS", { optional: true });                      // undefined si absente
+env.get("REGION", "eu-west-1");                              // une chaîne brute, ne lève jamais d'erreur
+env.required("STRIPE_SECRET_KEY");
+```
+
+| Fonction | Renvoie |
+| --- | --- |
+| `get(name, fallback?)` | La chaîne brute, ou `fallback`. Ne lève jamais d'erreur |
+| `has(name)` | Si elle est définie, même à une chaîne vide |
+| `required(name)` | La chaîne brute. Lève une erreur si elle est absente ou vide |
+| `string`, `number`, `boolean`, `port`, `url`, `duration`, `list`, `json` | La valeur typée, avec les options du tableau ci-dessus |
+| `oneOf(name, values, options?)` | Une des `values` |
+
+Chaque lecteur typé accepte `{ default, optional, env }` : `env` lit dans un autre objet que `process.env`. Une valeur absente ou invalide lève une `ValidationError`.
+
+## Un .env.example à partir de la spec
 
 ```js
 const spec = {
@@ -60,8 +86,7 @@ const spec = {
   SENTRY_DSN: { type: "url", optional: true },
 };
 
-const config = nc.env.validate(spec);
-nc.writeFile(".env.example", nc.env.example(spec));
+require("node:fs").writeFileSync(".env.example", env.example(spec));
 ```
 
 ```bash
@@ -80,70 +105,41 @@ LOG_LEVEL=info
 SENTRY_DSN=
 ```
 
-`example()` renvoie le texte et n'écrit rien elle-même. Lancez-la depuis un petit script et commitez le fichier : personne n'aura à lire le code pour savoir quoi définir.
+`example(spec)` renvoie le texte et n'écrit rien. Une `description` apparaît aussi dans le message « is required ».
 
-## Lire une seule variable
+## Charger des fichiers
 
-Les mêmes types sont disponibles un par un :
-
-```js
-nc.env.port("PORT", { default: 3000 });
-nc.env.number("WORKERS", { default: 4, min: 1, integer: true });
-nc.env.bool("FEATURE_BETA", { default: false });
-nc.env.url("API_URL");                         // lève une erreur si elle est absente ou invalide
-nc.env.oneOf("LOG_LEVEL", ["debug", "info", "warn"], { default: "info" });
-nc.env.get("REGION", "eu-west-1");             // simple chaîne, ne lève jamais d'erreur
-nc.env.required("STRIPE_SECRET_KEY");
-```
-
-## Les fichiers .env
-
-Le fichier `.env` du répertoire de travail est chargé au moment où vous importez le package. Les variables déjà définies ne sont pas écrasées, l'environnement réel l'emporte donc toujours. Définissez `NODE_COMFORT_DOTENV=false` pour désactiver ce comportement.
-
-Chargez vous-même d'autres fichiers quand vous en avez besoin :
+Le `.env` du dossier de travail est chargé quand le paquet est requis ([Configuration](/start/configuration/)). Chargez les autres fichiers vous-même :
 
 ```js
-nc.env.load(".env.test", { override: true });
-nc.env.load([".env.local", ".env"]);
+env.load(".env.test", { override: true });
+env.load([".env.local", ".env"]);       // le premier fichier qui définit une variable l'emporte
+env.load(".env", { cascade: true });    // avec NODE_ENV=production : .env.production.local, .env.local, .env.production, .env
+env.load(".env.ci", { required: true }); // lève une erreur si le fichier manque
 ```
 
-`load()` travaille en deux temps. Elle lit les fichiers, et le premier fichier qui définit une variable l'emporte : ici, `.env.local` passe avant `.env`. Elle place ensuite le résultat dans `process.env`, en conservant les variables déjà présentes, sauf si vous passez `override: true`. `override` ne change jamais l'ordre entre les fichiers.
+| Option | Par défaut | |
+| --- | --- | --- |
+| `override` (ou `overwrite`) | `false` | Remplace les variables déjà définies. Ne change jamais l'ordre entre les fichiers |
+| `cascade` | `false` | Charge aussi les fichiers du mode, le plus précis d'abord. `true` prend le mode dans `NODE_ENV`, une chaîne le nomme. `.env.local` est sauté en mode test |
+| `required` | `false` | Lève une `NodeComfortError` de code `ERR_ENV_FILE_MISSING` quand un fichier manque |
+| `expand` | `true` | Remplace les références `${OTHER}` |
+| `target` | `process.env` | Où placer les variables |
 
-Le `.env` chargé au démarrage fait exception : ce qu'il a défini a la priorité la plus basse, un fichier que vous chargez vous-même l'emporte donc sur lui. `nc.env.load(".env.local")` fait ce que vous attendez, sans rien avoir à désactiver. L'environnement réel l'emporte toujours sur tous les fichiers.
+`load` renvoie tout ce qu'il a lu. Les chemins partent du dossier de travail. Le vrai environnement l'emporte sur tous les fichiers, et un fichier que vous chargez l'emporte sur le `.env` automatique. Une référence comme `${HOST}` prend la valeur finale de `HOST`, quel que soit le fichier ou l'environnement qui la définit.
 
-### Ce que le chargement automatique laisse de côté
+Un `load()` explicite définit toutes les variables, y compris celles que le chargement automatique écarte (`NODE_OPTIONS`, `PATH`...) : ne chargez que des fichiers de confiance.
 
-Le `.env` chargé au démarrage est lu dans le dossier de travail, qui peut être un dépôt que quelqu'un vous a envoyé. Il ne définit donc jamais les variables capables d'exécuter du code dans les programmes que votre application lance, ou de désactiver les vérifications TLS : `NODE_OPTIONS`, `NODE_TLS_REJECT_UNAUTHORIZED`, `NODE_EXTRA_CA_CERTS`, `NODE_PATH`, `LD_PRELOAD`, `DYLD_*`, `GIT_SSH_COMMAND`, `GIT_CONFIG*`, `PATH`, `EDITOR`, `PAGER` et quelques autres du même genre (la [référence](/reference/env/) donne la liste complète). Quand il en laisse une de côté, il le signale une fois sur stderr.
-
-Si vous voulez vraiment l'une d'elles depuis un fichier de confiance, chargez-le vous-même : un appel explicite à `nc.env.load()` les définit toutes.
+## Analyser
 
 ```js
-nc.env.load(".env"); // votre propre fichier : NODE_OPTIONS et les autres sont aussi définies
+env.parse('PORT=3000\nURL="http://localhost:${PORT}"'); // { PORT: "3000", URL: "http://localhost:3000" }
+env.parse("TMP_COPY=${TMP}", { env: process.env });       // TMP pris dans le vrai environnement
 ```
 
-Une référence comme `${HOST}` prend la valeur finale de `HOST`. Si l'environnement ou `.env.local` définit `HOST`, un `URL=http://${HOST}` placé dans `.env` la suit.
-
-`load()` renvoie tout ce qu'elle a lu dans les fichiers. Les fichiers absents sont ignorés, sauf si vous passez `required: true`.
-
-## Un jeu de fichiers par mode
-
-`cascade` charge les fichiers qui accompagnent un fichier `.env`, le plus spécifique en premier :
-
-```js
-nc.env.load(".env", { cascade: true });
-// avec NODE_ENV=production : .env.production.local, .env.local, .env.production, .env
-```
-
-Le mode est `NODE_ENV`, ou `"development"` quand il n'est pas défini. Passez une chaîne pour le nommer vous-même : `{ cascade: "staging" }`. En mode `test`, `.env.local` est laissé de côté, pour que les tests se déroulent de la même façon chez tout le monde.
-
-Le `.env` chargé au démarrage ne gêne pas : les fichiers plus spécifiques remplacent ce qu'il a défini.
-
-## Ce qu'un fichier .env peut contenir
-
-L'analyseur gère ce à quoi vous vous attendez : guillemets, valeurs sur plusieurs lignes, `export`, commentaires, séquences d'échappement et références à d'autres variables.
+`parse(text, { expand, env })` ne modifie rien et ne lit que le texte et `env`, jamais `process.env` par défaut. Il comprend les guillemets, les valeurs sur plusieurs lignes, `export`, les commentaires, les échappements, `$VAR`, `${VAR}` et `${VAR:-default}`. Une valeur qui dépasse 64 Ko à force de références lève une `RangeError`.
 
 ```bash
-# .env
 APP_URL=http://localhost:${PORT:-3000}
 PRIVATE_KEY="-----BEGIN KEY-----
 ...
@@ -151,19 +147,19 @@ PRIVATE_KEY="-----BEGIN KEY-----
 GREETING='single quotes keep ${THIS} as is'
 ```
 
-`nc.env.parse(text)` analyse le texte sans toucher à `process.env`, et sans le lire non plus : une référence `${VAR}` n'utilise que les variables du texte lui-même et celles de l'option `env`. Passez `process.env` pour utiliser l'environnement réel :
-
-```js
-nc.env.parse('PORT=3000\nURL="http://localhost:${PORT}"'); // { PORT: "3000", URL: "http://localhost:3000" }
-nc.env.parse("TMP_COPY=${TMP}", { env: process.env });       // TMP vient de l'environnement réel
-```
-
-Une valeur qui dépasse 64 Ko à force de références (des variables qui utilisent chacune plusieurs fois la précédente) lève une `RangeError`.
-
 ## Modes
 
-```js
-nc.env.mode();          // NODE_ENV, ou "development"
-nc.env.isProduction();
-nc.env.isTest();        // vrai aussi sous node --test ou Jest
-```
+| Fonction | Renvoie |
+| --- | --- |
+| `mode()` | `NODE_ENV`, ou `"development"` |
+| `isProduction()`, `isDevelopment()` | Compare `mode()` |
+| `isTest()` | `NODE_ENV=test`, et aussi sous `node --test` ou Jest |
+
+## Avant la 3.0
+
+| 2.2 | 3.0 |
+| --- | --- |
+| `nc.env.bool()` | `nc.env.boolean()` |
+| `nc.getEnv()`, `nc.fs.getEnv()` | `nc.env.get()` |
+
+Les anciens noms fonctionnent encore en 3.0, avertissent une fois et disparaissent en 4.0. `env.load(..., { required: true })` lève désormais une `NodeComfortError` de code `ERR_ENV_FILE_MISSING` pour un fichier manquant.

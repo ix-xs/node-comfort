@@ -1,13 +1,15 @@
 ---
 title: "Validation par schéma"
-description: "`nc.schema` valide des données par rapport à une description de ce qu'elles doivent être, et vous donne en prime le type TypeScript des données valides. Si vous avez utilisé `zod`, vous serez en terrain connu."
-sidebar:
-  order: 7
+description: "`nc.schema` vérifie des données d'après une description de leur forme, les nettoie et donne le type TypeScript des données valides. L'API suit celle de zod."
 ---
 
 ```js
 const { schema: s } = require("@ix-xs/node-comfort");
+```
 
+## Analyser
+
+```js
 const User = s.object({
   name: s.string().trim().min(2),
   email: s.string().email().toLowerCase(),
@@ -16,27 +18,25 @@ const User = s.object({
   tags: s.array(s.string()).max(5).default([]),
 });
 
-const user = User.parse(req.body);
+User.parse({ name: "  Ada ", email: "ADA@Example.com", extra: 1 });
+// { name: "Ada", email: "ada@example.com", role: "user", tags: [] }
 ```
 
-`parse()` renvoie les données nettoyées (espaces retirés, minuscules appliquées, valeurs par défaut renseignées, clés inconnues supprimées), ou lève une `ValidationError` qui liste tous les problèmes.
+| Méthode | Renvoie |
+| --- | --- |
+| `parse(value, options?)` | Les données nettoyées (espaces retirés, valeurs converties, valeurs par défaut posées, clés inconnues retirées), ou lève une `ValidationError` qui liste chaque problème |
+| `safeParse(value, options?)` | `{ success: true, data }` ou `{ success: false, error, issues }`, ne lève jamais |
+| `is(value, options?)` | `true` ou `false` ; une garde de type |
 
-## Gérer les erreurs
+La seule option est `maxDepth` : le nombre de niveaux d'objets et de tableaux qu'une valeur peut avoir (1000 par défaut). Une valeur plus profonde reçoit un problème `"too_deep"` au lieu d'épuiser la pile.
 
-`safeParse()` ne lève jamais d'erreur. Elle renvoie soit les données, soit l'erreur :
-
-```js
-const result = User.safeParse(req.body);
-if (!result.success) {
-  return res.status(400).json(result.error.flatten());
-  // { email: ["Invalid email address"], age: ["Must be greater than or equal to 18"] }
-}
-saveUser(result.data);
-```
-
-Un résultat en échec contient aussi `issues`, la simple liste des problèmes. Chaque problème a un `path`, un `code` et un `message` que vous pouvez montrer aux utilisateurs :
+## Erreurs
 
 ```js
+const result = User.safeParse({ name: "Ada", email: "nope", age: 12 });
+
+result.error.flatten();
+// { email: ["Invalid email address"], age: ["Must be greater than or equal to 18"] }
 result.issues;
 // [
 //   { path: ["email"], code: "invalid_string", message: "Invalid email address", validation: "email" },
@@ -44,9 +44,16 @@ result.issues;
 // ]
 ```
 
-`result.error` est une `ValidationError` qui contient la même liste. `is()` est une simple vérification par oui ou non, qui sert aussi de garde de type.
+`result.error` est une `nc.errors.ValidationError` (code `ERR_VALIDATION`) avec les mêmes `issues`. `flatten()` regroupe les messages par champ, pour un formulaire. Voir [Erreurs](/basics/errors/).
 
-## Les types en prime
+Chaque vérification accepte un message, sous forme de texte ou de fonction de la valeur :
+
+```js
+s.string().min(8, "Use at least 8 characters");
+s.number().max(100, (value) => `${value} is too high`);
+```
+
+## Types
 
 ```ts
 import { schema as s, type Infer } from "@ix-xs/node-comfort";
@@ -55,93 +62,82 @@ type User = Infer<typeof User>;
 // { name: string; email: string; age?: number; role: "admin" | "user"; tags: string[] }
 ```
 
-En JavaScript, le même type est disponible grâce à JSDoc : `/** @typedef {import("@ix-xs/node-comfort").Infer<typeof User>} User */`.
+En JavaScript : `/** @typedef {import("@ix-xs/node-comfort").Infer<typeof User>} User */`.
 
-## Les briques de base
+## Constructeurs
 
-| Constructeur | Vérifications |
+| Constructeur | Vérifications et méthodes |
 | --- | --- |
 | `s.string()` | `min`, `max`, `length`, `nonempty`, `regex`, `startsWith`, `endsWith`, `includes` ; formats `email`, `url`, `uuid`, `ulid`, `ip`, `hostname`, `datetime`, `date`, `slug`, `hex`, `base64`, `semver` ; transformations `trim`, `toLowerCase`, `toUpperCase` |
 | `s.number()` | `min`, `max`, `gt`, `lt`, `int`, `safe`, `positive`, `nonnegative`, `negative`, `multipleOf` |
 | `s.boolean()`, `s.bigint()` | |
 | `s.date()` | `min`, `max` |
-| `s.literal(value)` | exactement cette valeur |
-| `s.enum([...])` | l'une des valeurs |
-| `s.array(item)` | `min`, `max`, `length`, `nonempty`, `unique` |
-| `s.object(shape)` | `strict`, `passthrough`, `extend`, `merge`, `pick`, `omit`, `partial`, `required`, `keyof` |
-| `s.union([...])`, `s.discriminatedUnion(key, [...])` | l'un de plusieurs schémas |
-| `s.tuple([...])`, `s.record(values)` | |
-| `s.lazy(() => schema)` | structures récursives |
-| `s.instanceOf(Class)`, `s.custom(test)` | tout le reste |
-| `s.any()`, `s.unknown()` | n'importe quoi |
+| `s.literal(value)` | Exactement cette valeur |
+| `s.enum([...])` | Une des valeurs |
+| `s.array(item)` | `min`, `max`, `length`, `nonempty`, `unique` ; `element` est le schéma des éléments |
+| `s.object(shape)` | `strict`, `passthrough`, `extend`, `merge`, `pick`, `omit`, `partial`, `required`, `keyof` ; `shape` |
+| `s.union([...])` | Le premier schéma qui convient |
+| `s.discriminatedUnion(key, [...])` | Le schéma d'objet dont le littéral `key` correspond |
+| `s.tuple([...])`, `s.record(values)` | Tableaux de longueur fixe, objets aux clés libres |
+| `s.lazy(() => schema)` | Structures récursives |
+| `s.instanceOf(Class)`, `s.custom(test)` | Tout le reste |
+| `s.any()`, `s.unknown()` | N'importe quoi |
+| `s.coerce.string()`, `.number()`, `.boolean()`, `.date()`, `.bigint()` | Convertissent d'abord l'entrée |
+| `s.Schema` | La classe de base de tous les schémas, pour `instanceof` |
 
 ```js
-s.number().gt(0).lt(1000); // 0 et 1000 sont refusés, là où min et max les acceptent
-s.number().safe();         // un entier que JavaScript représente exactement, pour les identifiants issus d'une base de données
+s.number().gt(0).lt(1000); // 0 et 1000 refusés, là où min et max les acceptent
+s.number().safe();         // un entier que JavaScript représente exactement
 s.string().date();         // "2024-01-31" : un vrai jour, sans heure
-s.string().slug();         // "my-first-post"
 ```
 
-Chaque vérification accepte un message facultatif, sous forme de chaîne ou de fonction de la valeur :
+## Valeurs facultatives et par défaut
 
-```js
-s.string().min(8, "Use at least 8 characters");
-s.number().max(100, (value) => `${value} is too high`);
-```
-
-## Facultatif, nullable et valeurs par défaut
-
-```js
-s.string().optional();              // string | undefined, et la clé devient facultative
-s.string().nullable();              // string | null
-s.string().default("guest");        // utilisée quand la valeur est undefined
-s.date().default(() => new Date()); // une nouvelle valeur à chaque fois
-s.number().catch(0);                // 0 au lieu d'une erreur quand la valeur est invalide
-```
+| Méthode | Donne |
+| --- | --- |
+| `optional()` | `T \| undefined` ; la clé d'un objet devient facultative |
+| `nullable()` | `T \| null` |
+| `nullish()` | `T \| null \| undefined` |
+| `default(value)` | `value` quand l'entrée vaut `undefined` ; une fonction est appelée à chaque fois |
+| `catch(value)` | `value` au lieu d'une erreur quand l'entrée est invalide |
+| `or(other)` | Raccourci de `s.union([this, other])` |
+| `array()` | Raccourci de `s.array(this)` |
+| `describe(text)` | Définit `description`, écrite dans le JSON Schema |
 
 ## Transformations et règles personnalisées
 
 ```js
-const Tags = s.string().transform((value) => value.split(",").map((t) => t.trim()));
+const Port = s.string().transform(Number).pipe(s.number().int().min(1).max(65535));
+Port.parse("8080");  // 8080
+Port.parse("70000"); // lève : Must be less than or equal to 65535
 
 const Signup = s.object({ password: s.string().min(8), confirm: s.string() })
   .refine((v) => v.password === v.confirm, { message: "Passwords don't match", path: ["confirm"] });
+Signup.safeParse({ password: "12345678", confirm: "x" }).error.flatten();
+// { confirm: ["Passwords don't match"] }
 ```
 
-`refine` avec un `path` rattache l'erreur à un champ, ce dont les formulaires ont besoin.
-
-`pipe()` envoie le résultat dans un autre schéma. Après un `transform()`, elle vérifie ce que la conversion a produit :
-
-```js
-const Port = s.string().transform(Number).pipe(s.number().int().min(1).max(65535));
-
-Port.parse("8080");  // 8080
-Port.parse("abc");   // lève : Expected number, received NaN
-Port.parse("70000"); // lève : Must be less than or equal to 65535
-```
+| Méthode | Rôle |
+| --- | --- |
+| `transform(fn)` | Remplace la valeur par `fn(value)` |
+| `pipe(schema)` | Vérifie le résultat avec un autre schéma |
+| `refine(test, { message, path, code })` | Une règle personnalisée ; `path` rattache le problème à un champ |
 
 ## Objets
 
-Les clés inconnues sont supprimées par défaut. `.strict()` les rejette et `.passthrough()` les conserve.
+Les clés inconnues sont retirées. `.strict()` les refuse, `.passthrough()` les garde.
 
 ```js
 const Admin = User.extend({ level: s.number() });
 const PublicUser = User.pick(["name", "role"]);
-const UserPatch = User.partial();  // toutes les clés facultatives, pour les requêtes PATCH
-const FullUser = User.required();  // l'inverse : age doit être présent lui aussi
-const SortBy = User.keyof();       // accepte "name", "email", "age", "role" ou "tags"
-
-const Timestamps = s.object({ createdAt: s.date(), updatedAt: s.date() });
-const Post = s.object({ title: s.string() }).merge(Timestamps);
+const UserPatch = User.partial(); // toutes les clés facultatives
+const SortBy = User.keyof();      // "name" | "email" | "age" | "role" | "tags"
+const Post = s.object({ title: s.string() }).merge(s.object({ createdAt: s.date() }));
 ```
 
-`extend`, `pick`, `omit`, `partial` et `required` conservent la façon dont le schéma traite les clés inconnues : un schéma strict reste donc strict. Avec `merge`, les clés du second schéma l'emportent, tout comme sa façon de traiter les clés inconnues.
+`extend`, `pick`, `omit`, `partial` et `required` conservent le traitement des clés inconnues ; avec `merge`, le second schéma l'emporte. Les noms hérités comme `toString` ne sont lus que si l'entrée les possède en propre.
 
-Les méthodes dont tout objet hérite, comme `toString`, ne sont pas des données : une clé qui porte un tel nom n'est lue que si l'entrée la possède vraiment.
-
-## Une forme parmi plusieurs
-
-Quand des objets se distinguent par une clé, comme le `type` d'un événement, utilisez `discriminatedUnion()` :
+## Unions
 
 ```js
 const Payment = s.discriminatedUnion("method", [
@@ -149,19 +145,14 @@ const Payment = s.discriminatedUnion("method", [
   s.object({ method: s.literal("transfer"), iban: s.string() }),
 ]);
 
-Payment.parse({ method: "card", last4: "4242" });          // { method: "card", last4: "4242" }
 Payment.safeParse({ method: "transfer" }).error.flatten(); // { iban: ["Required"] }
 Payment.safeParse({ method: "cash" }).error.flatten();
 // { method: ['Expected "card" | "transfer", received "cash"'] }
 ```
 
-Elle lit d'abord la clé et n'exécute que le schéma correspondant : les erreurs portent donc sur le genre d'objet que l'entrée déclare être. Chaque option doit être un schéma d'objet avec un littéral différent pour cette clé.
+`discriminatedUnion` lit d'abord la clé et n'exécute que le schéma correspondant : les problèmes concernent donc ce type d'objet. `s.union([s.string(), s.number()])` essaie chaque schéma tour à tour.
 
-`s.union([...])` essaie chaque schéma tour à tour et garde le premier qui convient. Utilisez-la quand une telle clé n'existe pas, comme dans `s.union([s.string(), s.number()])`.
-
-## Chaînes de requête et valeurs d'environnement
-
-Les valeurs qui viennent des URL, des formulaires et des variables d'environnement sont toujours des chaînes. `s.coerce` les convertit avant de les vérifier :
+## Chaînes venues des URL et de l'environnement
 
 ```js
 const Query = s.object({
@@ -173,7 +164,7 @@ const Query = s.object({
 Query.parse({ page: "2", active: "true" }); // { page: 2, active: true }
 ```
 
-`coerce.boolean()` comprend `"true"`, `"1"`, `"yes"`, `"on"` et leurs contraires.
+`coerce.boolean()` lit `"true"`, `"1"`, `"yes"`, `"on"` et leurs contraires.
 
 ## Données récursives
 
@@ -182,18 +173,13 @@ const Category = s.object({
   name: s.string(),
   children: s.lazy(() => s.array(Category)).default([]),
 });
-```
 
-Une valeur très profondément imbriquée, comme un corps JSON fait de cent mille `[`, épuiserait la pile. `parse()`, `safeParse()` et `is()` s'arrêtent donc à 1000 niveaux d'objets et de tableaux, et signalent un problème `"too_deep"` au lieu de lever une `RangeError` depuis les profondeurs. Abaissez la limite avec `maxDepth` quand vous savez jusqu'où vos données descendent :
-
-```js
-const result = Category.safeParse(req.body, { maxDepth: 20 });
-if (!result.success) result.issues; // [{ path: ["children", 0, "children", ...], code: "too_deep", ... }]
+Category.safeParse(body, { maxDepth: 20 }); // au-delà de 20 niveaux : un problème "too_deep"
 ```
 
 ## JSON Schema
 
-`toJSONSchema()` décrit ce qu'un schéma accepte sous la forme d'un JSON Schema (draft 2020-12), pour un document OpenAPI ou un générateur de formulaires :
+`toJSONSchema()` écrit un JSON Schema (draft 2020-12), pour OpenAPI ou un générateur de formulaires :
 
 ```js
 const Forecast = s.object({
@@ -215,6 +201,4 @@ Forecast.toJSONSchema();
 // }
 ```
 
-Les règles qui n'existent que dans le code, comme `refine()` et `transform()`, ne peuvent pas s'écrire en JSON Schema et sont laissées de côté. Un schéma récursif est placé sous `$defs`.
-
-Tous les constructeurs et toutes les vérifications sont listés dans la [référence](/reference/schema/).
+`refine()` et `transform()` ne peuvent pas s'y exprimer et sont omis. Un schéma récursif va sous `$defs`.

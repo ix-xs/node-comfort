@@ -14,10 +14,10 @@ const t = useT(locale);
 
 /** Pages offered first, in this order. Titles come from the pages themselves. */
 const STARTING_POINTS = [
-  "start/installation",
-  "project/setup",
-  "essentials/logger",
-  "data/schema",
+  "index", // the installation, the home page
+  "start/configuration",
+  "basics/organisation",
+  "essentials/fs",
   "system/http",
   "system/sqlite",
   "reference", // not a content page: its title comes from the reference itself
@@ -27,6 +27,7 @@ const QUERIES = ["slugify", "retry", "safeParse", "uuidv7", "paginate"];
 
 /** The part of the documentation a page belongs to, as the sidebar names it. */
 function area(slug: string): string {
+  if (slug === "index") return t("area.start");
   const folder = slug.includes("/") ? slug.slice(0, slug.indexOf("/")) : slug;
   return t(`area.${folder}` as UiKey);
 }
@@ -35,8 +36,10 @@ function area(slug: string): string {
 const titles = new Map((await getCollection("docs")).map((entry) => [entry.id, entry.data.title]));
 const pages = STARTING_POINTS.map((slug) => {
   // The page in this language when it is translated, the English one otherwise.
-  const title = (locale && titles.get(`${locale}/${slug}`)) || titles.get(slug) || (slug === "reference" ? referenceWords(locale).title : undefined);
-  return title ? { title, area: area(slug), href: href(`/${slug}/`, locale) } : undefined;
+  // The home page of a translation has the language as its id ("fr").
+  const translated = slug === "index" ? locale : `${locale}/${slug}`;
+  const title = (locale && titles.get(translated!)) || titles.get(slug) || (slug === "reference" ? referenceWords(locale).title : undefined);
+  return title ? { title, area: area(slug), href: href(slug === "index" ? "/" : `/${slug}/`, locale) } : undefined;
 }).filter((page) => page !== undefined);
 ---
 

@@ -6,7 +6,7 @@ import { withBase, withLocale } from "../plugins/base-links.mjs";
 const en = {
   // Header
   "nav.sections": "Sections",
-  "nav.docs": "Guide",
+  "nav.docs": "Documentation",
   "nav.reference": "Reference",
   "nav.github": "GitHub repository",
   "nav.theme": "Switch between dark and light",
@@ -14,12 +14,12 @@ const en = {
 
   // Names of the parts of the documentation, as the sidebar writes them
   "area.start": "Getting started",
-  "area.project": "Your first project",
+  "area.basics": "Basics",
+  "area.modules": "Modules",
   "area.essentials": "Essentials",
   "area.data": "Data",
   "area.flow": "Functions and async",
   "area.system": "System and network",
-  "area.recipes": "Complete examples",
   "area.help": "Help",
   "area.reference": "Reference",
 
@@ -37,19 +37,19 @@ export type UiKey = keyof typeof en;
 
 const fr: Record<UiKey, string> = {
   "nav.sections": "Rubriques",
-  "nav.docs": "Guide",
+  "nav.docs": "Documentation",
   "nav.reference": "Référence",
   "nav.github": "Dépôt GitHub",
   "nav.theme": "Basculer entre sombre et clair",
   "nav.language": "Langue",
 
-  "area.start": "Pour commencer",
-  "area.project": "Votre premier projet",
+  "area.start": "Démarrer",
+  "area.basics": "Les bases",
+  "area.modules": "Les modules",
   "area.essentials": "Essentiels",
   "area.data": "Données",
   "area.flow": "Fonctions et asynchrone",
   "area.system": "Système et réseau",
-  "area.recipes": "Exemples complets",
   "area.help": "Aide",
   "area.reference": "Référence",
 

@@ -4,7 +4,7 @@
 import StarlightPage from "@astrojs/starlight/components/StarlightPage.astro";
 import { Code } from "@astrojs/starlight/components";
 import type { ApiSymbol, Namespace } from "../../reference/model";
-import { example, find, firstSentence, model, nsKind, pathOf, shortName, sidebar, translate, untranslated, words } from "../../reference/model";
+import { example, find, firstSentence, membersOf, model, nsKind, ownedName, pathOf, shortName, sidebar, translate, untranslated, words } from "../../reference/model";
 import { href, render } from "../../reference/markdown";
 import { guideTitle } from "../../reference/guide";
 
@@ -26,8 +26,6 @@ const moreHtml = await render(rest.join("\n\n"), locale, options);
 
 const pkg = model.package.name;
 const importCode = [`const { ${key} } = require("${pkg}");`, w.orAlone, `const ${key} = require("${ns.module}");`].join("\n");
-const flat = model.flat[key] ?? [];
-const flatHtml = flat.length ? await render(w.topLevelText(`nc.${flat[0]}()`, `nc.${key}.${flat[0]}()`), locale, { inline: true }) : "";
 const examples = (ns.examples ?? []).map((code) => example(key, code, locale));
 const guide = await guideTitle(ns.guide, locale);
 
@@ -41,9 +39,21 @@ async function row(symbol: ApiSymbol) {
 const members = await Promise.all(ns.members.map((ref) => find(ref)!).filter(Boolean).map(row));
 const types = await Promise.all((ns.types ?? []).map((ref) => find(ref)!).filter(Boolean).map(row));
 const alsoHtml = ns.extra?.length ? await render(w.alsoText, locale, { inline: true }) : "";
+// A big class (nc.sqlite.SQLite) gets a section of its own members.
+const classes = await Promise.all(
+  members
+    .filter(({ symbol }) => symbol.members?.length)
+    .map(async ({ symbol }) => ({
+      symbol,
+      id: `${symbol.slug}-members`,
+      hint: await render(w.classMembersText(symbol.name), locale, { ...options, inline: true }),
+      rows: await Promise.all(membersOf(symbol).map(row)),
+    })),
+);
 
 const headings = [
   { depth: 2, slug: "members", text: w.members },
+  ...classes.map((c) => ({ depth: 2, slug: c.id, text: w.classMembers(c.symbol.name) })),
   ...(types.length ? [{ depth: 2, slug: "types", text: w.types }] : []),
   ...(ns.extra?.length ? [{ depth: 2, slug: "also-available", text: w.also }] : []),
 ];
@@ -69,7 +79,6 @@ const headings = [
   {moreHtml && <div class="nc-rf-more nc-rf-intro" set:html={moreHtml} lang={pending && locale ? "en" : undefined} />}
 
   <Code code={importCode} lang="js" />
-  {flatHtml && <p set:html={flatHtml} />}
   {examples.map((code) => <Code code={code} lang="js" />)}
 
   {guide && (
@@ -91,6 +100,21 @@ const headings = [
       ))}
     </ul>
   </section>
+
+  {classes.map(({ symbol: owner, id, hint, rows }) => (
+    <section class="nc-rf-section">
+      <h2 id={id}>{w.classMembers(owner.name)}</h2>
+      <p class="nc-rf-hint" set:html={hint} />
+      <ul class="nc-rf-list">
+        {rows.map(({ symbol, html }) => (
+          <li>
+            <a href={href(pathOf(symbol.ref), locale)} data-kind={symbol.kind} translate="no">{ownedName(symbol)}</a>
+            <span set:html={html} />
+          </li>
+        ))}
+      </ul>
+    </section>
+  ))}
 
   {types.length > 0 && (
     <section class="nc-rf-section">

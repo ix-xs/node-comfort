@@ -1,9 +1,9 @@
 ---
 title: "Passer à la 2.2"
 description: "La version 2.2 est une version de sécurité. La plupart des projets passent à la 2.2 sans rien changer. Cette page liste ce qui peut vous demander une action, le plus probable en premier."
-sidebar:
-  order: 6
 ---
+
+Les noms de cette page sont ceux de la 2.2 : [Passer à la 3.0](/help/upgrade-3-0/) donne leur forme en 3.0.
 
 La plupart des corrections de la 2.2 ne changent rien pour du code qui fonctionne aujourd'hui. Celles qui suivent refusent des entrées acceptées jusqu'ici, ou changent une valeur par défaut. Parcourez au moins les premières sections : ce sont celles que la plupart des projets rencontrent.
 
@@ -123,9 +123,9 @@ nc.sys.open("\\\\nas\\reports\\today.pdf", { allowUNC: true });
 Rien d'obligatoire, mais cela vaut le coup d'œil une fois passé à la 2.2 :
 
 - [Les mots de passe Argon2id](/system/crypto/#passwords) avec Node.js 24.7 ou plus récent, et `needsRehash()` pour faire passer les utilisateurs une connexion à la fois.
-- [`totpStep()` et `after`](/system/crypto/#two-factor-authentication) pour refuser un code à deux facteurs déjà utilisé.
-- [`SQLite.op` et `operators: "tagged"`](/system/sqlite/#values-from-a-request) pour les filtres construits à partir de valeurs d'une requête.
+- [`totpStep()` et `after`](/system/crypto/#two-factor-codes) pour refuser un code à deux facteurs déjà utilisé.
+- [`nc.sqlite.op` et `operators: "tagged"`](/system/sqlite/#values-from-a-request) pour les filtres construits à partir de valeurs d'une requête.
 - [`maxDepth`](/data/schema/#recursive-data) pour les schémas qui lisent des entrées profondément imbriquées.
-- [`using`](/recipes/cli-tool/#cleaning-up-with-using) avec les watchers, les planifications, les spinners et les écouteurs, sur Node.js 24 ou plus récent.
+- [`using`](/basics/resources/#using) avec les watchers, les planifications, les spinners et les écouteurs, sur Node.js 24 ou plus récent.
 
 Le [journal des modifications](https://github.com/ix-xs/node-comfort/blob/main/CHANGELOG.md) contient la liste complète.

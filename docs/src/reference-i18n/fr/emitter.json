@@ -22,7 +22,9 @@
   "Options for `on()` and `once()`.": "Options de `on()` et `once()`.",
   "Removes the listener when aborted. One signal can clean up many listeners at once.": "Retire l'écouteur à l'annulation. Un seul signal peut nettoyer de nombreux écouteurs d'un coup.",
   "Options for `waitFor()`.": "Options de `waitFor()`.",
-  "Reject with a `TimeoutError` after this long.": "Rejette avec une `TimeoutError` après cette durée.",
   "Reject with an `AbortError` when aborted.": "Rejette avec une `AbortError` à l'annulation.",
-  "Only resolve for events that pass this test.": "Ne résout que pour les événements qui passent ce test."
+  "Only resolve for events that pass this test.": "Ne résout que pour les événements qui passent ce test.",
+  "Creates an emitter. Same as `new nc.emitter.Emitter()`; extend `nc.emitter.Emitter` to give a class of yours events.": "Crée un émetteur. Identique à `new nc.emitter.Emitter()` ; étendez `nc.emitter.Emitter` pour donner des événements à une classe à vous.",
+  "A typed event emitter. In JavaScript, give the variable a JSDoc type such as `import(\"@ix-xs/node-comfort\").Emitter<{ ready: [port: number] }>`.": "Un émetteur d'événements typé. En JavaScript, donnez à la variable un type JSDoc comme `import(\"@ix-xs/node-comfort\").Emitter<{ ready: [port: number] }>`.",
+  "Reject with a `TimeoutError` after this long. `false` or `Infinity` means no limit, the default.": "Rejette avec une `TimeoutError` après cette durée. `false` ou `Infinity` signifie aucune limite, la valeur par défaut."
 }

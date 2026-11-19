@@ -1,137 +1,252 @@
 ---
 title: "Files and folders"
-description: "`nc.fs` covers the file work of everyday scripts and servers: reading and writing text and JSON, copying, moving, listing, watching. Its functions are also available at the top level (`nc.readJSON()`)."
-sidebar:
-  order: 2
+description: "`nc.fs`: read and write text and JSON, list, find, copy, move, remove and watch, synchronously, with paths relative to the calling file and no try/catch for everyday failures."
 ---
 
 ```js
-const settings = nc.readJSON("./settings.json", { theme: "light" });
-nc.writeJSON("./settings.json", { ...settings, theme: "dark" });
+const { fs } = require("@ix-xs/node-comfort");
 ```
-
-## No try/catch for everyday cases
-
-Missing files and failed operations don't throw. Read functions return `undefined` (or the fallback you pass), and write functions return `false`:
 
 ```js
-const text = nc.readFile("./notes.txt");            // undefined if it's missing
-const config = nc.readJSON("./config.json", {});    // {} if missing or invalid
-if (!nc.writeFile("/root/x", "data")) nc.warn("Could not write");
+const settings = fs.readJSON("./settings.json", { theme: "light" });
+fs.writeJSON("./settings.json", { ...settings, theme: "dark" });
 ```
 
-The few functions that must succeed, like `ensureFolder()`, say so and throw.
+## Return values
+
+Missing files and failed operations do not throw. Reads return `undefined` (or the fallback), writes and operations return `false`:
+
+```js
+fs.read("./notes.txt");           // undefined when it is missing
+fs.readJSON("./config.json", {}); // {} when missing or invalid
+if (!fs.write("/root/x", "data")) logger.warn("Could not write");
+```
+
+Only `ensureFile` and `ensureFolder`, which must succeed, throw.
 
 ## Paths
 
-- Absolute paths are used as they are.
-- Paths starting with `./` or `../` start from **the file that calls the function**. A script reading `./data.json` finds the file next to it, wherever you run it from.
-- Other relative paths, like `logs/app.log`, start from the working directory, as with Node's `fs`.
+| Path | Starts from |
+| --- | --- |
+| Absolute | Used as is |
+| `./x`, `../x` | The file that calls the function, wherever the script is run from |
+| `x`, `logs/x` | The working directory, as with `node:fs` |
 
-`nc.createPath("./x")` shows you the absolute path a function would use.
+`fs.resolve(path)` returns the absolute path a function of `nc.fs` would use; `fs.resolve()` is the working directory. `fs.remove(".")` is the folder of the calling file.
 
-## Writing safely
+Only `nc.fs` reads `./` from the calling file. `nc.sqlite.open()`, the logger's `file.path`, `nc.http.download()`, `nc.env.load()`, `nc.sys.open()` and `fs.glob()` read it from the working directory: pass them `fs.resolve("./x")` for a path next to your file.
 
-`writeFile()` and `writeJSON()` write to a temporary file and rename it. Someone reading the file never sees half of it, and a crash in the middle can't corrupt it. Missing folders are created.
-
-```js
-nc.writeFile("./dist/index.html", html);
-nc.writeFile("./.secrets/token", token, { mode: 0o600 });
-nc.writeJSON("./data/users.json", users, { spaces: 2 });
-nc.appendFile("./logs/audit.log", `${new Date().toISOString()} login ${user}\n`);
-```
-
-A file that already exists keeps its permissions when it's replaced: the token above stays readable by its owner only, even if a later write doesn't repeat `mode`.
-
-For a file that must survive a power cut, `fsync` makes `writeFile()` wait until the data is on the disk before it returns. It's slower, so keep it for the files that need it:
+## Reading
 
 ```js
-nc.writeFile("./data/ledger.json", ledger, { fsync: true }); // objects are written as JSON
+fs.read("./README.md");                              // string
+fs.read("./logo.png", "buffer");                     // Buffer
+fs.readLines("./urls.txt");                          // ["https://a.com", "https://b.com"]
+fs.readJSON("./settings.json", { theme: "light" });  // the fallback when missing or invalid
+fs.readJSON("./tsconfig.json", {}, { comments: true });
 ```
 
-`readJSON()` can read files with comments and trailing commas, like `tsconfig.json`:
+| Function | Returns when it cannot read |
+| --- | --- |
+| `read(path, encoding = "utf8")` | `undefined`. `"buffer"` returns a `Buffer` |
+| `readLines(path)` | `undefined`. A final new line adds no empty line |
+| `readJSON(path, fallback?, { comments, reviver })` | `fallback`. `comments` accepts comments and trailing commas |
+
+## Writing
 
 ```js
-const tsconfig = nc.readJSON("./tsconfig.json", {}, { comments: true });
+fs.write("./dist/index.html", html);
+fs.write("./.secrets/token", token, { mode: 0o600 });
+fs.write("./data/ledger.json", ledger, { fsync: true }); // an object is written as JSON
+fs.writeJSON("./data/users.json", users, { spaces: 2 });
+fs.append("./logs/audit.log", `${new Date().toISOString()} login ${user}\n`);
 ```
 
-## Finding files
+Writes go to a temporary file that is then renamed: a reader never sees half a file, and a crash cannot corrupt it. Missing folders are created. A file that already exists keeps its permissions.
+
+| `write` / `writeJSON` option | Default | |
+| --- | --- | --- |
+| `atomic` | `true` | Temporary file, then rename |
+| `mode` | system default | Permissions of a new file, like `0o600` |
+| `fsync` | `false` | Wait until the data is on the disk |
+| `spaces` | `2` | Indentation of JSON |
+| `encoding` | `"utf8"` | `write` only |
+| `replacer` | none | `writeJSON` only, passed to `JSON.stringify` |
+
+`append(path, data)` adds to the end of a file and creates it if needed.
+
+## Creating
 
 ```js
-nc.glob("src/**/*.{js,ts}");                         // ["src/index.js", "src/lib/a.ts"]
-nc.glob("**/*.test.js", { ignore: ["**/fixtures/**"] });
-nc.glob("packages/*", { type: "folders", absolute: true });
-
-nc.find("package.json");                             // the closest one, searching down
-nc.findUp("package.json");                           // the closest one, searching up
-nc.getFilesIn("./src");                              // every file, absolute paths
-nc.readLines("./urls.txt");                          // ["https://a.com", "https://b.com"]
+fs.ensureFolder("./storage/uploads"); // its absolute path
+fs.ensureFile("./logs/app.log");      // an empty file if needed, an existing one is untouched
+fs.touch("./.last-run");              // true, and the modification time is now
+const dir = fs.temp("export-");       // a new folder in the system temp directory
 ```
 
-Globs understand `*`, `**`, `?`, `[abc]` and `{a,b}`. `node_modules` and `.git` are skipped unless you say otherwise. Patterns are relative to the working directory, or to `cwd`; a pattern that starts from the root of the disk searches there and returns absolute paths:
-
-```js
-nc.glob(`${nc.tempFolder("build-")}/**/*.json`);
-nc.glob("/var/log/**/*.log");
-```
-
-`findUp()` looks in a folder, then in its parent, and so on up to the root of the disk. It's how you find the `package.json` or the `.git` a file belongs to. You get an absolute path, or `undefined`:
-
-```js
-nc.findUp(".git", { type: "folder", cwd: __dirname });
-nc.findUp(["pnpm-lock.yaml", "yarn.lock", "package-lock.json"]); // the first one found in each folder
-nc.findUp(".editorconfig", { cwd: __dirname, stopAt: repoRoot }); // never looks above repoRoot
-```
-
-It starts from the working directory unless you pass `cwd`, and it finds files and folders alike unless you pass `type`.
-
-## Copying, moving, deleting
-
-```js
-nc.copy("./templates", "./dist/templates");            // files or whole folders
-nc.copy("./.env.example", "./.env", { overwrite: false });
-nc.move("./report.pdf", "./archive/2026/report.pdf");  // works across drives
-nc.remove("./dist");                                    // file or folder
-nc.emptyFolder("./tmp");
-```
+| Function | Returns | On failure |
+| --- | --- | --- |
+| `ensureFolder(path)` | Absolute path | Throws |
+| `ensureFile(path)` | Absolute path | Throws |
+| `touch(path)` | `true` | `false` |
+| `temp(prefix = "nc-")` | Absolute path of a new, unique folder | Throws |
 
 ## Checking and measuring
 
 ```js
-nc.exists("./.env");
-nc.isFile("./a.txt"); nc.isFolder("./src");
-nc.fileSize("./backup.zip");         // bytes
-nc.folderSize("./node_modules");
-nc.hashFile("./release.zip");        // sha256, read in chunks
-nc.stat("./video.mp4")?.mtime;
+fs.exists("./.env");               // true
+fs.isFile("./logs/audit.log");     // true
+fs.isFolder("./logs");             // true
+fs.size("./logs/audit.log");       // 14, in bytes
+fs.size("./data");                 // 57, every file of the folder
+fs.hash("./release.zip");          // sha256 in hex, read in chunks
+fs.hash("./release.zip", { algorithm: "md5", encoding: "base64" });
+fs.stat("./video.mp4")?.mtime;
 ```
+
+`size`, `hash` and `stat` return `undefined` when the path does not exist.
+
+## Listing and finding
+
+```js
+fs.list("./");                                             // every file, recursive, absolute paths
+fs.list("./", { type: "folders" });
+fs.list("./", { recursive: false });
+fs.list("./", { filter: (file) => file.endsWith(".json") });
+
+fs.glob("src/**/*.{js,ts}");                               // ["src/index.js", "src/lib/a.ts"]
+fs.glob("**/*.test.js", { ignore: ["**/fixtures/**"] });
+fs.find("package.json");                                   // the closest one, searching down
+fs.findUp("package.json");                                 // the closest one, searching up
+fs.findUp(["pnpm-lock.yaml", "package-lock.json"], { stopAt: repoRoot });
+```
+
+| `list(folder, options)` option | Default | |
+| --- | --- | --- |
+| `type` | `"files"` | `"files"`, `"folders"` or `"all"` |
+| `recursive` | `true` | Go into nested folders |
+| `hidden` (or `dot`) | `true` | Include names starting with a dot |
+| `ignore` | `["node_modules"]` | Folder names skipped with all they hold |
+| `filter` | none | Keeps a path when it returns `true`. A folder left out is still searched |
+
+`list` returns `undefined` when the folder does not exist.
+
+| `glob(pattern, options)` option | Default | |
+| --- | --- | --- |
+| `cwd` | working directory | Where the pattern starts |
+| `absolute` | `false` | Absolute paths. A pattern that starts at the root of the disk always returns them |
+| `dot` | `false` | `*` and `**` match names starting with a dot |
+| `ignore` | `node_modules`, `.git` | Patterns left out |
+| `type` | `"files"` | `"files"`, `"folders"` or `"all"` |
+
+Patterns understand `*`, `**`, `?`, `[abc]` and `{a,b}`. `glob` returns sorted paths with `/` separators.
+
+`find(name, { cwd, type, ignore })` searches down, `findUp(name, { cwd, type, stopAt })` searches up to the root of the disk or to `stopAt`. Both return an absolute path or `undefined`. `findUp` takes several names, tried in order in each folder.
+
+## Copying and moving
+
+```js
+fs.copy("./templates", "./dist/templates");                   // a folder, merged into dest
+fs.copy("./logo.png", "./dist/");                             // ./dist/logo.png
+fs.copy("./.env.example", "./.env", { overwrite: false });
+fs.copy("./src", "./dist", { filter: (source) => !source.endsWith(".test.js") });
+fs.move("./report.pdf", "./archive/2026/report.pdf");        // works across drives
+fs.move("./report.pdf", "./archive/");                       // ./archive/report.pdf
+```
+
+| Source | `dest` | Result |
+| --- | --- | --- |
+| A file | An existing folder, or ends with `/` (or `\` on Windows) | Inside it, same name |
+| A file | Anything else | `dest` itself |
+| A folder | Any | `dest` itself, merged with what is there |
+
+| Option | Default | |
+| --- | --- | --- |
+| `overwrite` | `true` | Replace what exists |
+| `filter(source, destination)` | none | Return `false` to skip a file or folder, with all it holds |
+| `preserveTimestamps` | `false` | `copy` only |
+
+Both return `false` when the source is missing, when `source` or `dest` is empty, when the destination is inside the source, or when the operation failed. Links inside a copied folder are copied as links, never followed. `move` puts a destination in the way aside, and back if the move fails.
+
+## Removing
+
+```js
+fs.remove("./dist");                                           // a file or a folder
+fs.remove("./cache", { contents: true });                      // ./cache stays, empty
+fs.remove("./logs", { filter: (file) => file.endsWith(".log") }); // only what passes, at any depth
+```
+
+| Option | |
+| --- | --- |
+| `contents` | Empty the folder, keep it |
+| `filter(path)` | Delete only what passes. Implies `contents` |
+
+`remove` returns `false` when the path is empty or missing. An empty string is refused, never read as the working directory: write `"."` for the folder of the calling file. With `contents` or `filter`, a link to a folder is never emptied.
 
 ## Watching
 
 ```js
-const watcher = nc.watch({ path: "./src", recursive: true, debounce: 100 })
+const watcher = fs.watch("./src", { recursive: true, debounce: "100ms" })
   .on("change", (file) => rebuild(file))
-  .on("rename", (file) => nc.info(`Added or removed: ${file}`))
-  .on("error", (error) => nc.warn("The watch broke:", error.message));
+  .on("rename", (file) => logger.info(`Added or removed: ${file}`))
+  .on("error", (error) => logger.warn("The watch broke:", error.message));
 
 watcher.stop();
 ```
 
-`debounce` merges the bursts of events editors produce when they save. It takes milliseconds or text like `"100ms"`.
+| Option | |
+| --- | --- |
+| `path` | What to watch, when not given first. Defaults to the working directory |
+| `recursive` | Nested folders too |
+| `debounce` | Merges the events on one file within this long, in ms or like `"100ms"` |
+| `filter(event, file)` | Return `false` to ignore an event |
 
-`"error"` tells you that the watch itself failed, so you can start a new one. When the watched folder is deleted, the event fires once, with the code `ENOENT`, and the watcher stops. Without a listener, such an error is dropped. `watch()` returns `undefined` when the path doesn't exist.
+| Watcher method | |
+| --- | --- |
+| `on(event, callback)`, `off(event, callback)` | `"change"`, `"rename"`, `"all"` (gets the event name too), `"error"` |
+| `pause()`, `resume()` | Ignore events for a while |
+| `stop()` | Stops watching |
 
-On Node.js 24 and later, `using watcher = nc.watch(...)` closes the watcher at the end of the block, even when an error leaves it early: see [Cleaning up with `using`](/recipes/cli-tool/#cleaning-up-with-using).
+Every method returns the watcher. `watch` returns `undefined` when the path does not exist. When the watched folder is deleted, `"error"` fires once with the code `ENOENT` and the watcher stops. `using watcher = fs.watch(...)` stops it at the end of the block ([Resources](/basics/resources/)).
 
-## Odds and ends
+## File names
 
 ```js
-const dir = nc.tempFolder("export-");                     // a fresh folder in the temp directory
-nc.sanitizeFilename('Report: Q1/Q2 "final"?.pdf');         // "Report_ Q1_Q2 _final__.pdf"
-nc.ensureFolder("./storage/uploads");
-nc.touch("./.last-run");
+fs.sanitizeFilename('Report: Q1/Q2 "final"?.pdf'); // "Report_ Q1_Q2 _final__.pdf"
+fs.sanitizeFilename("CON.txt");                    // "_CON.txt"
 ```
 
-`sanitizeFilename()` produces names that work on Windows, macOS and Linux: forbidden characters are replaced and reserved names like `CON` are prefixed.
+The name works on Windows, macOS and Linux: forbidden characters are replaced (`replacement`, `"_"` by default), invisible characters removed, reserved names prefixed, the length capped at 255 bytes.
 
-The 1.x helpers (`getFile`, `getFolder`, `createFile`, `deleteFolder`, `copyFilesIn`, `moveFile` and the rest) are still here, with the same behavior. Every function is listed in the [reference](/reference/fs/).
+## Before 3.0
+
+| 2.2 | 3.0 |
+| --- | --- |
+| `nc.readFile()`, `nc.fs.readFile()` | `nc.fs.read()` |
+| `nc.writeFile()`, `nc.fs.writeFile()` | `nc.fs.write()` |
+| `nc.appendFile()`, `nc.fs.appendFile()` | `nc.fs.append()` |
+| `nc.fileSize()`, `nc.folderSize()` (and under `nc.fs`) | `nc.fs.size()` |
+| `nc.hashFile()`, `nc.fs.hashFile()` | `nc.fs.hash()` |
+| `nc.getFilesIn()`, `nc.getFoldersIn()` (and under `nc.fs`) | `nc.fs.list()`, `nc.fs.list(folder, { type: "folders" })` |
+| `nc.copyFile()`, `nc.copyFolder()`, `nc.copyFilesIn()`, `nc.copyFoldersIn()` (and under `nc.fs`) | `nc.fs.copy()` |
+| `nc.moveFile()`, `nc.moveFolder()`, `nc.moveFilesIn()`, `nc.moveFoldersIn()` (and under `nc.fs`) | `nc.fs.move()` |
+| `nc.deleteFile()`, `nc.deleteFolder()`, `nc.deleteFilesIn()`, `nc.deleteFoldersIn()` (and under `nc.fs`) | `nc.fs.remove()` |
+| `nc.emptyFolder()`, `nc.fs.emptyFolder()` | `nc.fs.remove(folder, { contents: true })` |
+| `nc.createFile()`, `nc.fs.createFile()` | `nc.fs.ensureFile()` or `nc.fs.write()` |
+| `nc.createFolder()`, `nc.fs.createFolder()` | `nc.fs.ensureFolder()` |
+| `nc.tempFolder()`, `nc.fs.tempFolder()` | `nc.fs.temp()` |
+| `nc.createPath()`, `nc.fs.createPath()` | `nc.fs.resolve()` |
+| `nc.getFile(p)`, `nc.fs.getFile(p)` | `nc.fs.isFile(p) ? nc.fs.resolve(p) : undefined` |
+| `nc.getFolder(p)`, `nc.fs.getFolder(p)` | `nc.fs.isFolder(p) ? nc.fs.resolve(p) : undefined` |
+| `nc.getEnv()`, `nc.fs.getEnv()` | `nc.env.get()` |
+| `nc.readJSON()`, `nc.readLines()`, `nc.writeJSON()`, `nc.exists()`, `nc.isFile()`, `nc.isFolder()`, `nc.stat()`, `nc.glob()`, `nc.find()`, `nc.findUp()`, `nc.ensureFile()`, `nc.ensureFolder()`, `nc.touch()`, `nc.copy()`, `nc.move()`, `nc.remove()`, `nc.sanitizeFilename()`, `nc.watch()` | The same name under `nc.fs` |
+
+The old names still work in 3.0, with their 2.2 behaviour, warn once, and are removed in 4.0. Where the new function differs:
+
+- `fileSize()` on a folder returned `undefined`; `size()` returns the total of its files.
+- `createFile()` and `createFolder()` returned `false` when the path existed or on failure; `ensureFile()` and `ensureFolder()` leave what exists, return the absolute path and throw on failure.
+- The `*In` helpers returned a count; `copy()`, `move()` and `remove()` return a boolean.
+- `copy()` and `move()` of a file onto an existing folder, or to a `dest` ending with `/`, now put it inside. In 2.2, the file could replace the whole folder (`move()`), be written under a name like the folder path, or overwrite silently.
+- `remove()`, `copy()` and `move()` refuse an empty path or destination. 2.2 resolved it to the working directory.
+
+See [Upgrading to 3.0](/help/upgrade-3-0/).

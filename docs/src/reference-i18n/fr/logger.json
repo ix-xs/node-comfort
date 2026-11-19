@@ -20,12 +20,9 @@
   "Prints a horizontal line, with an optional title in it.": "Affiche une ligne horizontale, avec un titre facultatif à l'intérieur.",
   "Sets the minimum level.": "Définit le niveau minimal.",
   "For an unknown level.": "Pour un niveau inconnu.",
-  "nc.setLevel(\"warn\");   // warnings and errors only\nnc.setLevel(\"silent\"); // nothing": "nc.setLevel(\"warn\");   // avertissements et erreurs uniquement\nnc.setLevel(\"silent\"); // rien",
   "The current minimum level.": "Le niveau minimal actuel.",
   "Would this level be printed? Use it to skip building expensive debug output.": "Ce niveau serait-il affiché ? Servez-vous-en pour éviter de construire une sortie de débogage coûteuse.",
   "Changes several settings at once.": "Modifie plusieurs réglages à la fois.",
-  "Shows or hides timestamps, or sets their pattern.": "Affiche ou masque les horodatages, ou définit leur motif.",
-  "Changes the markup delimiters, for when `<%` clashes with a template engine.": "Change les délimiteurs du balisage, pour les cas où `<%` entre en conflit avec un moteur de templates.",
   "Creates a logger with its own settings.": "Crée un logger avec ses propres réglages.",
   "A message as `onLog` receives it.": "Un message tel que `onLog` le reçoit.",
   "The method that was called.": "La méthode qui a été appelée.",
@@ -36,7 +33,6 @@
   "Rotate past this size, like `\"10MB\"`.": "Rotation au-delà de cette taille, comme `\"10MB\"`.",
   "How many rotated files to keep. Defaults to `5`.": "Nombre de fichiers de rotation à conserver. Par défaut : `5`.",
   "The permissions a new log file gets, like `0o640`. Defaults to `0o600`: only its owner can read it. A file that already exists keeps its own. Ignored on Windows.": "Les permissions que reçoit un nouveau fichier de logs, comme `0o640`. Par défaut : `0o600`, seul son propriétaire peut le lire. Un fichier qui existe déjà conserve les siennes. Sans effet sous Windows.",
-  "A logger from `createLogger()`. Every method returns the logger, so calls chain.": "Un logger créé par `createLogger()`. Chaque méthode renvoie le logger, les appels peuvent donc s'enchaîner.",
   "A plain message, no badge. Its first argument supports markup.": "Un message simple, sans badge. Son premier argument accepte le balisage.",
   "Very detailed diagnostics, hidden unless the level is `trace`.": "Diagnostic très détaillé, masqué sauf si le niveau est `trace`.",
   "Diagnostics, hidden unless the level is `debug` or lower.": "Diagnostic, masqué sauf si le niveau est `debug` ou inférieur.",
@@ -53,7 +49,6 @@
   "A logger with the same settings and a nested scope. Its `fields` are added to the parent's.": "Un logger avec les mêmes réglages et une portée imbriquée. Ses `fields` s'ajoutent à ceux du parent.",
   "Changes the minimum level.": "Change le niveau minimal.",
   "Would this level be printed? Skip expensive debug output when it wouldn't.": "Ce niveau serait-il affiché ? Évitez une sortie de débogage coûteuse quand ce n'est pas le cas.",
-  "Options for `createLogger()` and `configure()`.": "Options de `createLogger()` et `configure()`.",
   "Hide messages below this level. Defaults to `LOG_LEVEL`, else `\"info\"`.": "Masque les messages en dessous de ce niveau. Par défaut : `LOG_LEVEL`, sinon `\"info\"`.",
   "Shown before each message, like `[db]`. Child loggers extend it (`db:pool`).": "Affichée avant chaque message, comme `[db]`. Les loggers enfants la prolongent (`db:pool`).",
   "`true` shows `[HH:mm:ss]`, `false` hides it, a string is a `time.format` pattern. Defaults to `true`.": "`true` affiche `[HH:mm:ss]`, `false` le masque, une chaîne est un motif `time.format`. Par défaut : `true`.",
@@ -67,5 +62,8 @@
   "Keys whose values are replaced by `\"[redacted]\"` wherever they appear in logged objects, like `[\"password\", \"authorization\"]`. Case doesn't matter.": "Clés dont les valeurs sont remplacées par `\"[redacted]\"` partout où elles apparaissent dans les objets journalisés, comme `[\"password\", \"authorization\"]`. La casse n'a pas d'importance.",
   "Called for every message that passes the level, to send logs somewhere else. It isn't awaited, and an error it throws (or a promise it rejects) is ignored: logging never breaks the program.": "Appelé pour chaque message qui passe le niveau, pour envoyer les logs ailleurs. Il n'est pas attendu, et une erreur qu'il lève (ou une promesse qu'il rejette) est ignorée : la journalisation ne casse jamais le programme.",
   "Log levels, from the most verbose to the most severe. `silent` hides everything.": "Niveaux de log, du plus verbeux au plus grave. `silent` masque tout.",
-  "Where logs go: `process.stdout`, a file stream, or anything with a `write(text)` method.": "Destination des logs : `process.stdout`, un stream de fichier, ou tout objet doté d'une méthode `write(text)`."
+  "Where logs go: `process.stdout`, a file stream, or anything with a `write(text)` method.": "Destination des logs : `process.stdout`, un stream de fichier, ou tout objet doté d'une méthode `write(text)`.",
+  "nc.logger.setLevel(\"warn\");   // warnings and errors only\nnc.logger.setLevel(\"silent\"); // nothing": "nc.logger.setLevel(\"warn\");   // avertissements et erreurs uniquement\nnc.logger.setLevel(\"silent\"); // rien",
+  "A logger from `create()`. Every method returns the logger, so calls chain.": "Un logger créé par `create()`. Chaque méthode renvoie le logger, les appels peuvent donc s'enchaîner.",
+  "Options for `create()` and `configure()`.": "Options de `create()` et `configure()`."
 }

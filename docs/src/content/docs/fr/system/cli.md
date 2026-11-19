@@ -1,25 +1,17 @@
 ---
 title: "Outils en ligne de commande"
-description: "`nc.cli` réunit ce dont un outil en ligne de commande a besoin : arguments, sous-commandes, prompts, menus, spinners, barres de progression, tableaux, arbres et encadrés."
-sidebar:
-  order: 3
+description: "`nc.cli` : arguments et sous-commandes, questions et menus, spinners et barres de progression, tableaux, arbres et encadrés."
 ---
 
 ```js
 const { cli } = require("@ix-xs/node-comfort");
-
-const { flags } = cli.args({ port: { type: "number", short: "p", default: 3000 } });
-const name = await cli.prompt("Project name?", { default: "my-app" });
-const spin = cli.spinner("Installing").start();
-await install();
-spin.succeed("Installed");
 ```
 
-Quand personne n'est au clavier (CI, pipes), les prompts lisent de simples lignes sur stdin et les animations n'affichent que leur état final. `cli.isInteractive()` vous dit dans quel cas vous êtes. Toutes les options sont listées dans la [référence](/reference/cli/).
+Quand personne n'est au clavier (CI, pipes), les questions lisent de simples lignes sur stdin et les animations n'affichent que leur état final. `cli.isInteractive()` indique dans quel cas vous êtes.
 
 ## Arguments
 
-`args` analyse la ligne de commande à partir d'un schéma, et le résultat est typé : `flags.port` est un `number`.
+`args` analyse la ligne de commande d'après un schéma. Le résultat est typé : `flags.port` est un `number`.
 
 ```js
 const { flags, positionals } = cli.args({
@@ -27,7 +19,7 @@ const { flags, positionals } = cli.args({
   verbose: { type: "boolean", short: "v", description: "Show more logs" },
   tag: { type: "string", multiple: true },
   env: { type: "string", choices: ["dev", "prod"], default: "dev" },
-  token: { type: "string", required: true },
+  token: { type: "string", required: true, env: "API_TOKEN" },
 }, { description: "Start the server", version: "1.0.0" });
 ```
 
@@ -35,56 +27,64 @@ const { flags, positionals } = cli.args({
 node server.js -p 8080 -v --tag api --tag web --token=abc public/
 ```
 
-Cela donne `flags = { port: 8080, verbose: true, tag: ["api", "web"], env: "dev", token: "abc" }` et `positionals = ["public/"]`. Les booléens acceptent `--no-verbose`. Tout ce qui suit `--` va dans `positionals` sans être modifié.
+Cela donne `flags = { port: 8080, verbose: true, tag: ["api", "web"], env: "dev", token: "abc" }` et `positionals = ["public/"]`. Les booléens acceptent `--no-verbose` ; tout ce qui suit `--` va dans `positionals`.
 
-`choices` fonctionne aussi avec les nombres : `level: { type: "number", choices: [1, 2, 3] }` accepte `--level 2` et donne le nombre `2`.
+| Champ d'une option | |
+| --- | --- |
+| `type` | `"string"`, `"number"` ou `"boolean"` |
+| `short` | Un alias d'une lettre : `"p"` pour `-p` |
+| `default` | Quand l'option est absente |
+| `multiple` | Peut être répétée ; donne un tableau |
+| `required` | Échoue si elle est absente |
+| `choices` | Valeurs permises, chaînes ou nombres |
+| `env` | Une variable lue quand l'option n'est pas donnée. La ligne de commande l'emporte, puis la variable, puis `default` |
+| `description` | Affichée dans `--help` |
 
-`--help` (ou `-h`) affiche une aide générée puis quitte, et `--version` affiche la version. Une erreur de saisie lève une `TypeError` dont le message est prêt à être affiché, avec une suggestion en cas de faute de frappe :
+Dans une variable, une option répétée est une liste séparée par des virgules (`TAGS=api,web`), et un booléen vaut `1`, `true`, `yes`, `on` ou `y`.
 
-```text
-Unknown option --prot. Did you mean --port?
-Missing required option --token
-Option --port expects a number, got "abc"
-Option --env must be one of: dev, prod (got "staging")
-```
+| Option de `args` | Par défaut | |
+| --- | --- | --- |
+| `argv` | `process.argv.slice(2)` | Ce qui est analysé |
+| `name`, `description`, `usage`, `examples` | | Pour l'aide |
+| `commands` | | Les sous-commandes, ci-dessous |
+| `help` | `true` | Répondre à `--help` et `-h`, puis quitter |
+| `version` | | La réponse à `--version` |
+| `strict` | `true` | Refuser les options inconnues, avec une suggestion |
+| `env` | `process.env` | Où les options `env` sont lues |
 
-Interceptez-la pour afficher le message sans trace de pile :
+Une erreur sur la ligne de commande lève une `TypeError` avec `code: "ERR_CLI_ARGS"` et un message prêt à afficher :
 
 ```js
 let parsed;
 try {
   parsed = cli.args(schema);
 } catch (error) {
+  if (error.code !== "ERR_CLI_ARGS") throw error;
   console.error(error.message);
   process.exit(2);
 }
 ```
 
-Une option peut se rabattre sur une variable d'environnement avec `env`. La ligne de commande l'emporte, puis la variable, puis `default`.
+Les messages qu'elle donne :
 
-```js
-const { flags } = cli.args({
-  port: { type: "number", default: 3000, env: "PORT" },
-  token: { type: "string", required: true, env: "API_TOKEN" },
-  tag: { type: "string", multiple: true, env: "TAGS" },
-});
+```text
+Unknown option --prot. Did you mean --port?
+Missing required option --token
+Option --port expects a number, got "abc"
+Option --env must be one of: dev, prod (got "staging")
+Environment variable PORT expects a number, got "abc"
 ```
-
-```bash
-PORT=8080 API_TOKEN=abc TAGS=api,web node server.js
-```
-
-Cela donne `flags = { port: 8080, token: "abc", tag: ["api", "web"] }`. Dans une variable, une option répétée est une liste séparée par des virgules, et un booléen vaut `1`, `true`, `yes`, `on` ou `y` (`0`, `false`, `no`, `off`, `n` ou rien pour faux). Les variables sont vérifiées comme les options : `PORT=abc` échoue avec `Environment variable PORT expects a number, got "abc"`.
 
 ## Sous-commandes
 
-Donnez à `commands` le nom des sous-commandes et ce qu'elles font. Le premier argument doit être l'une d'elles, et il revient dans `command`.
+Le premier argument doit être l'une des `commands`, et revient dans `command`. Toutes les commandes partagent les options.
 
 ```js
 const { command, flags, positionals, help } = cli.args({
   watch: { type: "boolean", short: "w", description: "Rebuild when a file changes" },
   port: { type: "number", short: "p", default: 3000, env: "PORT", description: "Port for serve" },
 }, {
+  name: "tool",
   description: "Build and serve the site",
   commands: { build: "Build the project", serve: "Start the dev server" },
   examples: ["tool build --watch", "tool serve -p 8080"],
@@ -96,9 +96,7 @@ else if (command === "serve") await serve(flags.port);
 else console.log(help());
 ```
 
-`node tool.js build --watch src` donne `command = "build"`, `flags = { watch: true, port: 3000 }` et `positionals = ["src"]`. Toutes les commandes partagent les mêmes options. Un nom erroné lève une erreur, comme le fait une option erronée : `Unknown command "biuld". Did you mean build?`. Sans aucune commande, `command` vaut `undefined`, et c'est pourquoi l'exemple se termine en affichant `help()`.
-
-Les commandes et les `examples` apparaissent tous dans l'aide. Voici ce qu'affiche `node tool.js --help` :
+`tool build --watch src` donne `command = "build"`, `flags = { watch: true, port: 3000 }`, `positionals = ["src"]`. Un mauvais nom lève `Unknown command "biuld". Did you mean build?` ; aucune commande donne `undefined`. `tool --help` affiche :
 
 ```text
 Build and serve the site
@@ -120,38 +118,42 @@ Examples:
   tool serve -p 8080
 ```
 
-## Prompts
+## Questions et menus
 
 ```js
 const name = await cli.prompt("Project name?", { default: "my-app" });
-const age = await cli.prompt("Age?", { validate: (a) => /^\d+$/.test(a) || "Please enter a number" });
-const token = await cli.password("API token?");       // les caractères saisis s'affichent en *
+const age = await cli.prompt("Age?", { validate: (answer) => /^\d+$/.test(answer) || "Please enter a number" });
+const token = await cli.password("API token?");        // affiché en *
 const ok = await cli.confirm("Deploy to production?"); // y, yes, o, oui...
-```
 
-Quand stdin est un pipe et qu'il n'a plus de lignes à fournir, un prompt est rejeté avec une erreur au lieu d'attendre indéfiniment.
-
-## Menus
-
-```js
 const framework = await cli.select("Framework?", ["Express", "Fastify", "Koa"]);
-
 const plan = await cli.select("Plan?", [
   { label: "Free", value: "free", hint: "0 €" },
   { label: "Pro", value: "pro", hint: "9 €/month" },
   { label: "Enterprise", value: "ent", disabled: true },
 ]);
-
 const features = await cli.multiselect("Features?", ["TypeScript", "ESLint", "Tests", "Docker"], { min: 1 });
 ```
 
-Les flèches pour se déplacer, Entrée pour choisir. Début et Fin sautent au premier et au dernier choix, Page précédente et Page suivante avancent d'une page à la fois (10 choix, à changer avec `pageSize`). Pour `multiselect`, Espace coche ou décoche et `a` sélectionne tout.
+| Fonction | Renvoie | Options |
+| --- | --- | --- |
+| `prompt(question, options)` | La réponse | `default`, `validate` (renvoie `true` ou un message pour reposer la question) |
+| `password(question, options)` | La réponse | |
+| `confirm(question, options)` | `true` ou `false` | `default` (`false`) |
+| `select(question, choices, options)` | La valeur choisie | `default` (un indice), `pageSize` (`10`) |
+| `multiselect(question, choices, options)` | Un tableau de valeurs | `default`, `pageSize`, `min` |
 
-Dans un menu ou un prompt de mot de passe, Ctrl+C ou Échap annule : la promesse est rejetée avec une `AbortError`, et c'est donc vous qui décidez ce qu'annuler veut dire.
+Chaque question prend aussi `input`, `output` et `signal`. Dans un menu : les flèches pour se déplacer, Entrée pour choisir, Début et Fin, Page précédente et Page suivante ; dans `multiselect`, Espace coche ou décoche et `a` sélectionne tout.
+
+| La question se termine par | Elle rejette avec |
+| --- | --- |
+| Ctrl+C ou Échap (menu, mot de passe) | `AbortError`, code `ABORT_ERR` |
+| Le `signal` annulé | `AbortError`, code `ABORT_ERR` |
+| L'entrée fermée avant une réponse | `AbortError`, code `ERR_INPUT_CLOSED` |
 
 ```js
 try {
-  const plan = await cli.select("Plan?", ["Free", "Pro"]);
+  const plan = await cli.select("Plan?", ["Free", "Pro"], { signal: AbortSignal.timeout(60_000) });
   await subscribe(plan);
 } catch (error) {
   if (error.name !== "AbortError") throw error;
@@ -161,38 +163,24 @@ try {
 
 ## Spinners et barres de progression
 
-`spin` affiche un spinner pendant qu'un travail s'exécute, puis le termine par `✔` ou `✖`. Il se résout avec le résultat du travail, ou est rejeté avec son erreur.
+`spin` affiche un spinner pendant qu'une promesse ou une fonction s'exécute, puis le termine par `✔` ou `✖`. Il renvoie le résultat, ou rejette avec l'erreur.
 
 ```js
 const users = await cli.spin("Loading users", () => db.getAll("users"));
 
-await cli.spin("Deploying", deploy(), {
-  success: (url) => `Deployed to ${url}`,
-  fail: (error) => `Deploy failed: ${error.message}`,
-});
-```
-
-Le travail est une promesse ou une fonction. Une fonction reçoit le spinner et peut donc changer le texte en cours de route :
-
-```js
 await cli.spin("Installing", async (spinner) => {
   for (const name of packages) {
     spinner.text = `Installing ${name}`;
     await install(name);
   }
-}, { success: "Installed" });
+}, { success: "Installed", fail: (error) => `Install failed: ${error.message}` });
 ```
 
-Pour plus de contrôle, pilotez le spinner vous-même. Il peut aussi se terminer par `warn()`, `info()` ou un simple `stop()`.
+`spinner` et `progress` se pilotent à la main :
 
 ```js
-const spin = cli.spinner("Downloading").start();
-try {
-  await download();
-  spin.succeed("Downloaded 12 files");
-} catch (error) {
-  spin.fail(`Download failed: ${error.message}`);
-}
+const spinner = cli.spinner("Downloading", { interval: "80ms" }).start();
+spinner.succeed("Downloaded 12 files");
 
 const bar = cli.progress({ total: files.length, format: "{bar} {percent}% {label}" });
 for (const file of files) {
@@ -202,11 +190,27 @@ for (const file of files) {
 bar.stop();
 ```
 
-Les spinners et les barres de progression écrivent sur stderr : ils ne se mélangent donc pas aux données que vous affichez sur stdout. Le format de progression peut utiliser `{bar}`, `{percent}`, `{value}`, `{total}`, `{eta}`, `{elapsed}`, `{rate}` et `{label}`.
+| Spinner | |
+| --- | --- |
+| `start(text?)`, `stop()` | `stop()` efface la ligne |
+| `succeed`, `fail`, `warn`, `info` | Arrêtent avec `✔`, `✖`, `⚠` ou `ℹ` |
+| `text`, `isSpinning` | |
+| Options | `frames`, `interval` (`80` ou `"80ms"`), `color` (`"cyan"`), `stream` |
+| Options de `spin` | Celles du spinner, `success`, `fail` (texte ou fonction), `signal` |
 
-Avec Node.js 24 ou plus récent, `using spin = cli.spinner(...).start()` ou `using bar = cli.progress(...)` les arrête à la fin du bloc : une erreur ne peut donc pas laisser un spinner tourner ou le curseur caché. Voyez [Faire le ménage avec `using`](/recipes/cli-tool/#cleaning-up-with-using).
+| Barre de progression | |
+| --- | --- |
+| `tick(amount = 1, label?)`, `update(value, label?)` | Font avancer la barre |
+| `stop()` | Dessine l'état final et libère la ligne |
+| `value`, `total`, `percent` | `total` peut changer en cours de route |
+| Options | `total`, `width` (`30`), `format`, `complete` (`"█"`), `incomplete` (`"░"`), `label`, `stream` |
+| Emplacements de `format` | `{bar}`, `{percent}`, `{value}`, `{total}`, `{eta}`, `{elapsed}`, `{rate}`, `{label}` |
 
-## Tableaux et encadrés
+Les deux écrivent sur stderr : stdout reste propre pour les données. Les deux se déclarent avec `using` ([Ressources](/basics/resources/)).
+
+## Tableaux, encadrés et arbres
+
+Ces fonctions construisent du texte ; affichez-le vous-même. `nc.logger.table()` construit et affiche en un appel.
 
 ```js
 const users = [
@@ -225,32 +229,15 @@ console.log(cli.table(users));
 ╰──────┴───────┴────────╯
 ```
 
-Choisissez les colonnes, les en-têtes et l'alignement avec `columns`, et l'apparence avec `border` : `"rounded"`, `"single"`, `"double"`, `"heavy"`, `"ascii"`, `"none"` ou `"markdown"`. Les couleurs, les emoji et les caractères CJK s'alignent correctement. Une liste vide donne une chaîne vide.
+| Option de `table` | Par défaut | |
+| --- | --- | --- |
+| `columns` | toutes les clés | Des noms, ou `{ key, header, align, maxWidth, format }` |
+| `border` | `"rounded"` | `"single"`, `"double"`, `"heavy"`, `"ascii"`, `"none"`, `"markdown"` |
+| `header` | `true` | |
+| `padding` | `1` | |
+| `colors` | automatique | |
 
-Une cellule peut contenir plusieurs lignes de texte, et sa ligne dans le tableau s'agrandit pour leur faire place :
-
-```js
-console.log(cli.table([
-  { package: "left-pad", notes: "Deprecated\nUse padStart instead" },
-  { package: "chalk", notes: "Up to date" },
-]));
-```
-
-```text
-╭──────────┬──────────────────────╮
-│ package  │ notes                │
-├──────────┼──────────────────────┤
-│ left-pad │ Deprecated           │
-│          │ Use padStart instead │
-│ chalk    │ Up to date           │
-╰──────────┴──────────────────────╯
-```
-
-`border: "markdown"` donne un tableau à coller dans un README ou une pull request. Dans ce cas, un saut de ligne devient `<br>` et un `|` est échappé.
-
-```js
-console.log(cli.table(users, { border: "markdown" }));
-```
+Une cellule peut tenir sur plusieurs lignes. Les couleurs, les emoji et les caractères CJK restent alignés. Avec `border: "markdown"`, un saut de ligne devient `<br>` et `|` est échappé :
 
 ```text
 | name | role  | logins |
@@ -261,13 +248,7 @@ console.log(cli.table(users, { border: "markdown" }));
 
 ```js
 console.log(cli.box("Server ready\nhttp://localhost:3000", { title: "my-app", borderColor: "green" }));
-```
 
-## Arbres
-
-`tree` dessine des données imbriquées comme la commande `tree` dessine les dossiers.
-
-```js
 console.log(cli.tree({
   src: { "index.js": null, lib: ["a.js", "b.js"] },
   "package.json": "1.2 kB",
@@ -275,6 +256,10 @@ console.log(cli.tree({
 ```
 
 ```text
+╭─ my-app ────────────────╮
+│  Server ready           │
+│  http://localhost:3000  │
+╰─────────────────────────╯
 ├── src
 │   ├── index.js
 │   └── lib
@@ -283,11 +268,54 @@ console.log(cli.tree({
 └── package.json: 1.2 kB
 ```
 
-Les clés sont des branches. Un objet ou un tableau ouvre un niveau, `null` ou `true` donne une simple feuille, et toute autre valeur s'affiche après la clé. Passez `{ ascii: true }` pour dessiner avec `+`, `|` et `-` là où les caractères de dessin de boîtes s'affichent mal.
+| Option de `box` | Par défaut |
+| --- | --- |
+| `title`, `width` | |
+| `border` | `"rounded"` |
+| `padding` | `{ x: 2, y: 0 }` |
+| `align` | `"left"` |
+| `borderColor` | Un nom de style ou un code hexadécimal |
+| `colors` | automatique |
+
+Dans un `tree`, un objet ou un tableau ouvre un niveau, `null` ou `true` donne une simple feuille, toute autre valeur s'affiche après la clé. `{ ascii: true }` dessine avec `+`, `|` et `-`.
 
 ## Terminal
 
+| Fonction | Renvoie |
+| --- | --- |
+| `isInteractive()` | `true` quand stdin et stdout sont un terminal |
+| `size()` | `{ columns, rows }`, `{ columns: 80, rows: 24 }` sans terminal |
+| `clear()` | Efface l'écran |
+
+## Une commande complète
+
+`clean logs` liste les fichiers `.log` d'un dossier, demande avant de les supprimer et affiche la progression. Un chemin tapé par l'utilisateur est lu depuis le dossier de travail avec `path.resolve()` : `nc.fs` lit `./` depuis le fichier appelant.
+
 ```js
-cli.size();  // { columns: 120, rows: 40 }
-cli.clear();
+const path = require("node:path");
+const { cli, fs, logger } = require("@ix-xs/node-comfort");
+
+async function main() {
+  const { flags, positionals } = cli.args({
+    yes: { type: "boolean", short: "y", description: "Do not ask for confirmation" },
+  }, { name: "clean", usage: "<folder> [options]", description: "Removes the log files of a folder" });
+
+  // Lu depuis le dossier de travail, comme on s'y attend en ligne de commande.
+  const folder = path.resolve(positionals[0] ?? "");
+  const files = fs.list(folder, { filter: (file) => file.endsWith(".log") }) ?? [];
+  if (files.length === 0) return logger.info("Nothing to remove");
+
+  console.log(cli.table(files.map((file) => ({ file: path.relative(folder, file), size: fs.size(file) }))));
+  if (!flags.yes && !(await cli.confirm(`Remove ${files.length} files?`))) return;
+
+  const bar = cli.progress({ total: files.length });
+  for (const file of files) bar.tick(1, fs.remove(file) ? path.basename(file) : `${path.basename(file)} (kept)`);
+  bar.stop();
+}
+
+main().catch((error) => {
+  if (error.code === "ERR_CLI_ARGS" || error.code === "ERR_INPUT_CLOSED") console.error(error.message);
+  else logger.error(error);
+  process.exitCode = 1;
+});
 ```

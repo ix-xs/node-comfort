@@ -3,7 +3,7 @@
 // class, in the order of the guide, with what it is for and its members.
 import StarlightPage from "@astrojs/starlight/components/StarlightPage.astro";
 import type { ApiSymbol } from "../../reference/model";
-import { find, firstSentence, model, namespaceOf, nsKind, pathOf, shortName, sidebar, translate, words } from "../../reference/model";
+import { find, firstSentence, membersOf, model, namespaceOf, nsKind, ownedName, pathOf, sidebar, translate, words } from "../../reference/model";
 import { href, render } from "../../reference/markdown";
 
 interface Props {
@@ -30,7 +30,8 @@ const groups = await Promise.all(
         return {
           ns,
           intro: await render(firstSentence(translate(key, ns.text, locale)), locale, { inline: true, here: key }),
-          rows: await Promise.all(ns.members.map((ref) => find(ref)!).filter(Boolean).map(row)),
+          // The members of a big class follow it: db.getAll after nc.sqlite.SQLite.
+          rows: await Promise.all(ns.members.map((ref) => find(ref)!).filter(Boolean).flatMap((symbol) => [symbol, ...membersOf(symbol)]).map(row)),
         };
       }),
     ),
@@ -78,12 +79,12 @@ const headings = [
           </h3>
           <p class="nc-rf-ns-intro">
             <span set:html={intro} />
-            <span class="nc-rf-count">{w.count(ns.members.length, ns.types?.length ?? 0)}</span>
+            <span class="nc-rf-count">{w.count(rows.length, ns.types?.length ?? 0)}</span>
           </p>
           <ul class="nc-rf-list">
             {rows.map(({ symbol, html }) => (
               <li>
-                <a href={href(pathOf(symbol.ref), locale)} data-kind={symbol.kind} translate="no">{shortName(symbol)}</a>
+                <a href={href(pathOf(symbol.ref), locale)} data-kind={symbol.kind} translate="no">{ownedName(symbol)}</a>
                 <span set:html={html} />
               </li>
             ))}

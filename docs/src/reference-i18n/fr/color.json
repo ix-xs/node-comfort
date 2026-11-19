@@ -2,7 +2,6 @@
   "Terminal colors you can chain, like `chalk`. Truecolor is supported and downgraded on older terminals. Colors switch off by themselves when the output isn't a terminal or `NO_COLOR` is set; `FORCE_COLOR=1|2|3` turns them back on.": "Des couleurs de terminal que vous pouvez chaîner, comme `chalk`. Le truecolor est pris en charge, et rétrogradé sur les terminaux plus anciens. Les couleurs se désactivent d'elles-mêmes quand la sortie n'est pas un terminal ou que `NO_COLOR` est défini ; `FORCE_COLOR=1|2|3` les réactive.",
   "The current color level. Set it to force one: `0` turns colors off, `undefined` goes back to what the terminal supports.": "Le niveau de couleur actuel. Affectez-le pour en forcer un : `0` désactive les couleurs, `undefined` revient à ce que le terminal prend en charge.",
   "Whether colors are being output.": "Indique si les couleurs sont émises.",
-  "A separate instance with its own level, for another stream or for tests.": "Une instance séparée avec son propre niveau, pour un autre flux ou pour les tests.",
   "The color level a stream supports, taking `NO_COLOR` and `FORCE_COLOR` into account.": "Le niveau de couleur pris en charge par un flux, en tenant compte de `NO_COLOR` et de `FORCE_COLOR`.",
   "Removes colors, every other terminal escape code and every control character but tabs and new lines (so `\\r` and `\\b` go too).": "Retire les couleurs, tous les autres codes d'échappement du terminal et tous les caractères de contrôle sauf les tabulations et les retours à la ligne (`\\r` et `\\b` partent donc aussi).",
   "How many columns the text takes, ignoring colors and counting emoji and CJK as 2.": "Le nombre de colonnes occupées par le texte, sans tenir compte des couleurs et en comptant 2 pour les emoji et les caractères CJK.",
@@ -68,5 +67,6 @@
   "Bright white background.": "Fond blanc vif.",
   "The named styles, read-only.": "Les styles nommés, en lecture seule.",
   "A style in a chain: fixed codes, or a color resolved at output time.": "Un style dans un chaînage : des codes fixes, ou une couleur résolue au moment de la sortie.",
-  "Every named style.": "Tous les styles nommés."
+  "Every named style.": "Tous les styles nommés.",
+  "A separate instance with its own level, for another stream or for tests: `create(0)` or `create({ level: 0 })`.": "Une instance séparée avec son propre niveau, pour un autre flux ou pour les tests : `create(0)` ou `create({ level: 0 })`."
 }

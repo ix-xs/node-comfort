@@ -1,80 +1,70 @@
 ---
 title: "Objets"
-description: "`nc.obj` copie, fusionne, compare et lit des objets imbriqués. Les entrées ne sont jamais modifiées, et les clés `__proto__`, `constructor` et `prototype` sont toujours ignorées : une saisie utilisateur ne peut donc pas polluer les prototypes."
-sidebar:
-  order: 4
+description: "`nc.obj` : chemins pointés, clonage, fusion et comparaison en profondeur, remodelage. Les entrées ne sont jamais modifiées, et `__proto__`, `constructor` et `prototype` sont toujours ignorés."
 ---
 
 ```js
 const { obj } = require("@ix-xs/node-comfort");
-
-obj.get(config, "db.pool.max", 10);
-obj.merge(defaults, userSettings);
-obj.diff(before, after);
 ```
 
 ## Chemins pointés
 
-`get`, `set`, `update`, `has` et `unset` prennent un chemin. En TypeScript et en JavaScript vérifié, votre éditeur complète les chemins et connaît le type obtenu au bout :
+```js
+const config = { db: { pool: { max: 5 } }, items: [{ name: "a" }] };
 
-```ts
-type User = { profile: { name: string; address?: { city: string } } };
-
-obj.get(user, "profile.name");                 // string
-obj.get(user, "profile.address.city");         // string | undefined
-obj.get(user, "profile.address.city", "Paris"); // string
+obj.get(config, "db.pool.max", 10);      // 5
+obj.get(config, "db.pool.min", 1);       // 1
+obj.get(config, "items[0].name");        // "a"
+obj.get(config, ["items", 0, "name"]);   // "a"
+obj.has({ a: { b: undefined } }, "a.b"); // true
 ```
-
-Les chemins peuvent aussi utiliser des crochets ou être des tableaux : `"items[0].name"`, `["items", 0, "name"]`.
 
 `set`, `update` et `unset` renvoient une copie :
 
 ```js
-const next = obj.set(state, "user.profile.name", "Ada"); // state reste inchangé
-obj.set({}, "list[1].name", "x");                        // crée des tableaux pour les clés numériques
-obj.unset(config, "db.password");
-obj.unset({ list: ["a", "b", "c"] }, "list[1]");         // { list: ["a", "c"] }, aucun trou laissé
-obj.has({ a: { b: undefined } }, "a.b");                 // true
-```
-
-`update` calcule la nouvelle valeur à partir de la valeur actuelle. La fonction reçoit `undefined` quand il n'y a encore rien, ce qu'un paramètre par défaut permet de couvrir :
-
-```js
+obj.set(config, "db.pool.max", 10);                                      // config est inchangé
+obj.set({}, "list[1].name", "x");                                        // { list: [<vide>, { name: "x" }] }
+obj.unset({ list: ["a", "b", "c"] }, "list[1]");                         // { list: ["a", "c"] }
 obj.update({ stats: { visits: 41 } }, "stats.visits", (n = 0) => n + 1); // { stats: { visits: 42 } }
 obj.update({}, "stats.visits", (n = 0) => n + 1);                        // { stats: { visits: 1 } }
-obj.update(cart, "items", (items = []) => [...items, product]);
+```
+
+| Fonction | Rôle |
+| --- | --- |
+| `get(object, path, fallback?)` | La valeur, ou `fallback` quand elle vaut `undefined` |
+| `has(object, path)` | `true` quand le chemin existe, même s'il contient `undefined` |
+| `set(object, path, value)` | Crée ce qui manque : des tableaux pour les clés numériques, des objets sinon |
+| `update(object, path, fn)` | `fn` reçoit la valeur actuelle, `undefined` s'il n'y en a pas |
+| `unset(object, path)` | Retire une clé ; dans un tableau, ne laisse pas de trou |
+
+Un chemin s'écrit `"a.b.c"`, `"a[0].b"` ou `["a", 0, "b"]`. En TypeScript et en JavaScript vérifié, l'éditeur complète les chemins et type le résultat :
+
+```ts
+type User = { profile: { name: string; address?: { city: string } } };
+
+obj.get(user, "profile.name");                  // string
+obj.get(user, "profile.address.city");          // string | undefined
+obj.get(user, "profile.address.city", "Paris"); // string
 ```
 
 ## Fusionner
 
-`merge` fusionne en profondeur des objets simples dans un nouvel objet. Les derniers objets l'emportent et les tableaux sont remplacés :
-
 ```js
 obj.merge({ db: { host: "localhost", port: 5432 } }, { db: { port: 6543 } });
 // { db: { host: "localhost", port: 6543 } }
+obj.mergeWith({ arrays: "unique" }, { tags: ["a", "b"] }, { tags: ["b", "c"] }); // { tags: ["a", "b", "c"] }
+obj.mergeWith({ skipUndefined: true }, { port: 80 }, { port: undefined });     // { port: 80 }
+obj.defaults({ retries: 0, timeout: null }, { retries: 3, timeout: 5000, debug: false });
+// { retries: 0, timeout: null, debug: false }
 ```
 
-Le résultat ne partage rien avec ce que vous avez passé. Les objets imbriqués, les tableaux, les dates, les Map et les Set sont copiés. Modifier le résultat ne modifie donc jamais vos valeurs par défaut :
+`merge` fusionne en profondeur des objets simples dans un nouvel objet : les dernières sources l'emportent, les tableaux sont remplacés. Le résultat ne partage rien avec les sources (objets imbriqués, tableaux, dates, maps et sets sont copiés) ; les instances de classes sont gardées telles quelles.
 
-```js
-const settings = obj.merge(defaults, userSettings);
-settings.db.host = "db.internal"; // defaults.db.host vaut toujours "localhost"
-```
-
-Les instances de classe, comme une connexion à une base de données ou un logger, ne sont pas copiées : le résultat contient la même instance.
-
-`mergeWith` vous laisse choisir ce qu'il advient des tableaux et de `undefined` :
-
-```js
-obj.mergeWith({ arrays: "unique" }, { tags: ["a", "b"] }, { tags: ["b", "c"] }); // tags: ["a", "b", "c"]
-obj.mergeWith({ skipUndefined: true }, { port: 80 }, { port: undefined });     // port: 80
-```
-
-`defaults` complète ce qui manque et garde toute valeur déjà définie, même `null` ou `0` :
-
-```js
-obj.defaults(userOptions, { retries: 3, timeout: 5000 });
-```
+| Fonction | Rôle |
+| --- | --- |
+| `merge(...sources)` | Fusion en profondeur, la dernière source l'emporte |
+| `mergeWith(options, ...sources)` | `arrays` : `"replace"` (défaut), `"concat"`, `"unique"` ; `skipUndefined` |
+| `defaults(target, ...sources)` | Ne remplit que ce qui vaut `undefined` ; la première source a la priorité |
 
 ## Comparer
 
@@ -82,7 +72,7 @@ obj.defaults(userOptions, { retries: 3, timeout: 5000 });
 obj.equal({ a: [1, { b: 2 }] }, { a: [1, { b: 2 }] }); // true
 obj.equal(new Set([1, 2]), new Set([2, 1]));          // true
 obj.equal(new Error("boom"), new Error("bang"));      // false
-obj.equal(Buffer.from("ab"), Buffer.from("ab"));      // true
+obj.equal(NaN, NaN);                                  // true
 
 obj.diff({ name: "Ada", tags: ["a"] }, { name: "Ada L.", tags: ["a", "b"] });
 // [
@@ -91,9 +81,7 @@ obj.diff({ name: "Ada", tags: ["a"] }, { name: "Ada L.", tags: ["a", "b"] });
 // ]
 ```
 
-`equal` comprend les dates, les expressions régulières, les Map, les Set, les tableaux typés, les buffers, les erreurs, les URL, `NaN` et les références circulaires. Elle compare ce qu'une valeur contient : le message d'une erreur, l'adresse d'une URL, les octets d'un buffer. Une instance de classe n'est jamais égale à un objet simple qui a les mêmes propriétés.
-
-`diff` est pratique pour les journaux d'audit et les messages du type « qu'est-ce qui a changé ? ».
+`equal` compare les dates, les expressions régulières, les maps, les sets, les tableaux typés, les buffers, les erreurs (par leur message), les URL et les structures circulaires. Une instance de classe n'est jamais égale à un objet simple. `diff` renvoie des entrées `{ path, type: "added" | "removed" | "changed", from?, to? }`.
 
 ## Copier
 
@@ -108,66 +96,89 @@ class Point {
 const original = { at: new Point(3, 4), raw: Buffer.from("hi"), onDone() {} };
 const copy = obj.clone(original);
 
-copy.at instanceof Point; // true, et c'est un nouveau Point
+copy.at instanceof Point; // true, un nouveau Point
 copy.raw[0] = 72;         // original.raw contient toujours "hi"
 ```
 
-`clone` fait une copie profonde : objets simples, tableaux, dates, expressions régulières, Map, Set, URL, buffers et tableaux typés. Là où `structuredClone` lève une erreur sur une fonction et transforme une instance de classe en objet simple, `clone` garde les deux, et la copie d'une instance a la même classe. Les références partagées et les cycles sont préservés.
+`clone` copie les objets simples, les tableaux, les dates, les expressions régulières, les maps, les sets, les URL, les buffers et les tableaux typés. Contrairement à `structuredClone`, il garde les fonctions et la classe des instances. Les références partagées et les cycles sont préservés.
 
-## Sélectionner et remodeler
+`deepFreeze(object)` gèle un objet et tout ce qu'il contient.
+
+## Choisir et remodeler
 
 ```js
-obj.pick(user, ["id", "email"]);
-obj.omit(user, ["password", "token"]);
-obj.filter(scores, (value) => value > 10);
-obj.mapValues(prices, (price) => price * 1.2);
-obj.mapKeys(row, (key) => nc.str.camelCase(key));
-obj.renameKeys(doc, { _id: "id" });
-obj.invert({ a: "x", b: "y" });           // { x: "a", y: "b" }
-obj.compact(payload, { deep: true, removeEmpty: true });
-obj.flatten({ db: { host: "x" } });       // { "db.host": "x" }
-obj.unflatten({ "db.host": "x" });        // { db: { host: "x" } }
-obj.paths({ db: { host: "x", port: 5432 } }); // ["db.host", "db.port"]
+const user = { id: 1, email: "a@x.io", password: "p", token: "t" };
+
+obj.pick(user, ["id", "email"]);                                       // { id: 1, email: "a@x.io" }
+obj.omit(user, ["password", "token"]);                                 // { id: 1, email: "a@x.io" }
+obj.filter({ a: 5, b: 20, c: 12 }, (value) => value > 10);             // { b: 20, c: 12 }
+obj.mapValues({ tea: 2, cake: 4 }, (price) => price * 1.5);            // { tea: 3, cake: 6 }
+obj.mapKeys({ first_name: "Ada" }, (key) => key.toUpperCase());        // { FIRST_NAME: "Ada" }
+obj.renameKeys({ _id: 7, name: "x" }, { _id: "id" });                  // { id: 7, name: "x" }
+obj.invert({ a: "x", b: "y" });                                        // { x: "a", y: "b" }
+obj.compact({ a: 0, b: null, c: "", d: undefined });                   // { a: 0, c: "" }
+obj.compact({ a: { b: null, c: "" }, d: [], e: 1 }, { deep: true, removeEmpty: true }); // { e: 1 }
 ```
 
-`sortKeys` renvoie une copie dont les clés sont triées, objets imbriqués compris :
+| Fonction | Fonction de rappel |
+| --- | --- |
+| `filter(object, fn)` | `(value, key)` |
+| `mapValues(object, fn)` | `(value, key)` |
+| `mapKeys(object, fn)` | `(key, value)`, renvoie la nouvelle clé |
+
+`compact` ne retire que `null` et `undefined` ; `removeEmpty` retire aussi `""`, `[]` et `{}`, `deep` nettoie les objets et tableaux imbriqués. `nc.arr.compact()` retire toutes les valeurs fausses.
+
+## Clés à plat
+
+```js
+obj.flatten({ db: { host: "x", ports: [1, 2] } }); // { "db.host": "x", "db.ports": [1, 2] }
+obj.flatten({ db: { host: "x" } }, "app");         // { "app.db.host": "x" }
+obj.unflatten({ "db.host": "x" });                 // { db: { host: "x" } }
+obj.paths({ db: { host: "x", port: 5432 } });      // ["db.host", "db.port"]
+```
+
+`flatten` garde les tableaux comme valeurs.
+
+## Trier les clés
 
 ```js
 obj.sortKeys({ b: 1, a: { d: 1, c: 2 } });                  // { a: { c: 2, d: 1 }, b: 1 }
 obj.sortKeys({ b: 1, a: { d: 1, c: 2 } }, { deep: false }); // { a: { d: 1, c: 2 }, b: 1 }
+
+const key = JSON.stringify(obj.sortKeys(query)); // le même JSON quel que soit l'ordre des clés : une clé de cache
 ```
 
-Deux objets de même contenu donnent alors le même JSON, quel que soit l'ordre dans lequel leurs clés ont été écrites. C'est ce qu'il faut pour un hash ou une clé de cache :
+| Option | Défaut | |
+| --- | --- | --- |
+| `deep` | `true` | Les objets et tableaux imbriqués aussi. Avec `false`, les valeurs imbriquées sont partagées |
+| `compare` | ordre des unités de code | `(a, b) => number` |
 
-```js
-const key = JSON.stringify(obj.sortKeys(query));
+## Clés typées et taille
+
+```ts
+for (const key of obj.keys(config)) config[key]; // key est keyof typeof config, pas string
+for (const [key, value] of obj.entries(scores)) {}
+const map = obj.fromEntries(new Map([["a", 1]])); // { a: 1 }
 ```
 
-## Clés venant d'une saisie utilisateur
+`size(value)` compte les clés propres d'un objet, les entrées d'une `Map` ou d'un `Set`, les éléments d'un tableau, les caractères d'une chaîne, et donne `0` pour `null` et `undefined`.
+
+## Clés venues des utilisateurs
 
 ```js
 const body = JSON.parse('{ "name": "Ada", "__proto__": { "admin": true } }');
 
-obj.merge({}, body);                  // { name: "Ada" }
-obj.set({}, "__proto__.admin", true); // {}
-obj.get(user, "constructor.name");    // undefined
+obj.merge({}, body);                    // { name: "Ada" }
+obj.set({}, "__proto__.admin", true);   // {}
+obj.get({ a: 1 }, "constructor.name");  // undefined
 ```
 
-Toutes les fonctions ignorent les clés `__proto__`, `constructor` et `prototype`, dans les objets qu'elles copient comme dans les chemins qu'elles suivent. Un corps de requête ou un chemin fourni par un utilisateur ne peut pas atteindre un prototype.
+Chaque fonction ignore `__proto__`, `constructor` et `prototype`, dans les objets qu'elle copie comme dans les chemins qu'elle suit.
 
-## Fonctions typées
+## Avant la 3.0
 
-En TypeScript, `Object.keys` et `Object.entries` renvoient de simples chaînes. Celles-ci gardent les vraies clés :
+| 2.2 | 3.0 |
+| --- | --- |
+| `obj.isEmpty(value)` | `nc.is.empty(value)` |
 
-```ts
-for (const key of obj.keys(config)) config[key]; // pas d'erreur de type
-for (const [key, value] of obj.entries(scores)) {}
-```
-
-Et pour les constantes qui ne doivent jamais changer :
-
-```js
-const CONFIG = obj.deepFreeze({ db: { host: "localhost" } });
-```
-
-La [référence de `nc.obj`](/reference/obj/) liste toutes les fonctions avec leurs options.
+L'ancien nom fonctionne toujours et prévient une fois. `nc.is.empty()` renvoie `false` pour les nombres, les booléens et les autres valeurs qui ne sont pas des conteneurs, là où `obj.isEmpty()` renvoyait `true`.

@@ -31,6 +31,17 @@ function assert(condition, message = "Assertion failed") {
 }
 
 /**
+ * How a guard is called in 3.0: `nc.is.integer` rather than the name of its function.
+ * @param {Function} guard
+ * @returns {string}
+ */
+const _guardName = (guard) => {
+  const is = require("./Is.js");
+  const key = Object.keys(is).find((name) => /** @type {Record<string, unknown>} */ (/** @type {unknown} */ (is))[name] === guard);
+  return key ? `nc.is.${key}` : guard.name || "the type guard";
+};
+
+/**
  * Throws an `AssertionError` unless `value` passes `guard`. Afterwards,
  * `value` has the guarded type.
  *
@@ -48,7 +59,7 @@ function assert(condition, message = "Assertion failed") {
 assert.type = function assertType(value, guard, message) {
   if (!guard(value)) {
     const text = typeof message === "function" ? message() : message;
-    throw new (require("./errors.js").AssertionError)(text ?? `Expected value to pass ${guard.name || "the type guard"}`);
+    throw new (require("./errors.js").AssertionError)(text ?? `Expected value to pass ${_guardName(guard)}`);
   }
 };
 

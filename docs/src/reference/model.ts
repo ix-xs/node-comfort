@@ -49,7 +49,7 @@ export interface Method {
 export type Kind = "function" | "method" | "constructor" | "property" | "class" | "interface" | "type";
 
 export interface ApiSymbol {
-  /** The namespace that holds it: "str", "SQLite". */
+  /** The namespace that holds it: "str", "sqlite". */
   ns: string;
   name: string;
   slug: string;
@@ -61,8 +61,10 @@ export interface ApiSymbol {
   text?: string;
   deprecated?: string;
   static?: boolean;
-  /** The same function at the top level of the package: "nc.info". */
-  flat?: string;
+  /** The page of its class, for a member of a big class: "sqlite/sqlite". */
+  owner?: string;
+  /** The pages of its members, for a big class like nc.sqlite.SQLite. */
+  members?: string[];
   code?: Token[];
   overloads?: Signature[];
   ctor?: Signature;
@@ -92,7 +94,6 @@ export interface Namespace {
 export const model = api as unknown as {
   package: { name: string; version: string };
   groups: { id: string; keys: string[] }[];
-  flat: Record<string, string[]>;
   namespaces: Namespace[];
   symbols: ApiSymbol[];
 };
@@ -111,12 +112,18 @@ export const pathOf = (ref: string) => `/reference/${ref}/`;
 export const nsKind = (ns: Namespace) => (ns.kind === "class" ? "class" : "namespace");
 
 /** The name a member goes by in a list: `slugify`, `new SQLite()`. */
-export const shortName = (symbol: ApiSymbol) => (symbol.kind === "constructor" ? `new ${symbol.ns}()` : symbol.name);
+export const shortName = (symbol: ApiSymbol) => (symbol.kind === "constructor" ? symbol.title.replace(/^new (?:\w+\.)*(\w+)\(\)$/, "new $1()") : symbol.name);
+
+/** The name of a member of a big class among the names of its namespace: `db.getAll`, `new SQLite()`. */
+export const ownedName = (symbol: ApiSymbol) => (symbol.owner && symbol.kind !== "constructor" ? symbol.title : shortName(symbol));
+
+/** The pages of the members of a big class, in order. */
+export const membersOf = (symbol: ApiSymbol) => (symbol.members ?? []).map((ref) => find(ref)!).filter(Boolean);
 
 /** The first sentence of a description, for a row of a list. */
 export function firstSentence(text = ""): string {
   const paragraph = text.split(/\n\s*\n/)[0].replace(/\s+/g, " ").trim();
-  const stop = /[.!?](?=\s+[A-Z`*\[]|$)/g;
+  const stop = /[.!?](?=\s+[\p{Lu}`*\[]|$)/gu;
   for (let match; (match = stop.exec(paragraph)); ) {
     if (/\b(e\.g|i\.e|p\. ex|etc)$/.test(paragraph.slice(0, match.index))) continue;
     return paragraph.slice(0, match.index + 1);
@@ -199,8 +206,8 @@ const en = {
   kindHelp: {
     namespace: "A group of functions on one subject, like `nc.str` for strings. You import it from the package, then call its functions: `str.slugify()`.",
     function: "Something you call. `str.slugify(\"Hello world\")` is a function: you call it, it gives something back.",
-    method: "A function of an object you created. `db.insert()` is a method of a database opened with `new nc.SQLite()`.",
-    class: "A kind of object you create with `new`, which then has its own methods: `const db = new nc.SQLite()`.",
+    method: "A function of an object you created. `db.insert()` is a method of a database opened with `nc.sqlite.open()`.",
+    class: "A kind of object you create with `new` (or a factory), which then has its own methods: `const db = new nc.sqlite.SQLite()`.",
     interface: "The shape of an object: the list of what it holds. You fill it in (the options of `str.slugify()` are a `SlugifyOptions`) or you read it.",
     type: "A name given to a set of possible values, such as `\"info\" | \"error\"`. It exists for your editor only.",
   },
@@ -210,8 +217,6 @@ const en = {
   groups: { essentials: "Essentials", data: "Data", flow: "Functions and async", system: "System and network" } as Record<string, string>,
   import: "Import",
   orAlone: "// or on its own, which loads nothing else",
-  topLevel: "// also at the top level of the package",
-  topLevelText: (flat: string, full: string) => `These functions are also at the top level of the package: \`${flat}\` is \`${full}\`.`,
   typeImport: "In TypeScript, or in a JSDoc comment of JavaScript:",
   members: "Members",
   types: "Types",
@@ -225,6 +230,8 @@ const en = {
   examples: "Examples",
   properties: "Properties",
   methods: "Methods",
+  classMembers: (name: string) => `Members of ${name}`,
+  classMembersText: (name: string) => `What a \`${name}\` has, each on a page of its own.`,
   values: "Possible values",
   constructor: "Constructor",
   usedBy: "Used by",
@@ -249,11 +256,11 @@ type Words = typeof en;
 
 const frWords: Words = {
   title: "Référence de l'API",
-  lead: "Chaque espace de noms, fonction, classe et type du paquet, chacun sur sa propre page : à quoi il sert, ce qu'il prend, ce qu'il renvoie.",
+  lead: "Chaque namespace, fonction, classe et type du paquet, chacun sur sa propre page : à quoi il sert, ce qu'il prend, ce qu'il renvoie.",
   sidebarAll: "Vue d'ensemble",
   overview: "Vue d'ensemble",
   kinds: {
-    namespace: "Espace de noms",
+    namespace: "Namespace",
     function: "Fonction",
     method: "Méthode",
     constructor: "Constructeur",
@@ -265,8 +272,8 @@ const frWords: Words = {
   kindHelp: {
     namespace: "Un groupe de fonctions sur un même sujet, comme `nc.str` pour les chaînes. Vous l'importez depuis le paquet, puis vous appelez ses fonctions : `str.slugify()`.",
     function: "Quelque chose que vous appelez. `str.slugify(\"Hello world\")` est une fonction : vous l'appelez, elle vous rend quelque chose.",
-    method: "Une fonction d'un objet que vous avez créé. `db.insert()` est une méthode d'une base ouverte avec `new nc.SQLite()`.",
-    class: "Un genre d'objet que vous créez avec `new`, et qui a ensuite ses propres méthodes : `const db = new nc.SQLite()`.",
+    method: "Une fonction d'un objet que vous avez créé. `db.insert()` est une méthode d'une base ouverte avec `nc.sqlite.open()`.",
+    class: "Un genre d'objet que vous créez avec `new` (ou une fabrique), et qui a ensuite ses propres méthodes : `const db = new nc.sqlite.SQLite()`.",
     interface: "La forme d'un objet : la liste de ce qu'il contient. Vous la remplissez (les options de `str.slugify()` sont un `SlugifyOptions`) ou vous la lisez.",
     type: "Un nom donné à un ensemble de valeurs possibles, comme `\"info\" | \"error\"`. Il n'existe que pour votre éditeur.",
   },
@@ -276,8 +283,6 @@ const frWords: Words = {
   groups: { essentials: "Essentiels", data: "Données", flow: "Fonctions et asynchrone", system: "Système et réseau" },
   import: "Import",
   orAlone: "// ou seul, ce qui ne charge rien d'autre",
-  topLevel: "// existe aussi à la racine du paquet",
-  topLevelText: (flat: string, full: string) => `Ces fonctions existent aussi à la racine du paquet : \`${flat}\` équivaut à \`${full}\`.`,
   typeImport: "En TypeScript, ou dans un commentaire JSDoc en JavaScript :",
   members: "Membres",
   types: "Types",
@@ -291,6 +296,8 @@ const frWords: Words = {
   examples: "Exemples",
   properties: "Propriétés",
   methods: "Méthodes",
+  classMembers: (name: string) => `Membres de ${name}`,
+  classMembersText: (name: string) => `Ce que possède un \`${name}\`, chaque membre sur sa propre page.`,
   values: "Valeurs possibles",
   constructor: "Constructeur",
   usedBy: "Utilisé par",
@@ -301,7 +308,7 @@ const frWords: Words = {
   optional: "facultatif",
   readonly: "lecture seule",
   static: "statique",
-  deprecated: "Obsolète",
+  deprecated: "Déprécié",
   avoid: "À éviter dans du nouveau code.",
   default: "Par défaut :",
   inherited: "Vient de",
@@ -342,12 +349,17 @@ export function sidebar(locale: string | undefined, current?: string) {
         if (key !== current) return { label: ns.title, link: pathOf(ns.slug), attrs: { "data-kind": nsKind(ns), translate: "no" } };
         const members = ns.members.map((ref) => find(ref)!).filter(Boolean);
         const types = (ns.types ?? []).map((ref) => find(ref)!).filter(Boolean);
+        // A big class opens on its own members, like a namespace.
+        const entry = (symbol: ApiSymbol) =>
+          symbol.members?.length
+            ? { label: symbol.name, collapsed: false, items: [{ label: w.overview, link: pathOf(symbol.ref), attrs: { "data-kind": symbol.kind } }, ...membersOf(symbol).map(link)] }
+            : link(symbol);
         return {
           label: ns.title,
           collapsed: false,
           items: [
             { label: w.overview, link: pathOf(ns.slug), attrs: { "data-kind": nsKind(ns) } },
-            ...members.map(link),
+            ...members.map(entry),
             ...(types.length ? [{ label: w.types, collapsed: true, items: types.map(link) }] : []),
           ],
         };

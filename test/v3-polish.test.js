@@ -428,3 +428,41 @@ describe("deprecation codes", () => {
     assert.equal(code("nc.time.timezones"), "NODE_COMFORT_DEP_TIME_TIMEZONES");
   });
 });
+
+describe("3.0: fixes found by running the docs", () => {
+  it("time.parse() without a pattern says what it needs", () => {
+    assert.throws(() => nc.time.parse("2026-01-02"), { name: "TypeError", message: /needs a pattern/ });
+    assert.equal(nc.time.format(nc.time.parse("02/01/2026", "DD/MM/YYYY"), "YYYY-MM-DD"), "2026-01-02");
+  });
+
+  it("assert.type names the guard by its 3.0 name", () => {
+    assert.throws(() => nc.assert.type(1.5, nc.is.integer), { message: "Expected value to pass nc.is.integer" });
+    assert.throws(() => nc.assert.type(1, (v) => typeof v === "string"), { message: /Expected value to pass/ });
+  });
+
+  it("the class subpaths carry their factory, in CommonJS and in ES modules", () => {
+    const SQLite = require("../src/SQLite.js");
+    assert.equal(typeof SQLite.open, "function");
+    assert.equal(require("../src/Cache.js").create().constructor, require("../src/Cache.js"));
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), "nc-esm-"));
+    try {
+      const entry = path.join(dir, "check.mjs");
+      const url = (name) => JSON.stringify(require("node:url").pathToFileURL(path.join(__dirname, "..", "src", name)).href);
+      fs.writeFileSync(
+        entry,
+        [
+          `import SQLite from ${url("SQLite.js")};`,
+          `import Cache from ${url("Cache.js")};`,
+          `import Emitter from ${url("Emitter.js")};`,
+          "const db = SQLite.open(':memory:');",
+          "console.log(db instanceof SQLite, typeof SQLite.op.gte, Cache.create() instanceof Cache, Emitter.create() instanceof Emitter);",
+          "db.close();",
+        ].join("\n"),
+      );
+      const out = require("node:child_process").execFileSync(process.execPath, [entry], { encoding: "utf8" });
+      assert.equal(out.trim(), "true function true true");
+    } finally {
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
+  });
+});
