@@ -11,7 +11,7 @@ description: "Ce que coûte la bibliothèque au démarrage et à chaque appel, e
 | --- | --- |
 | `require()` du paquet | environ 12 ms |
 | ... puis utiliser `nc.str` et `nc.is` | environ 20 ms au total |
-| ... puis toucher les 25 namespaces | environ 65 ms au total |
+| ... puis toucher les 27 namespaces | environ 65 ms au total |
 | `import` de la racine depuis un module ES | environ 65 ms : tous les namespaces sont chargés |
 | `import` d'un point d'entrée, comme `@ix-xs/node-comfort/str` | environ 13 ms |
 

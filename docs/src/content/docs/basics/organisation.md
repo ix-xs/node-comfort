@@ -1,6 +1,6 @@
 ---
 title: "Organisation"
-description: "The shape of the API: 25 namespaces, one way to call each member, factories for the objects that hold state, and the old names kept until 4.0."
+description: "The shape of the API: 27 namespaces, one way to call each member, factories for the objects that hold state, and the old names kept until 4.0."
 ---
 
 ```js
@@ -13,10 +13,10 @@ nc.is.email("ada@example.com");
 
 ## One form
 
-Every member is called as `nc.<namespace>.<member>`. The root holds the 25 namespaces and nothing else:
+Every member is called as `nc.<namespace>.<member>`. The root holds the 27 namespaces and nothing else:
 
 ```js
-Object.keys(nc).length; // 25
+Object.keys(nc).length; // 27
 Object.keys(nc.fs);     // ["read", "readJSON", "readLines", "write", ...]
 ```
 
@@ -53,6 +53,8 @@ const { slugify } = require("@ix-xs/node-comfort/str");
 | `async` | Concurrency, queues, retries, timeouts | [Async and concurrency](/flow/async/) |
 | `cache` | In-memory cache with TTL and LRU | [Cache](/flow/cache/) |
 | `emitter` | Typed events | [Typed events](/flow/emitter/) |
+| `quota` | Hits allowed per key in a time window | [Quota](/flow/quota/) |
+| `circuit` | Circuit breaker for a service that can go down | [Circuit breaker](/flow/circuit/) |
 | `sqlite` | SQLite without SQL for everyday queries | [SQLite](/system/sqlite/) |
 | `http` | HTTP client with retries and checks | [HTTP client](/system/http/) |
 | `sys` | Processes, ports, shutdown, the machine | [Processes and system](/system/sys/) |
@@ -68,6 +70,8 @@ A namespace that hands out objects with their own state has a factory. The class
 | `nc.logger.create(options)` | A logger with its own settings | |
 | `nc.cache.create(options)` | A cache | `nc.cache.Cache` |
 | `nc.emitter.create()` | An event emitter | `nc.emitter.Emitter` |
+| `nc.quota.create(options)` | A quota per key | `nc.quota.Quota` |
+| `nc.circuit.create(options)` | A circuit breaker | `nc.circuit.Circuit` |
 | `nc.sqlite.open(path, options)` | A database connection | `nc.sqlite.SQLite` |
 | `nc.http.create(options)` | An HTTP client with defaults | |
 | `nc.color.create({ level })` | Colors at a given level | |

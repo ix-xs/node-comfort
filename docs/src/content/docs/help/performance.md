@@ -11,7 +11,7 @@ description: "What the library costs at startup and per call, and how to keep bo
 | --- | --- |
 | `require()` the package | about 12 ms |
 | ... then use `nc.str` and `nc.is` | about 20 ms in total |
-| ... then touch the 25 namespaces | about 65 ms in total |
+| ... then touch the 27 namespaces | about 65 ms in total |
 | `import` the root from an ES module | about 65 ms: every namespace is loaded |
 | `import` one entry point, like `@ix-xs/node-comfort/str` | about 13 ms |
 

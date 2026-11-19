@@ -1,7 +1,7 @@
 {
  "package": {
   "name": "@ix-xs/node-comfort",
-  "version": "3.0.0"
+  "version": "3.1.0"
  },
  "groups": [
   {
@@ -35,7 +35,9 @@
     "func",
     "async",
     "cache",
-    "emitter"
+    "emitter",
+    "quota",
+    "circuit"
    ]
   },
   {
@@ -353,7 +355,8 @@
     "errors/http-error",
     "errors/jwt-error",
     "errors/process-error",
-    "errors/sqlite-error"
+    "errors/sqlite-error",
+    "errors/circuit-open-error"
    ],
    "types": [
     "errors/node-comfort-error-options",
@@ -949,6 +952,51 @@
     "emitter/event-map",
     "emitter/listen-options",
     "emitter/wait-for-options"
+   ]
+  },
+  {
+   "key": "quota",
+   "slug": "quota",
+   "kind": "namespace",
+   "title": "nc.quota",
+   "module": "@ix-xs/node-comfort/quota",
+   "guide": "/flow/quota/",
+   "group": "flow",
+   "source": "https://github.com/ix-xs/node-comfort/blob/main/src/QuotaNamespace.js",
+   "text": "A quota per key: at most `limit` hits per `window` for each user, IP or\nguild, counted in a fixed window that starts at the key's first hit.\n`consume()` answers at once whether a hit is allowed: nothing waits.\nNot to be confused with `async.rateLimit()`, which spaces calls out by\nmaking them wait, or `async.limit()`, which caps how many run at once.",
+   "examples": [
+    "const perUser = nc.quota.create({ limit: 5, window: \"1m\" });\nconst { allowed, resetMs } = perUser.consume(userId);\nif (!allowed) return reply(`Try again in ${Math.ceil(resetMs / 1000)}s`);"
+   ],
+   "members": [
+    "quota/create",
+    "quota/quota"
+   ],
+   "types": [
+    "quota/quota-key",
+    "quota/quota-options",
+    "quota/quota-result"
+   ]
+  },
+  {
+   "key": "circuit",
+   "slug": "circuit",
+   "kind": "namespace",
+   "title": "nc.circuit",
+   "module": "@ix-xs/node-comfort/circuit",
+   "guide": "/flow/circuit/",
+   "group": "flow",
+   "source": "https://github.com/ix-xs/node-comfort/blob/main/src/CircuitNamespace.js",
+   "text": "A circuit breaker. After too many failures in a row, the circuit opens and\nevery call fails at once with a `CircuitOpenError`, without touching the\nservice that is down. After `resetTimeout`, the next call is a trial\n(half-open): if it works the circuit closes, if it fails it opens again.\nNot to be confused with `async.rateLimit()`, which spaces calls out, or\n`async.limit()`, which caps how many run at once.",
+   "examples": [
+    "const payments = nc.circuit.create({ failureThreshold: 5, resetTimeout: \"30s\" });\nconst invoice = await payments.execute(() => api.createInvoice(order));"
+   ],
+   "members": [
+    "circuit/create",
+    "circuit/circuit"
+   ],
+   "types": [
+    "circuit/circuit-options",
+    "circuit/circuit-status"
    ]
   },
   {
@@ -11104,6 +11152,7 @@
     "env/load",
     "errors/abort-error",
     "errors/assertion-error",
+    "errors/circuit-open-error",
     "errors/http-error",
     "errors/jwt-error",
     "errors/process-error",
@@ -12740,6 +12789,142 @@
   },
   {
    "ns": "errors",
+   "name": "CircuitOpenError",
+   "slug": "circuit-open-error",
+   "ref": "errors/circuit-open-error",
+   "title": "nc.errors.CircuitOpenError",
+   "kind": "class",
+   "source": "https://github.com/ix-xs/node-comfort/blob/main/src/errors.js#L416",
+   "code": [
+    [
+     "class CircuitOpenError extends "
+    ],
+    [
+     "NodeComfortError",
+     {
+      "ref": "errors/node-comfort-error"
+     }
+    ]
+   ],
+   "ctor": {
+    "code": [
+     [
+      "new CircuitOpenError(message?: string, options?: "
+     ],
+     [
+      "NodeComfortErrorOptions",
+      {
+       "ref": "errors/node-comfort-error-options"
+      }
+     ],
+     [
+      "): "
+     ],
+     [
+      "CircuitOpenError",
+      {
+       "ref": "errors/circuit-open-error"
+      }
+     ]
+    ],
+    "params": [
+     {
+      "name": "message",
+      "type": [
+       [
+        "string"
+       ]
+      ],
+      "optional": true,
+      "default": "\"The circuit is open: the call was rejected\""
+     },
+     {
+      "name": "options",
+      "type": [
+       [
+        "NodeComfortErrorOptions",
+        {
+         "ref": "errors/node-comfort-error-options"
+        }
+       ]
+      ],
+      "optional": true
+     }
+    ],
+    "returns": {
+     "type": [
+      [
+       "CircuitOpenError",
+       {
+        "ref": "errors/circuit-open-error"
+       }
+      ]
+     ]
+    }
+   },
+   "properties": [
+    {
+     "name": "code",
+     "type": [
+      [
+       "string"
+      ]
+     ],
+     "text": "Stable, machine-readable code.",
+     "inheritedFrom": "errors/node-comfort-error"
+    }
+   ],
+   "methods": [
+    {
+     "name": "toJSON",
+     "text": "What `JSON.stringify()` writes for the error: its name, code, message\nand own fields, without the stack. Handy for API responses and logs.",
+     "overloads": [
+      {
+       "code": [
+        [
+         "toJSON(): "
+        ],
+        [
+         "Record",
+         {
+          "href": "https://www.typescriptlang.org/docs/handbook/utility-types.html#recordkeys-type"
+         }
+        ],
+        [
+         "<string, unknown>"
+        ]
+       ],
+       "returns": {
+        "type": [
+         [
+          "Record",
+          {
+           "href": "https://www.typescriptlang.org/docs/handbook/utility-types.html#recordkeys-type"
+          }
+         ],
+         [
+          "<string, unknown>"
+         ]
+        ]
+       }
+      }
+     ],
+     "examples": [
+      "res.status(400).json({ error });\n// {\"error\":{\"name\":\"ValidationError\",\"code\":\"ERR_VALIDATION\",\"message\":\"...\",\"issues\":[...]}}"
+     ],
+     "inheritedFrom": "errors/node-comfort-error"
+    }
+   ],
+   "text": "Thrown by `execute()` of a circuit from `nc.circuit.create()` while the\ncircuit is open: the call was rejected without running. Its code is\n`ERR_CIRCUIT_OPEN`.",
+   "examples": [
+    "try {\n  await payments.execute(() => api.charge(card, amount));\n} catch (error) {\n  if (error instanceof nc.errors.CircuitOpenError) return \"Payments are down, try again later\";\n  throw error;\n}"
+   ],
+   "usedBy": [
+    "circuit/execute"
+   ]
+  },
+  {
+   "ns": "errors",
    "name": "NodeComfortErrorOptions",
    "slug": "node-comfort-error-options",
    "ref": "errors/node-comfort-error-options",
@@ -12777,6 +12962,7 @@
    "usedBy": [
     "errors/abort-error",
     "errors/assertion-error",
+    "errors/circuit-open-error",
     "errors/http-error",
     "errors/jwt-error",
     "errors/node-comfort-error",
@@ -38285,6 +38471,791 @@
    ],
    "usedBy": [
     "emitter/wait-for"
+   ]
+  },
+  {
+   "ns": "quota",
+   "name": "create",
+   "slug": "create",
+   "ref": "quota/create",
+   "title": "nc.quota.create",
+   "kind": "function",
+   "source": "https://github.com/ix-xs/node-comfort/blob/main/src/QuotaNamespace.js#L28",
+   "overloads": [
+    {
+     "code": [
+      [
+       "create(options: "
+      ],
+      [
+       "QuotaOptions",
+       {
+        "ref": "quota/quota-options"
+       }
+      ],
+      [
+       "): "
+      ],
+      [
+       "Quota",
+       {
+        "ref": "quota/quota"
+       }
+      ]
+     ],
+     "params": [
+      {
+       "name": "options",
+       "type": [
+        [
+         "QuotaOptions",
+         {
+          "ref": "quota/quota-options"
+         }
+        ]
+       ]
+      }
+     ],
+     "returns": {
+      "type": [
+       [
+        "Quota",
+        {
+         "ref": "quota/quota"
+        }
+       ]
+      ]
+     }
+    }
+   ],
+   "text": "Creates a quota. Same as `new nc.quota.Quota(options)`.",
+   "examples": [
+    "const perUser = nc.quota.create({ limit: 5, window: \"1m\" });\nperUser.consume(\"user-42\"); // { allowed: true, remaining: 4, resetMs: 60000 }"
+   ]
+  },
+  {
+   "ns": "quota",
+   "name": "Quota",
+   "slug": "quota",
+   "ref": "quota/quota",
+   "title": "nc.quota.Quota",
+   "kind": "class",
+   "source": "https://github.com/ix-xs/node-comfort/blob/main/src/Quota.js#L46",
+   "code": [
+    [
+     "class Quota"
+    ]
+   ],
+   "text": "Counts hits per key in a fixed window. Not to be confused with\n`async.rateLimit()`, which spaces calls out, or `async.limit()`, which caps\nhow many run at once: a quota only says yes or no.",
+   "examples": [
+    "const perIp = new nc.quota.Quota({ limit: 100, window: \"1h\" });"
+   ],
+   "members": [
+    "quota/constructor",
+    "quota/consume",
+    "quota/reset",
+    "quota/size"
+   ],
+   "usedBy": [
+    "quota/constructor",
+    "quota/create"
+   ]
+  },
+  {
+   "ns": "quota",
+   "name": "constructor",
+   "slug": "constructor",
+   "ref": "quota/constructor",
+   "owner": "quota/quota",
+   "title": "new nc.quota.Quota()",
+   "kind": "constructor",
+   "source": "https://github.com/ix-xs/node-comfort/blob/main/src/Quota.js#L60",
+   "overloads": [
+    {
+     "code": [
+      [
+       "new Quota(options: "
+      ],
+      [
+       "QuotaOptions",
+       {
+        "ref": "quota/quota-options"
+       }
+      ],
+      [
+       "): "
+      ],
+      [
+       "Quota",
+       {
+        "ref": "quota/quota"
+       }
+      ]
+     ],
+     "params": [
+      {
+       "name": "options",
+       "type": [
+        [
+         "QuotaOptions",
+         {
+          "ref": "quota/quota-options"
+         }
+        ]
+       ]
+      }
+     ],
+     "returns": {
+      "type": [
+       [
+        "Quota",
+        {
+         "ref": "quota/quota"
+        }
+       ]
+      ]
+     },
+     "throws": [
+      {
+       "type": [
+        [
+         "TypeError | RangeError"
+        ]
+       ],
+       "text": "If `limit` is not a number of 0 or more, or `window` not a duration longer than 0."
+      }
+     ]
+    }
+   ],
+   "examples": [
+    "const perIp = new nc.quota.Quota({ limit: 100, window: \"1h\" });"
+   ]
+  },
+  {
+   "ns": "quota",
+   "name": "consume",
+   "slug": "consume",
+   "ref": "quota/consume",
+   "owner": "quota/quota",
+   "title": "quota.consume",
+   "kind": "method",
+   "source": "https://github.com/ix-xs/node-comfort/blob/main/src/Quota.js#L99",
+   "overloads": [
+    {
+     "code": [
+      [
+       "consume(key: "
+      ],
+      [
+       "QuotaKey",
+       {
+        "ref": "quota/quota-key"
+       }
+      ],
+      [
+       ", cost?: number): "
+      ],
+      [
+       "QuotaResult",
+       {
+        "ref": "quota/quota-result"
+       }
+      ]
+     ],
+     "params": [
+      {
+       "name": "key",
+       "type": [
+        [
+         "QuotaKey",
+         {
+          "ref": "quota/quota-key"
+         }
+        ]
+       ]
+      },
+      {
+       "name": "cost",
+       "type": [
+        [
+         "number"
+        ]
+       ],
+       "optional": true,
+       "default": "1",
+       "text": "How much this hit uses up. `0` reads the state without using anything."
+      }
+     ],
+     "returns": {
+      "type": [
+       [
+        "QuotaResult",
+        {
+         "ref": "quota/quota-result"
+        }
+       ]
+      ]
+     },
+     "throws": [
+      {
+       "type": [
+        [
+         "TypeError | RangeError"
+        ]
+       ],
+       "text": "If `cost` is not a number of 0 or more."
+      }
+     ]
+    }
+   ],
+   "text": "Records a hit for `key` and says whether it fits in the quota. A refused\nhit is not counted, so a key that keeps trying is let in again as soon as\nits window ends.",
+   "examples": [
+    "const result = perUser.consume(userId);\nif (!result.allowed) throw new Error(`Slow down: retry in ${result.resetMs} ms`);\nperUser.consume(userId, 3); // a hit that costs 3"
+   ]
+  },
+  {
+   "ns": "quota",
+   "name": "reset",
+   "slug": "reset",
+   "ref": "quota/reset",
+   "owner": "quota/quota",
+   "title": "quota.reset",
+   "kind": "method",
+   "source": "https://github.com/ix-xs/node-comfort/blob/main/src/Quota.js#L129",
+   "overloads": [
+    {
+     "code": [
+      [
+       "reset(key: "
+      ],
+      [
+       "QuotaKey",
+       {
+        "ref": "quota/quota-key"
+       }
+      ],
+      [
+       "): boolean"
+      ]
+     ],
+     "params": [
+      {
+       "name": "key",
+       "type": [
+        [
+         "QuotaKey",
+         {
+          "ref": "quota/quota-key"
+         }
+        ]
+       ]
+      }
+     ],
+     "returns": {
+      "type": [
+       [
+        "boolean"
+       ]
+      ],
+      "text": "`true` if the key had a window."
+     }
+    }
+   ],
+   "text": "Forgets a key: its next hit starts a new window.",
+   "examples": [
+    "perUser.reset(userId); // after a successful login, say"
+   ]
+  },
+  {
+   "ns": "quota",
+   "name": "size",
+   "slug": "size",
+   "ref": "quota/size",
+   "owner": "quota/quota",
+   "title": "quota.size",
+   "kind": "property",
+   "source": "https://github.com/ix-xs/node-comfort/blob/main/src/Quota.js#L134",
+   "code": [
+    [
+     "size: number"
+    ]
+   ],
+   "text": "How many keys have a window, finished ones not dropped yet included."
+  },
+  {
+   "ns": "quota",
+   "name": "QuotaKey",
+   "slug": "quota-key",
+   "ref": "quota/quota-key",
+   "kind": "type",
+   "title": "QuotaKey",
+   "source": "https://github.com/ix-xs/node-comfort/blob/main/src/QuotaNamespace.js",
+   "text": "A key that can hold a quota: a user id, an IP address, a guild id...",
+   "code": [
+    [
+     "type QuotaKey = string | number"
+    ]
+   ],
+   "usedBy": [
+    "quota/consume",
+    "quota/reset"
+   ]
+  },
+  {
+   "ns": "quota",
+   "name": "QuotaOptions",
+   "slug": "quota-options",
+   "ref": "quota/quota-options",
+   "kind": "interface",
+   "title": "QuotaOptions",
+   "source": "https://github.com/ix-xs/node-comfort/blob/main/src/QuotaNamespace.js",
+   "text": "Options for `nc.quota.create()`.",
+   "properties": [
+    {
+     "name": "limit",
+     "type": [
+      [
+       "number"
+      ]
+     ],
+     "text": "How many hits each key may make per window."
+    },
+    {
+     "name": "window",
+     "type": [
+      [
+       "string | number"
+      ]
+     ],
+     "text": "The length of a window, in ms or like `\"1m\"`. A key's window starts at its first hit."
+    }
+   ],
+   "code": [
+    [
+     "type QuotaOptions = {\n  limit: number;\n  window: string | number;\n}"
+    ]
+   ],
+   "usedBy": [
+    "quota/constructor",
+    "quota/create"
+   ]
+  },
+  {
+   "ns": "quota",
+   "name": "QuotaResult",
+   "slug": "quota-result",
+   "ref": "quota/quota-result",
+   "kind": "interface",
+   "title": "QuotaResult",
+   "source": "https://github.com/ix-xs/node-comfort/blob/main/src/QuotaNamespace.js",
+   "text": "What `consume()` answers.",
+   "properties": [
+    {
+     "name": "allowed",
+     "type": [
+      [
+       "boolean"
+      ]
+     ],
+     "text": "Whether this hit fits in the quota. A refused hit is not counted."
+    },
+    {
+     "name": "remaining",
+     "type": [
+      [
+       "number"
+      ]
+     ],
+     "text": "Hits left in the current window."
+    },
+    {
+     "name": "resetMs",
+     "type": [
+      [
+       "number"
+      ]
+     ],
+     "text": "Milliseconds until the window ends and the key starts again from zero."
+    }
+   ],
+   "code": [
+    [
+     "type QuotaResult = {\n  allowed: boolean;\n  remaining: number;\n  resetMs: number;\n}"
+    ]
+   ],
+   "usedBy": [
+    "quota/consume"
+   ]
+  },
+  {
+   "ns": "circuit",
+   "name": "create",
+   "slug": "create",
+   "ref": "circuit/create",
+   "title": "nc.circuit.create",
+   "kind": "function",
+   "source": "https://github.com/ix-xs/node-comfort/blob/main/src/CircuitNamespace.js#L29",
+   "overloads": [
+    {
+     "code": [
+      [
+       "create(options?: "
+      ],
+      [
+       "CircuitOptions",
+       {
+        "ref": "circuit/circuit-options"
+       }
+      ],
+      [
+       "): "
+      ],
+      [
+       "Circuit",
+       {
+        "ref": "circuit/circuit"
+       }
+      ]
+     ],
+     "params": [
+      {
+       "name": "options",
+       "type": [
+        [
+         "CircuitOptions",
+         {
+          "ref": "circuit/circuit-options"
+         }
+        ]
+       ],
+       "optional": true
+      }
+     ],
+     "returns": {
+      "type": [
+       [
+        "Circuit",
+        {
+         "ref": "circuit/circuit"
+        }
+       ]
+      ]
+     }
+    }
+   ],
+   "text": "Creates a circuit breaker. Same as `new nc.circuit.Circuit(options)`.",
+   "examples": [
+    "const payments = nc.circuit.create({ failureThreshold: 5, resetTimeout: \"30s\" });\nawait payments.execute(() => api.charge(card, amount));\npayments.status; // \"closed\", \"open\" or \"half-open\""
+   ]
+  },
+  {
+   "ns": "circuit",
+   "name": "Circuit",
+   "slug": "circuit",
+   "ref": "circuit/circuit",
+   "title": "nc.circuit.Circuit",
+   "kind": "class",
+   "source": "https://github.com/ix-xs/node-comfort/blob/main/src/Circuit.js#L56",
+   "code": [
+    [
+     "class Circuit"
+    ]
+   ],
+   "text": "A circuit breaker: it fails fast while a service is down, then lets a\ntrial call through to see whether it is back. Not to be confused with\n`async.rateLimit()`, which spaces calls out, or `async.limit()`, which\ncaps how many run at once.",
+   "examples": [
+    "const search = new nc.circuit.Circuit({ resetTimeout: \"1m\", isFailure: (error) => error.status !== 404 });"
+   ],
+   "members": [
+    "circuit/constructor",
+    "circuit/status",
+    "circuit/execute"
+   ],
+   "usedBy": [
+    "circuit/constructor",
+    "circuit/create"
+   ]
+  },
+  {
+   "ns": "circuit",
+   "name": "constructor",
+   "slug": "constructor",
+   "ref": "circuit/constructor",
+   "owner": "circuit/circuit",
+   "title": "new nc.circuit.Circuit()",
+   "kind": "constructor",
+   "source": "https://github.com/ix-xs/node-comfort/blob/main/src/Circuit.js#L79",
+   "overloads": [
+    {
+     "code": [
+      [
+       "new Circuit(options?: "
+      ],
+      [
+       "CircuitOptions",
+       {
+        "ref": "circuit/circuit-options"
+       }
+      ],
+      [
+       "): "
+      ],
+      [
+       "Circuit",
+       {
+        "ref": "circuit/circuit"
+       }
+      ]
+     ],
+     "params": [
+      {
+       "name": "options",
+       "type": [
+        [
+         "CircuitOptions",
+         {
+          "ref": "circuit/circuit-options"
+         }
+        ]
+       ],
+       "optional": true
+      }
+     ],
+     "returns": {
+      "type": [
+       [
+        "Circuit",
+        {
+         "ref": "circuit/circuit"
+        }
+       ]
+      ]
+     },
+     "throws": [
+      {
+       "type": [
+        [
+         "TypeError | RangeError"
+        ]
+       ],
+       "text": "If a threshold is not a number of 1 or more, or `resetTimeout` not a duration."
+      }
+     ]
+    }
+   ],
+   "examples": [
+    "const search = new nc.circuit.Circuit({ resetTimeout: \"1m\", isFailure: (error) => error.status !== 404 });"
+   ]
+  },
+  {
+   "ns": "circuit",
+   "name": "status",
+   "slug": "status",
+   "ref": "circuit/status",
+   "owner": "circuit/circuit",
+   "title": "circuit.status",
+   "kind": "property",
+   "source": "https://github.com/ix-xs/node-comfort/blob/main/src/Circuit.js#L107",
+   "code": [
+    [
+     "status: "
+    ],
+    [
+     "CircuitStatus",
+     {
+      "ref": "circuit/circuit-status"
+     }
+    ]
+   ],
+   "text": "Where the circuit stands. It stays `\"open\"` until the first call made\nafter `resetTimeout`, which turns it `\"half-open\"`."
+  },
+  {
+   "ns": "circuit",
+   "name": "execute",
+   "slug": "execute",
+   "ref": "circuit/execute",
+   "owner": "circuit/circuit",
+   "title": "circuit.execute",
+   "kind": "method",
+   "source": "https://github.com/ix-xs/node-comfort/blob/main/src/Circuit.js#L130",
+   "overloads": [
+    {
+     "code": [
+      [
+       "execute<T>(fn: () => T | PromiseLike<T>): "
+      ],
+      [
+       "Promise",
+       {
+        "href": "https://developer.mozilla.org/docs/Web/JavaScript/Reference/Global_Objects/Promise"
+       }
+      ],
+      [
+       "<"
+      ],
+      [
+       "Awaited",
+       {
+        "href": "https://www.typescriptlang.org/docs/handbook/utility-types.html#awaitedtype"
+       }
+      ],
+      [
+       "<T>>"
+      ]
+     ],
+     "params": [
+      {
+       "name": "fn",
+       "type": [
+        [
+         "() => T | PromiseLike<T>"
+        ]
+       ]
+      }
+     ],
+     "returns": {
+      "type": [
+       [
+        "Promise",
+        {
+         "href": "https://developer.mozilla.org/docs/Web/JavaScript/Reference/Global_Objects/Promise"
+        }
+       ],
+       [
+        "<"
+       ],
+       [
+        "Awaited",
+        {
+         "href": "https://www.typescriptlang.org/docs/handbook/utility-types.html#awaitedtype"
+        }
+       ],
+       [
+        "<T>>"
+       ]
+      ]
+     },
+     "throws": [
+      {
+       "type": [
+        [
+         "CircuitOpenError",
+         {
+          "ref": "errors/circuit-open-error"
+         }
+        ]
+       ],
+       "text": "If the circuit is open."
+      }
+     ]
+    }
+   ],
+   "text": "Runs `fn` through the circuit and returns what it returns. While the\ncircuit is open, rejects with a `CircuitOpenError` without calling `fn`.\nAn error of `fn` is always thrown back to you, after being counted as a\nfailure (unless `isFailure` says otherwise).",
+   "examples": [
+    "try {\n  return await payments.execute(() => api.charge(card, amount));\n} catch (error) {\n  if (error instanceof nc.errors.CircuitOpenError) return \"Payments are down, try again in a minute\";\n  throw error;\n}"
+   ]
+  },
+  {
+   "ns": "circuit",
+   "name": "CircuitOptions",
+   "slug": "circuit-options",
+   "ref": "circuit/circuit-options",
+   "kind": "interface",
+   "title": "CircuitOptions",
+   "source": "https://github.com/ix-xs/node-comfort/blob/main/src/CircuitNamespace.js",
+   "text": "Options for `nc.circuit.create()`.",
+   "properties": [
+    {
+     "name": "failureThreshold",
+     "type": [
+      [
+       "number"
+      ]
+     ],
+     "optional": true,
+     "text": "Failures in a row that open the circuit. Defaults to `5`."
+    },
+    {
+     "name": "resetTimeout",
+     "type": [
+      [
+       "string | number"
+      ]
+     ],
+     "optional": true,
+     "text": "How long the circuit stays open before a trial, in ms or like `\"30s\"`. Defaults to `\"30s\"`."
+    },
+    {
+     "name": "successThreshold",
+     "type": [
+      [
+       "number"
+      ]
+     ],
+     "optional": true,
+     "text": "Successes in a row, while half-open, that close the circuit. Defaults to `1`."
+    },
+    {
+     "name": "isFailure",
+     "type": [
+      [
+       "((error: unknown) => boolean)"
+      ]
+     ],
+     "optional": true,
+     "text": "Whether an error counts as a failure. Every error does by default; one that doesn't is still thrown to the caller."
+    },
+    {
+     "name": "onOpen",
+     "type": [
+      [
+       "(() => void)"
+      ]
+     ],
+     "optional": true,
+     "text": "Called each time the circuit opens."
+    },
+    {
+     "name": "onClose",
+     "type": [
+      [
+       "(() => void)"
+      ]
+     ],
+     "optional": true,
+     "text": "Called each time the circuit closes again."
+    }
+   ],
+   "code": [
+    [
+     "type CircuitOptions = {\n  failureThreshold?: number;\n  resetTimeout?: string | number;\n  successThreshold?: number;\n  isFailure?: ((error: unknown) => boolean);\n  onOpen?: (() => void);\n  onClose?: (() => void);\n}"
+    ]
+   ],
+   "usedBy": [
+    "circuit/constructor",
+    "circuit/create"
+   ]
+  },
+  {
+   "ns": "circuit",
+   "name": "CircuitStatus",
+   "slug": "circuit-status",
+   "ref": "circuit/circuit-status",
+   "kind": "type",
+   "title": "CircuitStatus",
+   "source": "https://github.com/ix-xs/node-comfort/blob/main/src/CircuitNamespace.js",
+   "text": "The state of a circuit: `\"closed\"` lets every call through, `\"open\"`\nrejects them, `\"half-open\"` lets calls through to see whether the service\nis back.",
+   "code": [
+    [
+     "type CircuitStatus = \"closed\" | \"open\" | \"half-open\""
+    ]
+   ],
+   "values": [
+    "closed",
+    "open",
+    "half-open"
+   ],
+   "usedBy": [
+    "circuit/status"
    ]
   },
   {

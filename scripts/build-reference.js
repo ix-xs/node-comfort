@@ -41,7 +41,7 @@ const STRICT = process.argv.includes("--strict");
 const GROUPS = [
   { id: "essentials", keys: ["config", "logger", "fs", "env", "is", "assert", "errors", "json"] },
   { id: "data", keys: ["str", "num", "arr", "obj", "schema", "time", "id"] },
-  { id: "flow", keys: ["func", "async", "cache", "emitter"] },
+  { id: "flow", keys: ["func", "async", "cache", "emitter", "quota", "circuit"] },
   { id: "system", keys: ["crypto", "http", "sqlite", "sys", "cli", "color"] },
 ];
 
@@ -49,7 +49,7 @@ const GROUPS = [
 const GUIDES = /** @type {Record<string, string>} */ ({
   config: "/start/configuration/", logger: "/essentials/logger/", fs: "/essentials/fs/", env: "/essentials/env/", is: "/essentials/is/", assert: "/essentials/is/", errors: "/basics/errors/", json: "/essentials/json/",
   str: "/data/str/", num: "/data/num/", arr: "/data/arr/", obj: "/data/obj/", schema: "/data/schema/", time: "/data/time/", id: "/data/id/",
-  func: "/flow/func/", async: "/flow/async/", cache: "/flow/cache/", emitter: "/flow/emitter/",
+  func: "/flow/func/", async: "/flow/async/", cache: "/flow/cache/", emitter: "/flow/emitter/", quota: "/flow/quota/", circuit: "/flow/circuit/",
   crypto: "/system/crypto/", http: "/system/http/", sqlite: "/system/sqlite/", sys: "/system/sys/", cli: "/system/cli/", color: "/system/color/",
 });
 

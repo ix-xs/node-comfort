@@ -59,6 +59,8 @@ const items = await Promise.all(ids.map((id) => throttled(() => api.get(`items/$
 | `concurrency` | Can be changed on the fly | |
 | `onIdle()` | Resolves when nothing runs or waits | |
 
+To refuse a call instead of making it wait, per user or per IP, use a [quota](/flow/quota/). To stop calling a service that keeps failing, a [circuit breaker](/flow/circuit/).
+
 ## Queue
 
 A queue adds priorities, pausing and a time limit per task. `add()` resolves with the task's result.

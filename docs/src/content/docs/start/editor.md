@@ -38,7 +38,7 @@ import { get, set } from "@ix-xs/node-comfort/obj";
 | Entry point | Exports |
 | --- | --- |
 | `config`, `logger`, `fs`, `env`, `is`, `assert`, `errors`, `json`, `str`, `num`, `arr`, `obj`, `schema`, `time`, `id`, `crypto`, `func`, `async`, `http`, `sys`, `cli`, `color` | The namespace, as `nc.<namespace>` |
-| `cache`, `emitter`, `sqlite` | The class, with its factory as a static method: `Cache.create()`, `Emitter.create()`, `SQLite.open()` and `SQLite.op` |
+| `cache`, `emitter`, `quota`, `circuit`, `sqlite` | The class, with its factory as a static method: `Cache.create()`, `Emitter.create()`, `Quota.create()`, `Circuit.create()`, `SQLite.open()` and `SQLite.op` |
 | `checker`, `utils` | The 2.x namespaces, deprecated |
 
 ```js
@@ -46,7 +46,7 @@ const SQLite = require("@ix-xs/node-comfort/sqlite");
 const db = SQLite.open(":memory:");
 ```
 
-In ES modules, these three are default imports (`import SQLite from "@ix-xs/node-comfort/sqlite"`): a named import of `open` or `op` fails. Importing the root from an ES module loads every namespace, an entry point loads only its own: see [Performance](/help/performance/).
+In ES modules, these five are default imports (`import SQLite from "@ix-xs/node-comfort/sqlite"`): a named import of `open` or `op` fails. Importing the root from an ES module loads every namespace, an entry point loads only its own: see [Performance](/help/performance/).
 
 ## Types
 

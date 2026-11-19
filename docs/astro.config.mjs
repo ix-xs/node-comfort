@@ -126,7 +126,7 @@ export default defineConfig({
           "modules",
           group("Essentials", "Essentiels", ["essentials/logger", "essentials/fs", "essentials/env", "essentials/is", "essentials/json"], false),
           group("Data", "Données", ["data/str", "data/num", "data/arr", "data/obj", "data/schema", "data/time", "data/id"], false),
-          group("Functions and async", "Fonctions et asynchrone", ["flow/func", "flow/async", "flow/cache", "flow/emitter"], false),
+          group("Functions and async", "Fonctions et asynchrone", ["flow/func", "flow/async", "flow/cache", "flow/emitter", "flow/quota", "flow/circuit"], false),
           group("System and network", "Système et réseau", ["system/crypto", "system/http", "system/sqlite", "system/sys", "system/cli", "system/color"], false),
         ], false),
         group("Help", "Aide", ["help/upgrade-3-0", "help/upgrade-2-2", "help/migration", "help/performance", "help/faq", "help/troubleshooting"]),

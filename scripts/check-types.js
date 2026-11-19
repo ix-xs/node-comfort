@@ -111,8 +111,8 @@ for (const [key, value] of Object.entries(nc)) {
   for (const member of Object.keys(value)) {
     docProbe(`nc.${key}.`, member, `nc.${key}.${member}`);
     const inner = value[member];
-    // The classes of cache, emitter and sqlite: every method of their instances.
-    if (["cache", "emitter", "sqlite"].includes(key) && isClass(inner)) {
+    // The classes of cache, emitter, quota, circuit and sqlite: every method of their instances.
+    if (["cache", "emitter", "quota", "circuit", "sqlite"].includes(key) && isClass(inner)) {
       const variable = `${key}_${member}`;
       docCode += `/** @type {InstanceType<typeof nc.${key}.${member}>} */ let ${variable} = /** @type {any} */ (null);\n`;
       for (const method of Object.getOwnPropertyNames(inner.prototype)) {
@@ -150,7 +150,9 @@ import { set as setConfig } from "${P}/config";
 import color from "${P}/color";
 import SQLite from "${P}/sqlite";
 import Cache from "${P}/cache";
-import { ValidationError } from "${P}/errors";
+import Quota from "${P}/quota";
+import Circuit from "${P}/circuit";
+import { ValidationError, CircuitOpenError } from "${P}/errors";
 import { object, string } from "${P}/schema";
 
 const slug: string = slugify("Hello");
@@ -163,6 +165,10 @@ const red: string = color.red.bold("x");
 const db = new SQLite<{ id: number }>(":memory:");
 const ids: number[] = db.getAll("t").map((row) => row.id);
 const cache = new Cache<string, number>();
+const logins: Quota = Quota.create({ limit: 5, window: "15m" });
+const breaker: Circuit = new Circuit({ resetTimeout: 1000 });
+const circuitError: CircuitOpenError = new CircuitOpenError();
+void logins; void breaker; void circuitError;
 const User = object({ email: string().email() });
 const error: ValidationError | undefined = undefined;
 void slug; void city; void ok; void parsed; void red; void ids; void cache; void User; void error;
@@ -618,6 +624,75 @@ const chain: (n: number) => Promise<string> = nc.func.pipeAsync(async (n: number
 const flag: boolean = nc.env.boolean("FLAG", { default: false });
 void byId; void names; void active; void on; void off; void small; void big; void wrong; void ms; void text; void counts; void busy; void id; void cache; void job; void shout; void chain; void flag;
 `,
+);
+
+// quota and circuit (3.1)
+addFile(
+  "quota-circuit.ts",
+  `import nc = require("${P}");
+import { quota, circuit, errors } from "${P}";
+import type { QuotaOptions, QuotaResult, CircuitOptions, CircuitStatus } from "${P}";
+
+const options: QuotaOptions = { limit: 5, window: "1m" };
+const perUser = quota.create(options);
+const sameQuota: InstanceType<typeof quota.Quota> = perUser;
+const result: QuotaResult = perUser.consume("user-42");
+const allowed: boolean = result.allowed;
+const remaining: number = perUser.consume(42, 2).remaining;
+const resetMs: number = result.resetMs;
+const forgotten: boolean = perUser.reset("user-42");
+const keys: number = perUser.size;
+// @ts-expect-error the window is required
+quota.create({ limit: 5 });
+// @ts-expect-error the result has no "ok" field
+void result.ok;
+// @ts-expect-error a key is a string or a number
+perUser.consume({ id: 1 });
+void sameQuota; void allowed; void remaining; void resetMs; void forgotten; void keys;
+
+const settings: CircuitOptions = {
+  failureThreshold: 3,
+  resetTimeout: "30s",
+  successThreshold: 2,
+  isFailure: (error) => !(error instanceof errors.ValidationError),
+  onOpen: () => {},
+  onClose: () => {},
+};
+const breaker = circuit.create(settings);
+const sameCircuit: InstanceType<typeof nc.circuit.Circuit> = breaker;
+const status: CircuitStatus = breaker.status;
+if (status === "half-open") void status;
+// @ts-expect-error not a status
+const notAStatus: CircuitStatus = "broken";
+// @ts-expect-error status is read only
+breaker.status = "open";
+// @ts-expect-error unknown option
+circuit.create({ threshold: 3 });
+async function run() {
+  const value: number = await breaker.execute(async () => 42);
+  const text: string = await breaker.execute(() => "sync");
+  // @ts-expect-error execute resolves to what fn returns
+  const wrong: string = await breaker.execute(async () => 42);
+  try {
+    await breaker.execute(() => fetch("https://example.com"));
+  } catch (error) {
+    if (error instanceof nc.errors.CircuitOpenError) { const code: string = error.code; void code; }
+  }
+  void value; void text; void wrong;
+}
+void run; void sameCircuit; void notAStatus;
+`,
+);
+addFile(
+  "hover-quota.js",
+  `const nc = require("${P}");
+nc.quota.create({ limit: 1, window: 1 }).cons${MARK}ume("a");
+nc.circuit.create().sta${MARK}tus;
+`,
+  [
+    { name: "hover: quota.consume() returns a QuotaResult", kind: "hover", expect: ["consume(", "QuotaResult", "@example"] },
+    { name: "hover: circuit.status is a CircuitStatus", kind: "hover", expect: ["status", "CircuitStatus"] },
+  ],
 );
 
 // run

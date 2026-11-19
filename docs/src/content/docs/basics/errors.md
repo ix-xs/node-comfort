@@ -29,6 +29,7 @@ try {
 | `JWTError` | `ERR_JWT_MALFORMED`, `ERR_JWT_ALGORITHM`, `ERR_JWT_SIGNATURE`, `ERR_JWT_EXPIRED`, `ERR_JWT_NOT_BEFORE`, `ERR_JWT_CLAIM` | `crypto.decodeJWT`, `crypto.verifyJWT` | `expiredAt` |
 | `ProcessError` | `ERR_PROCESS`, `ETIMEDOUT` | `sys.run`, `sys.exec` | `command`, `exitCode`, `signal`, `stdout`, `stderr`, `timedOut` |
 | `SQLiteError` | `ERR_SQLITE` | `sqlite` | `sql`, `sqliteCode` |
+| `CircuitOpenError` | `ERR_CIRCUIT_OPEN` | `execute()` of a circuit from `circuit.create()`, while it is open | |
 
 Every class extends `NodeComfortError`, which extends `Error`: `error instanceof nc.errors.NodeComfortError` catches the whole family. `instanceof` also works across two copies of the package in `node_modules`. `AbortError` is named `"AbortError"`, like the native one.
 
@@ -50,6 +51,7 @@ Every class extends `NodeComfortError`, which extends `Error`: `error instanceof
 | `ERR_NOT_FOUND` | `nc.sys.open()` got a path that does not exist |
 | `ERR_DECRYPT` | The secret is wrong, or the text is not what `nc.crypto.encrypt()` produced |
 | `ERR_ARGON2_UNAVAILABLE` | Argon2id needs Node.js 24.7 or later |
+| `ERR_CIRCUIT_OPEN` | The circuit is open: the call was rejected without running. See [Circuit breaker](/flow/circuit/) |
 
 ```js
 try {

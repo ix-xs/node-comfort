@@ -1,6 +1,6 @@
 {
   "name": "@ix-xs/node-comfort",
-  "version": "3.0.0",
+  "version": "3.1.0",
   "description": "The zero-dependency standard library for Node.js: logger, filesystem, SQLite, schema validation, HTTP client, CLI toolkit, cache, env, async pools, colors, events, i18n dates, ids, crypto and hundreds of fully typed helpers.",
   "keywords": [
     "utils",
@@ -36,6 +36,8 @@
     "async",
     "concurrency",
     "queue",
+    "rate-limiter",
+    "circuit-breaker",
     "events",
     "emitter",
     "date",
@@ -154,6 +156,14 @@
     "./emitter": {
       "types": "./types/src/Emitter.d.ts",
       "default": "./src/Emitter.js"
+    },
+    "./quota": {
+      "types": "./types/src/Quota.d.ts",
+      "default": "./src/Quota.js"
+    },
+    "./circuit": {
+      "types": "./types/src/Circuit.d.ts",
+      "default": "./src/Circuit.js"
     },
     "./sqlite": {
       "types": "./types/src/SQLite.d.ts",
