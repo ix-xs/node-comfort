@@ -697,8 +697,12 @@ const callOf = (/** @type {Record<string, any>} */ item) => {
   return item.title;
 };
 
-/** A cell of a table: one line, with its pipes escaped. */
-const cell = (/** @type {string} */ text) => text.replace(/\s+/g, " ").replace(/\|/g, "\\|").trim();
+/**
+ * A cell of a table: one line, with its pipes escaped. Backslashes stay as
+ * they are: the cells hold code spans (`\r`), where Markdown shows a doubled
+ * one as two characters, and a pipe is the only character a table reads.
+ */
+const cell = (/** @type {string} */ text) => text.replace(/\s+/g, " ").split("|").join("\\|").trim();
 
 /** @param {string} language */
 const modulesPage = (language) => {
